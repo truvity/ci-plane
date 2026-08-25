@@ -47,14 +47,25 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- $sched := (index $b.scheduling $arch) | default dict }}
+      {{- if $sched.nodeSelector }}
+      nodeSelector:
+        {{- toYaml $sched.nodeSelector | nindent 8 }}
+      {{- else }}
       nodeSelector:
         kubernetes.io/arch: {{ $arch }}
         {{- with $.Values.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
+      {{- if $sched.tolerations }}
+      tolerations:
+        {{- toYaml $sched.tolerations | nindent 8 }}
+      {{- else }}
       {{- with $.Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       securityContext:
         fsGroup: 1000

@@ -62,6 +62,14 @@ buildkitd:
   # default: a builder mid-build is not migratable state.
   podAnnotations:
     karpenter.sh/do-not-disrupt: "true"
+  # Per-arch scheduling override. Empty = the chart default
+  # (kubernetes.io/arch selector + the chart-global tolerations). An
+  # estate whose arches live on different pools sets each arch's
+  # nodeSelector/tolerations here wholesale (the block REPLACES the
+  # default when present).
+  scheduling:
+    arm64: {}
+    amd64: {}
 
 nixCache:
   # Transparent read-through cache of the nix upstream, consumed as an
