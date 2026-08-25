@@ -41,8 +41,10 @@ release (base-image/CVE pickup). The upstream runner base is pinned and
 renovate-annotated for exactly this reason — `latest` was invisible to
 renovate. With `vars.AUTO_RELEASE=true` (and the App configured plus a
 tag-ruleset bypass for it), the weekly auto-release workflow cuts the
-patch tag itself: renovate automerge → auto tag → image/charts publish
-→ gitops pin PR (auto-merge armed) → ArgoCD sync. Fully hands-off.
+patch tag itself. **Promotion is the consumer's job**: this repo
+releases and stops — gitops's own renovate tracks the published chart
+version, bumps its pin, regenerates renders in-branch and merges on
+green; ArgoCD syncs. Fully hands-off, with one identity per side.
 
 **Skip-rebuild** is load-bearing: when `image/` is unchanged since the
 previous release, the previous digest is re-tagged (manifest copy)
