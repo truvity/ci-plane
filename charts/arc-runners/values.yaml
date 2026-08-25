@@ -12,6 +12,14 @@ githubConfigUrl: ""
 # by every scale set of the release.
 githubConfigSecret: arc-github-app
 
+# REQUIRED to match the INSTALLED ARC controller's version exactly: the
+# controller deletes any AutoscalingRunnerSet whose
+# app.kubernetes.io/version label differs from its build version
+# ("Autoscaling runner set version doesn't match the build version.
+# Deleting the resource."). Feed this from the same pin that installs
+# the controller so the two can never drift.
+arcVersion: "0.14.2"
+
 # The ARC controller's ServiceAccount — this chart grants it the
 # per-scale-set manager Role in the release namespace, exactly as the
 # upstream gha-runner-scale-set chart does.

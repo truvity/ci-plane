@@ -22,6 +22,8 @@ metadata:
     app.kubernetes.io/instance: {{ $name }}
     app.kubernetes.io/component: autoscaling-runner-set
     app.kubernetes.io/part-of: gha-rs
+    # The controller's compatibility gate — see values.arcVersion.
+    app.kubernetes.io/version: {{ $root.Values.arcVersion | quote }}
     actions.github.com/organization: {{ include "arc-runners.org" $root }}
     actions.github.com/scale-set-name: {{ $name }}
     actions.github.com/scale-set-namespace: {{ $root.Release.Namespace }}
