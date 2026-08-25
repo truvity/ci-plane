@@ -28,8 +28,11 @@ jobs:
           set -euo pipefail
           for c in charts/*; do
             helm lint "$c"
-            helm template test "$c" > /dev/null
           done
+          # arc-runners deliberately fails to render without
+          # githubConfigUrl, so only ci-cache templates bare; both get
+          # the estate-shaped overlay below.
+          helm template test charts/ci-cache > /dev/null
           # Estate-shaped overlay: the paths gitops actually exercises.
           helm template test charts/ci-cache \
             --set goModproxy.enabled=true \
