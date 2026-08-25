@@ -27,14 +27,16 @@
 # here needs a `# renovate:` line directly above it; a pin without one
 # is invisible, and invisible is indistinguishable from current.
 
-# The one deliberate exception to the annotation rule above: the runner
-# binary must stay compatible with the ARC controller, which is bumped
-# by its own chart pin (versions.arc), so pinning a version here would
-# let the two drift apart independently. `latest` is resolved ONCE at
-# build time and then frozen by the image digest that gitops pins, so it
-# is not floating at runtime — it just means "whatever was current when
-# a human tagged".
-ARG RUNNER_VERSION=latest
+# PINNED, annotated — the automatic-chain decision (INF-573 follow-up,
+# 2026-08-25) that replaced the old `latest` exception: `latest` was
+# invisible to renovate, so upstream runner (and its CVE) pickups
+# happened only as a side effect of some OTHER image change. Pinned +
+# annotated, renovate bumps it, automerge lands it, and the next tag
+# ships it. Compatibility with the ARC controller still holds: renovate
+# moves this pin within days of upstream, which is faster than the
+# controller chart stream moves.
+# renovate: datasource=docker depName=ghcr.io/actions/actions-runner
+ARG RUNNER_VERSION=2.336.0
 # renovate: datasource=github-releases depName=goreleaser/goreleaser-pro
 ARG GORELEASER_VERSION=v2.17.1
 

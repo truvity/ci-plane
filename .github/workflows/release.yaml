@@ -167,7 +167,12 @@ jobs:
           ref: master
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Open the pin PR (one standing branch, force-pushed)
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Install devbox
+        run: curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
+
+      - name: Open the pin PR (one standing branch, force-pushed, auto-merge armed)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.image.outputs.version }}
@@ -178,13 +183,19 @@ jobs:
             echo "pin already current"; exit 0
           fi
           sed -i -E "s|^ciPlane: \".*\"|ciPlane: \"$PIN\"|" cfg/versions.yaml
+          # The pin flows into values/versions and the golden renders;
+          # a PR without them is born red on the drift post-condition.
+          devbox run -- just render
+          devbox run -- just golden
           git config user.name "truvity-ci-automation[bot]"
           git config user.email "truvity-ci-automation[bot]@users.noreply.github.com"
           git checkout -B ci-plane-pin
-          git add cfg/versions.yaml
+          git add cfg/versions.yaml cfggen.lock.yaml values/ internal/rendertest/testdata/
           git commit -m "chore(versions): ci-plane → ${VERSION}"
           git push -f origin ci-plane-pin
           gh pr create --repo truvity/gitops --head ci-plane-pin \
             --title "chore(versions): ci-plane → ${VERSION}" \
-            --body "One united version: charts at ${PIN} with the runner image digest stamped in. Rendered values need \`just render && just golden\` if CI flags drift." \
+            --body "One united version: charts at ${PIN} with the runner image digest stamped in; renders and goldens regenerated in-branch." \
             2>/dev/null || echo "PR already open — branch force-pushed"
+          gh pr merge ci-plane-pin --repo truvity/gitops --squash --auto \
+            || echo "auto-merge not armed (checks/permissions) — PR awaits a human"
