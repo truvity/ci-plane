@@ -94,7 +94,11 @@ spec:
       containers:
         - name: verdaccio
           image: {{ include "ci-cache.image" $n.image }}
-          args: ["--config", "/verdaccio/conf/config.yaml"]
+          # No args: the image's entrypoint is `dumb-init --` with
+          # `verdaccio --config /verdaccio/conf/config.yaml` as CMD —
+          # args REPLACE the CMD, so passing flags alone makes
+          # dumb-init exec "--config" and crashloop. The mount below
+          # lands on the image's default config path.
           ports:
             - name: http
               containerPort: 4873
