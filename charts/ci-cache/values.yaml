@@ -137,3 +137,34 @@ bazelRemote:
       memory: 256Mi
     limits:
       memory: 1Gi
+
+npmCache:
+  # verdaccio: a read-through npm registry proxy (INF-581). NOT the
+  # nginx pattern — npm tarballs are immutable but metadata documents
+  # mutate on publish, and tarball URLs are embedded inside metadata,
+  # so a dumb proxy caches stale metadata or nothing useful. verdaccio
+  # short-TTLs metadata and caches tarballs forever on a disposable
+  # PVC. PUBLIC packages only, publish denied, registration off — zero
+  # secrets in the cache path. Runners point npmRegistryServer here
+  # with a health-probe fallback to upstream: pod down = slower, never
+  # broken.
+  enabled: true
+  image:
+    registry: docker.io
+    repository: verdaccio/verdaccio
+    # renovate: datasource=docker depName=verdaccio/verdaccio
+    tag: "6.10.0"
+  size: 20Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  networkPolicy:
+    # Only listed namespaces may consume the cache. Restrictive by
+    # default: an empty list renders a policy admitting nothing.
+    enabled: true
+    consumerNamespaces:
+      - arc-runners-truvity
+
