@@ -22,13 +22,27 @@ it from the upstream `gha-runner-scale-set-controller` chart. The
 `arc-runners` chart renders the CRs directly, so it cannot drift from
 the controller's own chart-version stream.
 
+## Package naming convention
+
+Multi-artifact repositories nest their container packages under the
+repository name (`ghcr.io/truvity/<repo>/<artifact>` — this repo's
+`ci-plane/runner`); single-artifact repositories historically used flat
+repo-named packages and are migrating to the nested form
+(INF-574…INF-579). `ghcr.io/truvity/charts/<name>` stays the chart
+namespace.
+
 ## Release model
 
 **A `v*` tag is the release act** — tag creation is restricted by
 ruleset, so who can tag is who can publish. Renovate keeps every pinned
 tool current and automerges on green, so master is perpetually current;
 a patch tag on an unchanged tree is the legitimate "pure refresh"
-release (base-image/CVE pickup).
+release (base-image/CVE pickup). The upstream runner base is pinned and
+renovate-annotated for exactly this reason — `latest` was invisible to
+renovate. With `vars.AUTO_RELEASE=true` (and the App configured plus a
+tag-ruleset bypass for it), the weekly auto-release workflow cuts the
+patch tag itself: renovate automerge → auto tag → image/charts publish
+→ gitops pin PR (auto-merge armed) → ArgoCD sync. Fully hands-off.
 
 **Skip-rebuild** is load-bearing: when `image/` is unchanged since the
 previous release, the previous digest is re-tagged (manifest copy)
