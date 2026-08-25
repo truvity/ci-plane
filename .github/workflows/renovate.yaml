@@ -1,0 +1,30 @@
+# Self-hosted Renovate, daily — the shared implementation.
+#
+# The App identity is carried by the CREDENTIAL NAMES, not by the
+# workflow: it reads vars.RENOVATE_CLIENT_ID and
+# secrets.RENOVATE_APP_PRIVATE_KEY, org-level on the public estate. The
+# shared workflow skips cleanly while the variable is unset, so the file
+# is safe to carry before the entitlement exists.
+#
+# What renovate buys THIS repository: it is the security-update engine.
+# Every version ARG in the Dockerfile carries a renovate annotation;
+# renovate bumps them and automerges on green (renovate.json), so
+# master is perpetually current — and a v* tag turns current into a
+# published image.
+#
+# `secrets: inherit` is mandatory. A called workflow receives none of the
+# caller's secrets otherwise; `vars` resolve and secrets do not.
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # daily midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    uses: truvity/ci-workflows/.github/workflows/renovate.yaml@ce73f615db4348e9114369c7c321ca09dcd4d361 # v2.10.8
+    secrets: inherit

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: arc-runners
+description: >-
+  ARC runner scale sets with the profile doctrine baked in: per-profile
+  AutoscalingRunnerSet CRs (rendered directly — the controller and its
+  CRDs stay a separate install, so this chart cannot drift from the
+  controller's chart-version stream), measured memory ceilings with
+  request == limit, GOMAXPROCS pinned to the cgroup, disruption
+  protection for mid-job runners, and the stuck-runner janitor for
+  actions/actions-runner-controller#4307. One release per GitHub
+  organization, installed into that org's runner namespace.
+type: application
+# version and appVersion are stamped by the release workflow.
+version: 0.0.0-dev
+appVersion: 0.0.0-dev
+home: https://github.com/truvity/ci-plane
+sources:
+  - https://github.com/truvity/ci-plane

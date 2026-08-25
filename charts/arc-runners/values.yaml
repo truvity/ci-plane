@@ -1,0 +1,134 @@
+# arc-runners — one release per GitHub organization, installed into
+# that organization's runner namespace.
+
+# REQUIRED: the org this release registers against, e.g.
+# https://github.com/truvity. A scale set registers against ONE
+# organization; each org needs its own release, GitHub App secret and
+# namespace.
+githubConfigUrl: ""
+
+# Secret carrying github_app_id / github_app_installation_id /
+# github_app_private_key (delivered estate-side, e.g. by ESO). Shared
+# by every scale set of the release.
+githubConfigSecret: arc-github-app
+
+# The ARC controller's ServiceAccount — this chart grants it the
+# per-scale-set manager Role in the release namespace, exactly as the
+# upstream gha-runner-scale-set chart does.
+controllerServiceAccount:
+  name: arc-gha-rs-controller
+  namespace: arc-system
+
+# ServiceAccount for the runner pods (plumbing-only identity doctrine:
+# registry pull + caches, nothing else). Created estate-side; empty
+# means the namespace default SA.
+runnerServiceAccountName: ""
+
+# The runner image. `digest` is stamped by the release workflow;
+# consumers override `registry` (e.g. an ECR pull-through prefix) and
+# inherit the digest — transitively digest-pinned by the chart version.
+runnerImage:
+  registry: ghcr.io
+  repository: truvity/ci-plane/runner
+  digest: "" # sha256:… — stamped at release; empty renders the tag
+  tag: latest
+
+# 1, not 0: a warm runner removes the cold-start window (node
+# provisioning + image pull + registration) in which GitHub hands out a
+# job message that no runner is ready to take — the window upstream
+# #4307 turns into a permanent stall. The stall is per SCALE SET, so
+# every profile carries one.
+minRunners: 1
+# A per-set FAIRNESS limit when several releases share one node pool —
+# the most one org can claim before the other queues. The pool's own
+# capacity cap is the real spend ceiling and binds first.
+maxRunners: 8
+
+runnerGroup: Default
+
+# Runner pod scheduling. The tolerations are no-ops on untainted
+# clusters; estates with tainted worker/CI pools get the doctrine for
+# free. nodeSelector is estate-specific (e.g. a dedicated CI pool).
+nodeSelector: {}
+tolerations:
+  - key: arch
+    operator: Exists
+  - key: ci
+    value: "true"
+    effect: NoSchedule
+# A runner mid-job is not migratable state: node-consolidation eviction
+# cancels the run. Jobs end, THEN the node may go. This stops
+# consolidation, not spot reclaim — run CI pools on-demand.
+podAnnotations:
+  karpenter.sh/do-not-disrupt: "true"
+
+# The listener long-polls GitHub for jobs; it schedules wherever the
+# controller namespace allows and needs the same arch tolerance.
+listenerTolerations:
+  - key: arch
+    operator: Exists
+
+# The profile matrix. Recipes are not one population: measured on a Go
+# monorepo, linters peak at a flat ~4Gi while a cold build wants ~20Gi;
+# one profile sized for the second group parks trivial jobs on huge
+# nodes. Sizes are MEASURED, not guessed — memory request == limit so
+# memory cannot be overcommitted: however many runners pack onto a
+# node, their ceilings cannot sum past its allocatable. A runner killed
+# at its cgroup limit uploads NO log blob and reads as a hang, which is
+# why the ceilings err high.
+#
+# GOMAXPROCS is pinned because cgroup-aware GOMAXPROCS is Go's alone —
+# golangci-lint and `make -j$(nproc)` read the NODE's core count, and
+# CI pools are heterogeneous. The CPU LIMIT exists for the same reason:
+# without one, cpu.max is "max" and container-aware runtimes read the
+# node. There is deliberately NO ephemeral-storage REQUEST (a disk
+# request breaks scale-from-zero) but the LIMIT is load-bearing:
+# exceeding it must evict the POD, never the node.
+#
+# The map key IS the identifier: k8s object name == GitHub scale-set
+# name == the workflow's `runs-on` label. Renaming one prunes the old
+# set and strands queued jobs — add alongside, never rename.
+scaleSets:
+  preview-large:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 24Gi
+      limits:
+        cpu: "4"
+        memory: 24Gi
+        ephemeral-storage: 40Gi
+  preview-small:
+    gomaxprocs: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: 6Gi
+      limits:
+        cpu: "2"
+        memory: 6Gi
+        ephemeral-storage: 20Gi
+
+janitor:
+  # Sweeps ephemeral runners stranded by upstream ARC bug
+  # actions/actions-runner-controller#4307 ("Ephemeral Runners seem to
+  # get stuck when job is canceled or interrupted"). Cancellation is
+  # the trigger, and `concurrency: cancel-in-progress` means routine
+  # cancels, so the sweep is not optional. Deletes ONLY runners that
+  # hold no job, match a stuck signature in their own log, and are
+  # older than the grace period. Remove when #4307 ships a fix.
+  enabled: true
+  schedule: "*/3 * * * *"
+  graceSeconds: 180
+  image:
+    registry: docker.io
+    repository: alpine/k8s
+    # renovate: datasource=docker depName=alpine/k8s
+    tag: 1.33.1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

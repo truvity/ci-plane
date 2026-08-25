@@ -1,0 +1,123 @@
+{{- if not .Values.githubConfigUrl }}{{ fail "githubConfigUrl is required" }}{{ end }}
+{{- $root := . }}
+{{- range $name, $p := .Values.scaleSets }}
+{{- /*
+The CRs are rendered DIRECTLY rather than through the upstream
+gha-runner-scale-set chart: the controller and that chart share a
+version stream, and bundling the chart here would let the two drift.
+The CR API (actions.github.com/v1alpha1) is the contract with the
+controller; labels and the manager Role/RoleBinding mirror what the
+upstream chart creates. The values-hash annotation changes whenever
+this set's rendered inputs change, which is what prompts the
+controller to recycle the listener — same mechanism as upstream.
+*/}}
+{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" ($p.minRunners | default $root.Values.minRunners) "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl }}
+---
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: autoscaling-runner-set
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/organization: {{ include "arc-runners.org" $root }}
+    actions.github.com/scale-set-name: {{ $name }}
+    actions.github.com/scale-set-namespace: {{ $root.Release.Namespace }}
+  annotations:
+    actions.github.com/runner-group-name: {{ $root.Values.runnerGroup }}
+    actions.github.com/runner-scale-set-name: {{ $name }}
+    actions.github.com/cleanup-manager-role-name: {{ $name }}-gha-rs-manager
+    actions.github.com/cleanup-manager-role-binding: {{ $name }}-gha-rs-manager
+    actions.github.com/values-hash: {{ $spec | toJson | sha256sum | trunc 63 }}
+spec:
+  githubConfigUrl: {{ $root.Values.githubConfigUrl }}
+  githubConfigSecret: {{ $root.Values.githubConfigSecret }}
+  runnerGroup: {{ $root.Values.runnerGroup }}
+  minRunners: {{ $p.minRunners | default $root.Values.minRunners }}
+  maxRunners: {{ $p.maxRunners | default $root.Values.maxRunners }}
+  listenerTemplate:
+    spec:
+      {{- with $root.Values.listenerTolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: listener
+  template:
+    metadata:
+      {{- with $root.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with $root.Values.runnerServiceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: runner
+          image: {{ include "arc-runners.runnerImage" $root }}
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: GOMAXPROCS
+              value: {{ $p.gomaxprocs | quote }}
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+---
+# The controller's per-scale-set manager Role — mirrors the upstream
+# chart: the controller SA needs these in the runner namespace to run
+# ephemeral runners here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: {{ $name }}
+    app.kubernetes.io/component: manager-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-gha-rs-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ $root.Values.controllerServiceAccount.name }}
+    namespace: {{ $root.Values.controllerServiceAccount.namespace }}
+{{- end }}

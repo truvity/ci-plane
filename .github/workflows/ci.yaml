@@ -1,0 +1,65 @@
+# PR gate: charts must lint and template with defaults AND with an
+# estate-shaped values overlay; the image must build (amd64 only — the
+# QEMU arm64 half is the slow part of a release and buys no review
+# signal; the release builds both).
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  charts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Lint and template
+        run: |
+          set -euo pipefail
+          for c in charts/*; do
+            helm lint "$c"
+            helm template test "$c" > /dev/null
+          done
+          # Estate-shaped overlay: the paths gitops actually exercises.
+          helm template test charts/ci-cache \
+            --set goModproxy.enabled=true \
+            --set goModproxy.s3.bucket=example \
+            --set goModproxy.s3.region=eu-central-1 \
+            --set runnerImage.registry=example.ecr/github \
+            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+            > /dev/null
+          helm template test charts/arc-runners \
+            --set githubConfigUrl=https://github.com/example \
+            --set runnerServiceAccountName=preview-runner \
+            --set nodeSelector."karpenter\.sh/nodepool"=ci \
+            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+            > /dev/null
+          echo "charts OK"
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Build (amd64, no push)
+        run: docker buildx build --platform linux/amd64 image/
+
+  # A stable name for branch protection to require.
+  check:
+    needs: [charts, image]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: '[ "${{ needs.charts.result }}" = "success" ] && [ "${{ needs.image.result }}" = "success" ]'

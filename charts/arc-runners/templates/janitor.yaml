@@ -1,0 +1,129 @@
+{{- if .Values.janitor.enabled }}
+{{- $j := .Values.janitor }}
+---
+# arc-runner-janitor: sweeps ephemeral runners stranded by upstream ARC
+# bug actions/actions-runner-controller#4307. GitHub hands each queued
+# job to a runner as a MESSAGE that can be acquired once; when a job is
+# cancelled or interrupted, the acquiring runner fails to clean up and
+# every later runner logs "Job message already acquired" or "job
+# assignment is invalid", then idles forever. The queue stalls beside
+# idle capacity — a signature that reads like a capacity problem and is
+# not one. Namespace-scoped RBAC; deletes ONLY runners that (a) hold no
+# job, (b) match a stuck signature, (c) are older than the grace
+# period. Remove when #4307 ships a fix.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arc-runner-janitor
+  labels:
+    app.kubernetes.io/name: arc-runner-janitor
+    app.kubernetes.io/part-of: arc-runners
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arc-runner-janitor
+rules:
+  - apiGroups: ["actions.github.com"]
+    resources: ["ephemeralrunners"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arc-runner-janitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arc-runner-janitor
+subjects:
+  - kind: ServiceAccount
+    name: arc-runner-janitor
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arc-runner-janitor-v1
+data:
+  sweep.sh: |
+    #!/bin/sh
+    set -eu
+    GRACE_SECONDS={{ $j.graceSeconds }}
+    NOW=$(date -u +%s)
+    STUCK='Job message already acquired|job assignment is invalid|invalid job assignment'
+    swept=0
+
+    # jq converts the timestamp, not `date`: the image is Alpine, so
+    # `date` is BusyBox, and BusyBox cannot parse ISO-8601 with -d.
+    # jq's fromdateiso8601 is exact and jq is already a dependency.
+    kubectl get ephemeralrunners -n {{ .Release.Namespace }} -o json \
+      | jq -r '.items[] | select((.status.jobRepositoryName // "") == "")
+               | "\(.metadata.name)\t\(.metadata.creationTimestamp|fromdateiso8601)"' \
+    | while IFS="$(printf '\t')" read -r name created_epoch; do
+        [ -z "$name" ] && continue
+        age=$(( NOW - created_epoch ))
+        if [ "$age" -lt "$GRACE_SECONDS" ]; then
+          echo "skip $name: age ${age}s < grace"
+          continue
+        fi
+        # Read the runner's own log; a pod that is gone or starting has none.
+        if kubectl logs -n {{ .Release.Namespace }} "$name" --tail=200 2>/dev/null \
+             | grep -qE "$STUCK"; then
+          echo "STUCK $name (age ${age}s, no job, signature matched) — deleting"
+          kubectl delete ephemeralrunner -n {{ .Release.Namespace }} "$name" --wait=false || true
+          swept=$((swept+1))
+        else
+          echo "ok $name (age ${age}s, idle, no signature)"
+        fi
+      done
+    echo "sweep complete"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: arc-runner-janitor
+  labels:
+    app.kubernetes.io/name: arc-runner-janitor
+    app.kubernetes.io/part-of: arc-runners
+spec:
+  schedule: {{ $j.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: arc-runner-janitor
+          restartPolicy: Never
+          enableServiceLinks: false
+          containers:
+            - name: sweep
+              image: {{ include "arc-runners.image" $j.image }}
+              command: ["/bin/sh", "/scripts/sweep.sh"]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                {{- toYaml $j.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: script
+              configMap:
+                name: arc-runner-janitor-v1
+                defaultMode: 0555
+{{- end }}

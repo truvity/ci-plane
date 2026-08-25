@@ -1,0 +1,131 @@
+{{- if .Values.buildkitd.enabled }}
+{{- $b := .Values.buildkitd }}
+{{- range $arch := $b.archs }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  selector:
+    app.kubernetes.io/name: buildkitd
+    ci-plane.io/arch: {{ $arch }}
+  ports:
+    - name: grpc
+      port: 1234
+      targetPort: 1234
+---
+# Rootless BuildKit: no privileged securityContext. The unconfined
+# seccomp profile is the documented rootless-buildkit requirement —
+# user-namespace isolation replaces the default profile, which blocks
+# the unprivileged clone/mount syscalls rootless depends on.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buildkitd-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  serviceName: buildkitd-{{ $arch }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: {{ $arch }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buildkitd
+        app.kubernetes.io/part-of: ci-cache
+        ci-plane.io/arch: {{ $arch }}
+      {{- with $b.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: {{ $arch }}
+        {{- with $.Values.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # Rootless buildkit needs user namespaces; the default sysctl
+        # ceiling on minimal hosts is too low.
+        - name: enable-userns
+          image: {{ include "ci-cache.image" $b.initImage }}
+          command: ["sysctl", "-w", "user.max_user_namespaces=63359"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: buildkitd
+          image: {{ include "ci-cache.image" $b.image }}
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --oci-worker-no-process-sandbox
+          ports:
+            - name: grpc
+              containerPort: 1234
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: Unconfined
+          readinessProbe:
+            exec:
+              # --addr: buildctl defaults to the unix socket; the daemon
+              # listens on TCP for the runners.
+              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $.Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ $b.cacheSize }}
+{{- if $b.networkPolicy.enabled }}
+---
+# Only the listed consumer namespaces may reach the builders.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: buildkitd-{{ $arch }}-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: {{ $arch }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range $ns := $b.networkPolicy.consumerNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+        {{- end }}
+      ports:
+        - port: 1234
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

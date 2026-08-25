@@ -1,0 +1,131 @@
+# ci-cache — the in-cluster CI cache plane.
+#
+# Image references are split {registry}/{repository}:{tag} so an estate
+# with an ECR pull-through cache overrides ONLY `registry` per
+# component family and inherits everything else. Empty registry means
+# the upstream registry (docker.io / ghcr.io).
+
+# The runner image (go-modproxy runs it — it bakes go-cache-plugin).
+# `digest` is stamped by the release workflow; consumers override
+# `registry` (e.g. "712….dkr.ecr.…amazonaws.com/github") and inherit
+# the digest, staying transitively digest-pinned by the chart version.
+runnerImage:
+  registry: ghcr.io
+  repository: truvity/ci-plane/runner
+  digest: "" # sha256:… — stamped at release; empty renders the tag instead
+  tag: latest
+
+# Scheduling defaults shared by every component. The upstream defaults
+# are empty; an estate with tainted worker pools sets tolerations here
+# once.
+nodeSelector: {}
+tolerations: []
+storageClassName: gp3
+
+buildkitd:
+  # Rootless BuildKit builders, one single-replica StatefulSet per arch,
+  # registered client-side as one buildx builder (--driver remote) so
+  # multi-platform builds split natively, no QEMU. The daemon never
+  # ships to runners — client-only docker + buildx live in the runner
+  # image. StatefulSet because the PVC is the HOT layer cache and two
+  # daemons must never share a store; the WARM layer is cache-to
+  # type=registry and survives builder replacement.
+  enabled: true
+  archs: [arm64, amd64]
+  image:
+    registry: docker.io
+    repository: moby/buildkit
+    # renovate: datasource=docker depName=moby/buildkit
+    tag: v0.27.0-rootless
+  initImage:
+    registry: docker.io
+    repository: library/busybox
+    tag: "1.36"
+  cacheSize: 50Gi
+  resources:
+    # No CPU limit: builds burst to whatever the node has free; the
+    # request is scheduling headroom only.
+    requests:
+      cpu: 500m
+      memory: 4Gi
+      ephemeral-storage: 2Gi
+    limits:
+      memory: 8Gi
+      ephemeral-storage: 10Gi
+  networkPolicy:
+    # Only listed namespaces may reach the builders. Restrictive by
+    # default: an empty list renders a policy admitting nothing.
+    enabled: true
+    consumerNamespaces:
+      - arc-runners-truvity
+  # Annotations for the builder pods. Karpenter estates keep the
+  # default: a builder mid-build is not migratable state.
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+
+nixCache:
+  # Transparent read-through cache of the nix upstream, consumed as an
+  # ordinary HTTP SUBSTITUTER (not a forward proxy). Runners list this
+  # service before the upstream in nix.conf; pod down = fall through:
+  # slower, never broken.
+  enabled: true
+  upstream: cache.nixos.org
+  # In-cluster resolver for the upstream's rotating CDN IPs.
+  resolver: kube-dns.kube-system.svc.cluster.local
+  size: 30Gi
+  # nginx max_size — keep ~2Gi under `size` for temp files and
+  # eviction lag.
+  maxSize: 28g
+  image:
+    registry: docker.io
+    repository: library/nginx
+    # renovate: datasource=docker depName=nginx
+    tag: 1.29.4-alpine
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+goModproxy:
+  # go-cache-plugin `serve` — a caching Go module + sumdb proxy backed
+  # by an S3 prefix. Runs the RUNNER IMAGE (it bakes the binary).
+  # Requires S3 access on its ServiceAccount (pod identity / IRSA —
+  # estate-side wiring); disabled by default for that reason.
+  enabled: false
+  s3:
+    bucket: ""
+    region: ""
+    keyPrefix: modcache
+  sumdb: sum.golang.org
+  serviceAccount:
+    create: true
+    name: go-modproxy
+    annotations: {}
+  stagingSize: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+bazelRemote:
+  # moon's remote task cache speaks the Bazel Remote Execution v2 API.
+  # Disk-backed: zero IAM, cluster-local latency.
+  enabled: true
+  size: 10Gi
+  # --max_size in GiB; keep under `size`.
+  maxSizeGb: 8
+  image:
+    registry: docker.io
+    repository: buchgr/bazel-remote-cache
+    # renovate: datasource=docker depName=buchgr/bazel-remote-cache
+    tag: v2.6.1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

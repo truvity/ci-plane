@@ -1,0 +1,124 @@
+{{- if .Values.goModproxy.enabled }}
+{{- $g := .Values.goModproxy }}
+{{- if not $g.s3.bucket }}{{ fail "goModproxy.s3.bucket is required when goModproxy is enabled" }}{{ end }}
+---
+# go-modproxy: go-cache-plugin `serve --modproxy` — a caching Go module
+# + sumdb proxy backed by an S3 prefix. Runners set GOPROXY to this
+# service with a pipe-fallback to proxy.golang.org: pod down = direct
+# upstream, slower, never broken.
+#
+# The pod runs the RUNNER IMAGE itself — it bakes the go-cache-plugin
+# binary. S3 access is the pod's own identity: the ServiceAccount is
+# expected to carry pod-identity/IRSA wiring (estate-side) scoped to
+# the keyPrefix and nothing else. Local staging is an emptyDir — S3 is
+# the durable layer.
+{{- if $g.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $g.serviceAccount.name }}
+  labels:
+    app.kubernetes.io/name: go-modproxy
+    app.kubernetes.io/part-of: ci-cache
+  {{- with $g.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-modproxy
+  labels:
+    app.kubernetes.io/name: go-modproxy
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-modproxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: go-modproxy
+        app.kubernetes.io/part-of: ci-cache
+    spec:
+      serviceAccountName: {{ $g.serviceAccount.name }}
+      enableServiceLinks: false
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: go-modproxy
+          image: {{ include "ci-cache.runnerImage" $ }}
+          command: ["go-cache-plugin", "serve"]
+          env:
+            # serve is fully env-driven. --plugin is mandatory but
+            # listens on 127.0.0.1 only — nothing consumes it here; the
+            # HTTP modproxy is the product.
+            - name: GOCACHE_PLUGIN
+              value: "5930"
+            - name: GOCACHE_HTTP
+              value: ":5970"
+            - name: GOCACHE_MODPROXY
+              value: "true"
+            - name: GOCACHE_SUMDB
+              value: {{ $g.sumdb | quote }}
+            - name: GOCACHE_DIR
+              value: /data
+            - name: GOCACHE_S3_BUCKET
+              value: {{ $g.s3.bucket | quote }}
+            - name: GOCACHE_S3_REGION
+              value: {{ $g.s3.region | quote }}
+            - name: GOCACHE_KEY_PREFIX
+              value: {{ $g.s3.keyPrefix | quote }}
+          ports:
+            - name: http
+              containerPort: 5970
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            {{- toYaml $g.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1001 # runner uid in the runner image
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: {{ $g.stagingSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-modproxy
+  labels:
+    app.kubernetes.io/name: go-modproxy
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  selector:
+    app.kubernetes.io/name: go-modproxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}

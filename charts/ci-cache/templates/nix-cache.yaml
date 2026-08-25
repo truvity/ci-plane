@@ -1,0 +1,183 @@
+{{- if .Values.nixCache.enabled }}
+{{- $n := .Values.nixCache }}
+---
+# nix-cache: transparent read-through cache of the nix upstream,
+# consumed as an ordinary HTTP SUBSTITUTER — not an HTTP_PROXY (a
+# forward proxy only sees CONNECT tunnels for HTTPS and can cache
+# nothing without MITM). Runners list this service before the upstream
+# in nix.conf; pod down = fall through to upstream: slower, never
+# broken. A CACHE on a disposable PVC — zero IAM, no backups.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # Version suffix: bump on ANY nginx.conf edit — the Deployment
+  # references the versioned name, so the bump is what rolls the pod
+  # (GitOps engines never restart pods on in-place ConfigMap changes).
+  name: nix-cache-nginx-v1
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-cache
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+    events { worker_connections 1024; }
+    http {
+      access_log off;
+      # Writable paths for a non-root, read-only-rootfs container.
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /cache/tmp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
+      # max_size is enforced by LRU eviction; the slack below the PVC
+      # size absorbs temp files and eviction lag. inactive far above
+      # any real reuse window — eviction is size-driven here.
+      proxy_cache_path /cache/nix levels=1:2 keys_zone=nix:64m
+                       max_size={{ $n.maxSize }} inactive=90d use_temp_path=off;
+
+      # The upstream sits behind a CDN whose IPs rotate. A static
+      # proxy_pass hostname is resolved ONCE at config load and never
+      # again. The variable form forces per-request resolution through
+      # the cluster DNS, re-resolved every 300s.
+      resolver {{ $n.resolver }} valid=300s ipv6=off;
+
+      server {
+        listen 8080;
+
+        location = /healthz { return 200; }
+
+        location / {
+          set $upstream https://{{ $n.upstream }};
+          proxy_pass $upstream;
+          proxy_set_header Host {{ $n.upstream }};
+          proxy_ssl_server_name on;
+          proxy_ssl_name {{ $n.upstream }};
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+
+          proxy_cache nix;
+          proxy_cache_key $uri;
+          # Deterministic TTLs, upstream headers ignored: store paths
+          # are content-addressed, so both .narinfo and nar/* are
+          # immutable in practice. 404s are cached briefly — nix
+          # probes many nonexistent narinfos per closure.
+          proxy_ignore_headers Cache-Control Expires;
+          proxy_cache_valid 200 90d;
+          proxy_cache_valid 404 5m;
+          # Collapse a cold fleet's concurrent misses for the same
+          # path into ONE upstream fetch.
+          proxy_cache_lock on;
+          proxy_cache_lock_timeout 30s;
+          # A dead or slow upstream serves stale rather than erroring.
+          proxy_cache_use_stale error timeout updating;
+          add_header X-Cache $upstream_cache_status;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nix-cache-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storageClassName }}
+  resources:
+    requests:
+      storage: {{ $n.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nix-cache
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nix-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nix-cache
+        app.kubernetes.io/part-of: ci-cache
+    spec:
+      enableServiceLinks: false
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nginx
+          image: {{ include "ci-cache.image" $n.image }}
+          command: ["nginx", "-c", "/etc/nginx-cache/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx-cache
+              readOnly: true
+            - name: data
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            {{- toYaml $n.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101 # nginx uid in the official alpine image
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 101
+      volumes:
+        - name: conf
+          configMap:
+            name: nix-cache-nginx-v1
+        - name: data
+          persistentVolumeClaim:
+            claimName: nix-cache-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nix-cache
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-cache
+spec:
+  selector:
+    app.kubernetes.io/name: nix-cache
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}
