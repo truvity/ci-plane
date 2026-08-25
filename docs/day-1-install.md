@@ -78,4 +78,6 @@ is one change, not N). Runners reach the caches by cluster DNS:
 `buildkitd-<arch>.ci-cache.svc:1234` (buildx `--driver remote`),
 `nix-cache.ci-cache.svc` (nix extra-substituter),
 `go-modproxy.ci-cache.svc` (GOPROXY with a pipe-fallback to upstream),
-`bazel-remote.ci-cache.svc:9092` (moon remote cache).
+`bazel-remote.ci-cache.svc:9092` (moon remote cache),
+`npm-cache.ci-cache.svc` (yarn/npm/pnpm `npmRegistryServer`, public
+packages, behind a health-probe fallback to registry.npmjs.org).

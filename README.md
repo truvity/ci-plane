@@ -22,7 +22,7 @@ Supersedes [truvity/runner-image](https://github.com/truvity/runner-image).
 | Artifact | Published as |
 |---|---|
 | [`image/`](image/Dockerfile) — the runner image | `ghcr.io/truvity/ci-plane/runner:<version>` |
-| [`charts/ci-cache`](charts/ci-cache) — buildkitd (per-arch, daemonless), nix read-through cache, Go module proxy, Bazel-API remote cache | `oci://ghcr.io/truvity/charts/ci-cache` |
+| [`charts/ci-cache`](charts/ci-cache) — buildkitd (per-arch, daemonless), nix read-through cache, Go module proxy, npm registry cache, Bazel-API remote cache | `oci://ghcr.io/truvity/charts/ci-cache` |
 | [`charts/arc-runners`](charts/arc-runners) — AutoscalingRunnerSet CRs per profile + the #4307 stuck-runner janitor | `oci://ghcr.io/truvity/charts/arc-runners` |
 
 The ARC **controller** (and its CRDs) is deliberately NOT here — install
