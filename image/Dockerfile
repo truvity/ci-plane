@@ -38,7 +38,7 @@
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
 ARG RUNNER_VERSION=2.336.0
 # renovate: datasource=github-releases depName=goreleaser/goreleaser-pro
-ARG GORELEASER_VERSION=v2.17.1
+ARG GORELEASER_VERSION=v2.18.0
 
 # ── go-cache-plugin: built from source (upstream publishes no binary
 # releases). CROSS-compiled on the build platform: the previous form
