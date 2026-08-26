@@ -44,13 +44,17 @@ buildkitd:
   cacheSize: 50Gi
   resources:
     # No CPU limit: builds burst to whatever the node has free; the
-    # request is scheduling headroom only.
+    # request is scheduling headroom only. Right-sized 2026-08-27
+    # (idle ~58Mi, cache on the PVC not in memory): a 1.5Gi request
+    # fits a .medium node — on a dedicated build pool the request IS
+    # the node bill. The 3Gi limit matches a medium's allocatable; a
+    # limit above node capacity is headroom that cannot exist.
     requests:
       cpu: 500m
-      memory: 4Gi
+      memory: 1536Mi
       ephemeral-storage: 2Gi
     limits:
-      memory: 8Gi
+      memory: 3Gi
       ephemeral-storage: 10Gi
   networkPolicy:
     # Only listed namespaces may reach the builders. Restrictive by
