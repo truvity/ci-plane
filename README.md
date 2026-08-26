@@ -16,6 +16,9 @@ Supersedes [truvity/runner-image](https://github.com/truvity/runner-image).
 - [Day 1 — install](docs/day-1-install.md) — fresh-estate setup
 - [Day 2 — operations](docs/day-2-operations.md) — releasing, the
   automatic chain, rollback, upgrades
+- [Normalization criteria](docs/normalization.md) — the doctrine every
+  public truvity repo, artifact, and tool is held to (referenced by
+  code: R1–R3, N1–N3, B1–B6, P1–P3)
 
 ## Contents
 
