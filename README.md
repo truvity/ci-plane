@@ -19,6 +19,10 @@ Supersedes [truvity/runner-image](https://github.com/truvity/runner-image).
 - [Normalization criteria](docs/normalization.md) — the doctrine every
   public truvity repo, artifact, and tool is held to (referenced by
   code: R1–R3, N1–N3, B1–B6, P1–P3)
+- Setting up a repository end to end:
+  [ci-workflows docs/estate-lifecycle.md](https://github.com/truvity/ci-workflows/blob/master/docs/estate-lifecycle.md);
+  what a repository *is*:
+  [github-structure](https://github.com/truvity/github-structure)
 
 ## Contents
 
