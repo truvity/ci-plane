@@ -1,19 +1,16 @@
-# The last mile of the automatic chain (INF-573 follow-ups): when
-# renovate's automerged bumps have moved master past the latest release,
-# cut the next patch tag — which the Release workflow turns into a new
-# image (only if image/ changed) and charts, and the bump-pin job turns
-# into a gitops PR. Weekly, deliberately: CVE pickup cadence, not churn.
-#
-# DOUBLY GUARDED, off by default: the App credentials must be configured
-# AND vars.AUTO_RELEASE must be "true" — flipping it is the deliberate
-# policy act. Until the tag ruleset can carry an App bypass
-# (github-structure feature, ticketed), tag creation by the App is
-# rejected by the ruleset and this stays dark even if enabled.
+# The chain's last mile (INF-590): when renovate's automerged bumps
+# have moved master past the latest release, the shared workflow cuts
+# the next patch tag. DOUBLY GUARDED, off by default: the App
+# credentials must be entitled to this repo AND vars.AUTO_RELEASE must
+# be "true" — flipping it is the deliberate policy act. The v* tag
+# ruleset must carry the App bypass (gitops cfg/github.yaml) or the
+# push is rejected. Cron staggered per repo so Monday's releases don't
+# race each other's gitops pin PRs.
 name: Auto Release
 
 on:
   schedule:
-    - cron: "23 5 * * 1" # Mondays 05:23 UTC
+    - cron: "23 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -21,31 +18,9 @@ permissions:
 
 jobs:
   tag:
-    runs-on: ubuntu-latest
     if: vars.AUTO_RELEASE == 'true' && vars.CI_AUTOMATION_APP_ID != ''
-    steps:
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        id: app-token
-        with:
-          app-id: ${{ vars.CI_AUTOMATION_APP_ID }}
-          private-key: ${{ secrets.CI_AUTOMATION_PRIVATE_KEY }}
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Cut the next patch tag if master moved
-        run: |
-          set -euo pipefail
-          LATEST=$(git tag --list 'v*' --sort=-version:refname | head -1)
-          if [ -z "$LATEST" ]; then echo "no releases yet — a human cuts v1.0.0"; exit 0; fi
-          if [ "$(git rev-parse "$LATEST^{commit}")" = "$(git rev-parse HEAD)" ]; then
-            echo "master == $LATEST — nothing to release"; exit 0
-          fi
-          NEXT=$(echo "$LATEST" | awk -F. '{printf "%s.%s.%d", $1, $2, $3+1}')
-          git config user.name "truvity-ci-automation[bot]"
-          git config user.email "truvity-ci-automation[bot]@users.noreply.github.com"
-          git tag -a "$NEXT" -m "$NEXT — automatic release: master moved past $LATEST (renovate automerge)"
-          git push origin "$NEXT"
-          echo "released $NEXT" >> "$GITHUB_STEP_SUMMARY"
+    uses: truvity/ci-workflows/.github/workflows/auto-release.yaml@870a626b12231522fbee7d07a3dc7944f8f508e7 # v2.12.0
+    with:
+      app-id: ${{ vars.CI_AUTOMATION_APP_ID }}
+    secrets:
+      ci-automation-private-key: ${{ secrets.CI_AUTOMATION_PRIVATE_KEY }}
