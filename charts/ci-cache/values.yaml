@@ -130,7 +130,7 @@ bazelRemote:
     registry: docker.io
     repository: buchgr/bazel-remote-cache
     # renovate: datasource=docker depName=buchgr/bazel-remote-cache
-    tag: v2.6.1
+    tag: v2.6.2
   resources:
     requests:
       cpu: 50m
