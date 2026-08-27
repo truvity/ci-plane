@@ -3,7 +3,7 @@
 #
 # Doctrine (Oleg, 2026-08-13): the image contains ONLY what devbox
 # cannot deliver — the bootstrap (nix + devbox), pre-devbox shell
-# semantics (bash as sh), binaries outside nixpkgs (goreleaser-pro:
+# semantics (bash as sh), binaries outside nixpkgs (runner,
 # license-gated; go-cache-plugin: must pre-exist before any go
 # invocation it caches), and the docker toolchain (client + buildx:
 # essential, ruled in-image 2026-08-13 — daemonless, the daemon never
@@ -37,8 +37,6 @@
 # controller chart stream moves.
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
 ARG RUNNER_VERSION=2.336.0
-# renovate: datasource=github-releases depName=goreleaser/goreleaser-pro
-ARG GORELEASER_VERSION=v2.18.0
 
 # ── go-cache-plugin: built from source (upstream publishes no binary
 # releases). CROSS-compiled on the build platform: the previous form
@@ -73,16 +71,11 @@ RUN ln -sf /bin/bash /bin/sh \
  && apt-get install -y -qq --no-install-recommends xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# goreleaser-pro (the binary; the LICENSE KEY is an org secret and never
-# ships in an image).
-# Download-then-extract (no pipe): a curl failure must fail the step,
-# not feed tar garbage — v1's pipe hid a 404 as a tar error.
-RUN ARCH=$(dpkg --print-architecture) \
- && GR_ARCH=$([ "$ARCH" = "arm64" ] && echo arm64 || echo x86_64) \
- && curl -fsSL -o /tmp/goreleaser.tgz "https://github.com/goreleaser/goreleaser-pro/releases/download/${GORELEASER_VERSION}/goreleaser-pro_Linux_${GR_ARCH}.tar.gz" \
- && tar -xz -C /usr/local/bin -f /tmp/goreleaser.tgz goreleaser \
- && rm /tmp/goreleaser.tgz \
- && goreleaser --version
+# goreleaser-pro is deliberately ABSENT (INF-572): the Pro EULA's
+# no-distribution clause covers the binary even without the key, and
+# this image is public. Consumers install it job-time on their own
+# runners — bar via its proto pin (.prototools), release-private
+# callers via the install-goreleaser-pro input (ci-workflows v2.13.1).
 
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 
