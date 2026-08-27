@@ -87,3 +87,22 @@ warm layer lives in the registry (`cache-to type=registry`) and
 survives builder replacement — expect one slower build cycle after a
 PVC reset, not breakage. The nix cache and module proxy degrade to
 upstream when down.
+
+### npm read-through (verdaccio)
+
+Adoption is one line: ARC-pooled repos pass `node-cache: true` to the
+shared `check.yaml` (ci-workflows ≥ v2.13.0). The job probes
+`npm-cache.ci-cache.svc/-/ping` (2s) and, when it answers, sets
+`npm_config_registry` (npm, yarn classic) and `YARN_NPM_REGISTRY_SERVER`
+(berry) for the job — a down cache degrades the job to *slow* (direct
+npmjs, one warning line), never to *broken*. Both paths proven live
+2026-08-27: override active on bar's ARC job; graceful fallback on a
+hosted job.
+
+Know your consumer before expecting traffic: **hosted runners cannot
+reach the service at all** (public repos ride hosted — do not opt them
+in, the warning is pure noise), and a **zero-install yarn repo (bar:
+committed `.yarn/cache`) never fetches from any registry during
+install** — the override there only catches ad-hoc fetches (`npx`,
+`npm exec`, toolchain downloads honoring npm config). The cache earns
+its keep when a non-zero-install Node repo lands on the ARC pool.
