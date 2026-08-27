@@ -107,6 +107,25 @@ scaleSets:
         cpu: "4"
         memory: 24Gi
         ephemeral-storage: 40Gi
+  # The middle of the measured distribution (2026-08-27 fleet survey,
+  # cgroup memory.peak across 22 jobs): a 10.4–13.4Gi cluster — gitops
+  # lint/test, bar's moon ci, trustform-front build — sat on 24Gi
+  # runners at ~50%. 14Gi is the packing sweet spot: TWO medium
+  # runners fit one r6g.xlarge (~29Gi allocatable), where one 24Gi
+  # runner monopolized it. gomaxprocs stays 4 (CPU is compressible;
+  # memory does the packing). The peak line each job prints is the
+  # promotion/demotion evidence — a job whose limit hits climb here
+  # goes back to large.
+  preview-medium:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 14Gi
+      limits:
+        cpu: "4"
+        memory: 14Gi
+        ephemeral-storage: 30Gi
   preview-small:
     gomaxprocs: 2
     resources:
