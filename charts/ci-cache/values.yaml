@@ -40,7 +40,7 @@ buildkitd:
   initImage:
     registry: docker.io
     repository: library/busybox
-    tag: "1.36"
+    tag: "1.38"
   cacheSize: 50Gi
   resources:
     # No CPU limit: builds burst to whatever the node has free; the
