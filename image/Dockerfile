@@ -36,7 +36,7 @@
 # moves this pin within days of upstream, which is faster than the
 # controller chart stream moves.
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
-ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_VERSION=2.337.0
 
 # ── go-cache-plugin: built from source (upstream publishes no binary
 # releases). CROSS-compiled on the build platform: the previous form
