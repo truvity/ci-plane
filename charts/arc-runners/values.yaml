@@ -152,7 +152,7 @@ janitor:
     registry: docker.io
     repository: alpine/k8s
     # renovate: datasource=docker depName=alpine/k8s
-    tag: 1.36.2
+    tag: 1.37.0
   resources:
     requests:
       cpu: 25m
