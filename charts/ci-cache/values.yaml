@@ -92,7 +92,7 @@ nixCache:
     registry: docker.io
     repository: library/nginx
     # renovate: datasource=docker depName=nginx
-    tag: 1.31.4-alpine
+    tag: 1.31.5-alpine
   resources:
     requests:
       cpu: 250m
