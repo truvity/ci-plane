@@ -157,7 +157,7 @@ npmCache:
     registry: docker.io
     repository: verdaccio/verdaccio
     # renovate: datasource=docker depName=verdaccio/verdaccio
-    tag: "6.10.1"
+    tag: "6.10.2"
   size: 20Gi
   resources:
     requests:
