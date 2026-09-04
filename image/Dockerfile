@@ -90,7 +90,7 @@ COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 # renovate: datasource=docker depName=docker versioning=semver
 ARG DOCKER_VERSION=29.7.2
 # renovate: datasource=github-releases depName=docker/buildx
-ARG BUILDX_VERSION=v0.36.1
+ARG BUILDX_VERSION=v0.37.0
 RUN ARCH=$(dpkg --print-architecture) \
  && DOCKER_ARCH=$([ "$ARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
  && curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" \
