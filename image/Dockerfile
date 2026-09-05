@@ -88,7 +88,7 @@ COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 # matching release tag. semver versioning so the -dind / -windowsservercore
 # tags are read as prereleases and ignored.
 # renovate: datasource=docker depName=docker versioning=semver
-ARG DOCKER_VERSION=29.7.2
+ARG DOCKER_VERSION=29.8.0
 # renovate: datasource=github-releases depName=docker/buildx
 ARG BUILDX_VERSION=v0.37.0
 RUN ARCH=$(dpkg --print-architecture) \
