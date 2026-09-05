@@ -13,7 +13,7 @@ metadata:
   # Version suffix: bump on ANY nginx.conf edit — the Deployment
   # references the versioned name, so the bump is what rolls the pod
   # (GitOps engines never restart pods on in-place ConfigMap changes).
-  name: nix-cache-nginx-v1
+  name: nix-cache-nginx-v2
   labels:
     app.kubernetes.io/name: nix-cache
     app.kubernetes.io/part-of: ci-cache
@@ -48,6 +48,20 @@ data:
         listen 8080;
 
         location = /healthz { return 200; }
+
+        # Advertise a BETTER priority than the upstream we proxy.
+        # Nix chooses a substituter by the Priority in its
+        # nix-cache-info (LOWER wins), not by the order they appear in
+        # `substituters`. Proxying upstream's own nix-cache-info
+        # returned Priority 40 -- a tie with cache.nixos.org, which nix
+        # broke toward upstream. This cache therefore served almost
+        # nothing while runners pulled ~155 GB/day straight from Fastly
+        # (INF-621). StoreDir MUST match the upstream's or nix rejects
+        # the substituter outright.
+        location = /nix-cache-info {
+          default_type text/x-nix-cache-info;
+          return 200 "StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 10\n";
+        }
 
         location / {
           set $upstream https://{{ $n.upstream }};
@@ -159,7 +173,7 @@ spec:
       volumes:
         - name: conf
           configMap:
-            name: nix-cache-nginx-v1
+            name: nix-cache-nginx-v2
         - name: data
           persistentVolumeClaim:
             claimName: nix-cache-data
