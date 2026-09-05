@@ -128,11 +128,21 @@ ENV USER=runner \
 # in-image shape). Substituters: the in-cluster read-through cache of
 # cache.nixos.org first (nginx, ci-cache namespace — see gitops
 # arc-nix-cache.yaml), then nix's default upstream as automatic
-# fallback: cache down = slower, never broken. The S3 push cache is
-# retired with this — and with it the require-sigs=false it forced:
-# everything now originates upstream, whose narinfo signatures pass
-# through the proxy intact and verify against nix's default trusted
-# key.
+# fallback: cache down = slower, never broken.
+#
+# `substituters`, NOT `extra-substituters`: the extra- form APPENDS to
+# nix's default (cache.nixos.org), so the list read upstream-first and
+# the cache was never chosen — runners pulled ~155 GB/day straight
+# from Fastly while the nginx cache sat idle (INF-621). Naming the
+# full list is what puts the cache first. Order alone is not enough
+# either: nix ranks substituters by the Priority in each
+# nix-cache-info, so the proxy also advertises Priority 10 against
+# upstream's 40 (ci-cache chart).
+#
+# The S3 push cache is retired with this — and with it the
+# require-sigs=false it forced: everything now originates upstream,
+# whose narinfo signatures pass through the proxy intact and verify
+# against nix's default trusted key.
 # filter-syscalls off FOR THE BUILD ONLY: the arm64 half runs under
 # QEMU user emulation, where nix's seccomp BPF load fails ("Invalid
 # argument"); real arm64 hardware at runtime is unaffected and the
@@ -142,7 +152,7 @@ RUN NIX_CONFIG="filter-syscalls = false" \
  && mkdir -p /home/runner/.config/nix \
  && printf '%s\n' \
       'experimental-features = nix-command flakes' \
-      'extra-substituters = http://nix-cache.ci-cache.svc.cluster.local' \
+      'substituters = http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/' \
       > /home/runner/.config/nix/nix.conf
 
 ENV PATH="/home/runner/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
