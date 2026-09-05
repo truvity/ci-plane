@@ -11,7 +11,14 @@ upstream chart creates. The values-hash annotation changes whenever
 this set's rendered inputs change, which is what prompts the
 controller to recycle the listener — same mechanism as upstream.
 */}}
-{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" ($p.minRunners | default $root.Values.minRunners) "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl }}
+{{- /* hasKey, NOT `| default`: sprig's default treats 0 as empty, so a
+     profile asking for minRunners 0 (a deliberately COLD set) silently
+     rendered as the chart default 1 — the same bool-false trap that bit
+     renderFleet. maxRunners keeps `default` because 0 there is
+     meaningless (a set that can never run a job). */}}
+{{- $min := $root.Values.minRunners }}
+{{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
+{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -37,7 +44,7 @@ spec:
   githubConfigUrl: {{ $root.Values.githubConfigUrl }}
   githubConfigSecret: {{ $root.Values.githubConfigSecret }}
   runnerGroup: {{ $root.Values.runnerGroup }}
-  minRunners: {{ $p.minRunners | default $root.Values.minRunners }}
+  minRunners: {{ $min }}
   maxRunners: {{ $p.maxRunners | default $root.Values.maxRunners }}
   listenerTemplate:
     spec:
