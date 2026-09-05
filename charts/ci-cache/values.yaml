@@ -44,17 +44,34 @@ buildkitd:
   cacheSize: 50Gi
   resources:
     # No CPU limit: builds burst to whatever the node has free; the
-    # request is scheduling headroom only. Right-sized 2026-08-27
-    # (idle ~58Mi, cache on the PVC not in memory): a 1.5Gi request
-    # fits a .medium node — on a dedicated build pool the request IS
-    # the node bill. The 3Gi limit matches a medium's allocatable; a
-    # limit above node capacity is headroom that cannot exist.
+    # request is scheduling headroom only.
+    #
+    # Sized from an OBSERVED build peak, not from idle. The 2026-08-27
+    # sizing (500m/1.5Gi request, 3Gi limit) read idle RSS at ~58Mi and
+    # assumed the layer cache stayed on the PVC. Both premises are
+    # false in service: a builder holds its cache index in memory
+    # (arm64 measured at 2085Mi with the PVC 77% full), and on a
+    # DEDICATED pool Karpenter sizes the node from the REQUEST -- so
+    # 1.5Gi bought a .medium, whose 3.17Gi allocatable the 3Gi limit
+    # then claimed in full. A pod permitted to reach the node's whole
+    # allocatable is not a pod with headroom; it is the guaranteed OOM
+    # victim.
+    #
+    # What that cost: buildkitd-amd64 OOMKilled (exit 137) partway
+    # through a JS image build, every time. A dead server reaches the
+    # client as "rpc error: code = Unavailable ... EOF", so the symptom
+    # names the connection and not the memory -- it read as a network
+    # fault for a day (2026-09-05, dms#7).
+    #
+    # 4Gi of request moves the pod onto a .large (8Gi raw, ~7.1Gi
+    # allocatable) with no change to the estate's pool categories, and
+    # the 6Gi limit leaves ~1Gi for kubelet and the system daemons.
     requests:
-      cpu: 500m
-      memory: 1536Mi
+      cpu: 1000m
+      memory: 4Gi
       ephemeral-storage: 2Gi
     limits:
-      memory: 3Gi
+      memory: 6Gi
       ephemeral-storage: 10Gi
   networkPolicy:
     # Only listed namespaces may reach the builders. Restrictive by
