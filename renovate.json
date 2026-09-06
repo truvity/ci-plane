@@ -1,13 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended",
-    "helpers:pinGitHubActionDigests"
+    "github>truvity/ci-workflows"
   ],
   "osvVulnerabilityAlerts": true,
-  "labels": [
-    "dependencies"
-  ],
   "automerge": true,
   "automergeType": "pr",
   "automergeStrategy": "rebase",
@@ -15,7 +11,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Version ARGs in the Dockerfile, each annotated with a `# renovate:` line directly above it \u2014 a pin without one is invisible.",
+      "description": "Version ARGs in the Dockerfile, each annotated with a `# renovate:` line directly above it — a pin without one is invisible.",
       "managerFilePatterns": [
         "/^image/Dockerfile$/"
       ],
