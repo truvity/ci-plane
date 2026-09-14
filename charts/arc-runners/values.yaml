@@ -54,6 +54,24 @@ maxRunners: 8
 
 runnerGroup: Default
 
+# Runtime Nix transfer policy for every ephemeral runner. Rendered as
+# a content-addressed ConfigMap and exposed through NIX_CONFIG, which
+# overrides only the keys named here; the image's nix.conf continues
+# to own the substituter list (INF-621).
+#
+# Nix 2.35 retries most 5xx responses, including 504, but its 100ms
+# default base delay exhausts five attempts inside a few seconds. This
+# curve (full jitter, 60s ceiling) spans transient CDN failures without
+# making all cold runners retry in lockstep.
+nixConfig: |
+  filetransfer-retry-attempts = 8
+  filetransfer-retry-delay = 5000
+  filetransfer-retry-delay-rate-limited = 10000
+  filetransfer-retry-max-delay = 60000
+  filetransfer-retry-jitter = true
+  connect-timeout = 30
+  stalled-download-timeout = 300
+
 # Runner pod scheduling. The tolerations are no-ops on untainted
 # clusters; estates with tainted worker/CI pools get the doctrine for
 # free. nodeSelector is estate-specific (e.g. a dedicated CI pool).

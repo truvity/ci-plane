@@ -1,0 +1,14 @@
+{{- if .Values.nixConfig }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arc-runners.nixConfigName" . }}
+  labels:
+    app.kubernetes.io/name: runner-nix-config
+    app.kubernetes.io/part-of: gha-rs
+data:
+  nix.conf: |
+    {{- .Values.nixConfig | nindent 4 }}
+immutable: true
+{{- end }}

@@ -13,7 +13,7 @@ metadata:
   # Version suffix: bump on ANY nginx.conf edit — the Deployment
   # references the versioned name, so the bump is what rolls the pod
   # (GitOps engines never restart pods on in-place ConfigMap changes).
-  name: nix-cache-nginx-v2
+  name: nix-cache-nginx-v3
   labels:
     app.kubernetes.io/name: nix-cache
     app.kubernetes.io/part-of: ci-cache
@@ -38,11 +38,15 @@ data:
       proxy_cache_path /cache/nix levels=1:2 keys_zone=nix:64m
                        max_size={{ $n.maxSize }} inactive=90d use_temp_path=off;
 
-      # The upstream sits behind a CDN whose IPs rotate. A static
-      # proxy_pass hostname is resolved ONCE at config load and never
-      # again. The variable form forces per-request resolution through
-      # the cluster DNS, re-resolved every 300s.
+      # Resolve the CDN continuously and expose every current address
+      # as an upstream peer. This keeps DNS rotation (the variable
+      # proxy_pass used by v2) while also giving proxy_next_upstream a
+      # different peer to try after a connection error or retryable 5xx.
       resolver {{ $n.resolver }} valid=300s ipv6=off;
+      upstream nixos_cache {
+        zone nixos_cache 64k;
+        server {{ $n.upstream }}:443 resolve;
+      }
 
       server {
         listen 8080;
@@ -64,13 +68,27 @@ data:
         }
 
         location / {
-          set $upstream https://{{ $n.upstream }};
-          proxy_pass $upstream;
+          proxy_pass https://nixos_cache;
           proxy_set_header Host {{ $n.upstream }};
           proxy_ssl_server_name on;
           proxy_ssl_name {{ $n.upstream }};
           proxy_http_version 1.1;
           proxy_set_header Connection "";
+
+          # Bound each network phase independently. A healthy CDN
+          # stream should never go a minute without a byte; failing
+          # there leaves enough of the four-minute aggregate budget to
+          # try the other resolved peers.
+          proxy_connect_timeout 30s;
+          proxy_send_timeout 1m;
+          proxy_read_timeout 1m;
+          # Retry an idempotent cache GET against another resolved CDN
+          # peer. OSS nginx has no delayed backoff; Nix supplies that
+          # outer retry curve through the runner NIX_CONFIG.
+          proxy_next_upstream error timeout invalid_header
+                              http_500 http_502 http_503 http_504;
+          proxy_next_upstream_tries 4;
+          proxy_next_upstream_timeout 4m;
 
           proxy_cache nix;
           proxy_cache_key $uri;
@@ -82,12 +100,21 @@ data:
           proxy_cache_valid 200 90d;
           proxy_cache_valid 404 5m;
           # Collapse a cold fleet's concurrent misses for the same
-          # path into ONE upstream fetch.
+          # path into ONE upstream fetch in the normal case. A waiter
+          # falls through after four minutes—before Nix's five-minute
+          # idle timeout—while lock_age prevents another request from
+          # taking over cache population for ten minutes.
           proxy_cache_lock on;
-          proxy_cache_lock_timeout 30s;
-          # A dead or slow upstream serves stale rather than erroring.
-          proxy_cache_use_stale error timeout updating;
-          add_header X-Cache $upstream_cache_status;
+          proxy_cache_lock_timeout 4m;
+          proxy_cache_lock_age 10m;
+          # Refresh an expired object in the background while clients
+          # receive the stale copy. Explicit HTTP statuses matter: an
+          # upstream-generated 504 is neither a transport `error` nor
+          # nginx's own `timeout`.
+          proxy_cache_background_update on;
+          proxy_cache_use_stale error timeout invalid_header updating
+                                http_500 http_502 http_503 http_504;
+          add_header X-Cache $upstream_cache_status always;
         }
       }
     }
@@ -173,7 +200,7 @@ spec:
       volumes:
         - name: conf
           configMap:
-            name: nix-cache-nginx-v2
+            name: nix-cache-nginx-v3
         - name: data
           persistentVolumeClaim:
             claimName: nix-cache-data
