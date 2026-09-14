@@ -18,7 +18,8 @@ controller to recycle the listener — same mechanism as upstream.
      meaningless (a set that can never run a job). */}}
 {{- $min := $root.Values.minRunners }}
 {{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
-{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl }}
+{{- $nixConfigName := include "arc-runners.nixConfigName" $root }}
+{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $root.Values.nixConfig }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -79,6 +80,13 @@ spec:
           env:
             - name: GOMAXPROCS
               value: {{ $p.gomaxprocs | quote }}
+            {{- with $root.Values.nixConfig }}
+            - name: NIX_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $nixConfigName }}
+                  key: nix.conf
+            {{- end }}
           resources:
             {{- toYaml $p.resources | nindent 12 }}
 ---
