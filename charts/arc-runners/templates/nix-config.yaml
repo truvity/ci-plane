@@ -1,4 +1,5 @@
-{{- if .Values.nixConfig }}
+{{- $payload := include "arc-runners.nixConfig" . }}
+{{- if $payload }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -8,7 +9,17 @@ metadata:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
 data:
-  nix.conf: |
-    {{- .Values.nixConfig | nindent 4 }}
+  nix.conf: |-
+    {{- $payload | nindent 4 }}
+  {{- if .Values.nixBuilders.enabled }}
+  machines.template: |-
+    {{- include "arc-runners.nixMachines" . | nindent 4 }}
+  ssh_config: |-
+    {{- include "arc-runners.nixSSHConfig" . | nindent 4 }}
+  openbao-ca.crt: |-
+    {{- .Values.nixBuilders.openbao.caBundle | b64dec | nindent 4 }}
+  ssh-client-ca.pub: |-
+    {{- join "\n" .Values.nixBuilders.openbao.sshCAPublicKeys | nindent 4 }}
+  {{- end }}
 immutable: true
 {{- end }}

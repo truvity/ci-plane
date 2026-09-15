@@ -1,4 +1,30 @@
 {{- if not .Values.githubConfigUrl }}{{ fail "githubConfigUrl is required" }}{{ end }}
+{{- if .Values.nixBuilders.enabled }}
+{{- if not .Values.runnerServiceAccountName }}{{ fail "runnerServiceAccountName is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.builders }}{{ fail "nixBuilders.builders is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.knownHosts.existingSecret }}{{ fail "nixBuilders.knownHosts.existingSecret is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.knownHosts.key }}{{ fail "nixBuilders.knownHosts.key is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.knownHosts.revision }}{{ fail "nixBuilders.knownHosts.revision is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.sshUser }}{{ fail "nixBuilders.sshUser is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.address }}{{ fail "nixBuilders.openbao.address is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.namespace }}{{ fail "nixBuilders.openbao.namespace is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.caBundle }}{{ fail "nixBuilders.openbao.caBundle is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.sshCAPublicKeys }}{{ fail "nixBuilders.openbao.sshCAPublicKeys is required when nixBuilders is enabled" }}{{ end }}
+{{- range $key := .Values.nixBuilders.openbao.sshCAPublicKeys }}{{ if not ($key | trim) }}{{ fail "nixBuilders.openbao.sshCAPublicKeys may not contain an empty key" }}{{ end }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.authMount }}{{ fail "nixBuilders.openbao.authMount is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.authRole }}{{ fail "nixBuilders.openbao.authRole is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.sshMount }}{{ fail "nixBuilders.openbao.sshMount is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.sshRole }}{{ fail "nixBuilders.openbao.sshRole is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.audience }}{{ fail "nixBuilders.openbao.audience is required when nixBuilders is enabled" }}{{ end }}
+{{- $tokenTTL := int .Values.nixBuilders.openbao.tokenExpirationSeconds }}
+{{- if or (lt $tokenTTL 600) (gt $tokenTTL 3600) }}{{ fail "nixBuilders.openbao.tokenExpirationSeconds must be between 600 and 3600" }}{{ end }}
+{{- range $i, $builder := .Values.nixBuilders.builders }}
+{{- if not $builder.host }}{{ fail (printf "nixBuilders.builders[%d].host is required" $i) }}{{ end }}
+{{- if not $builder.system }}{{ fail (printf "nixBuilders.builders[%d].system is required" $i) }}{{ end }}
+{{- if le (int $builder.maxJobs) 0 }}{{ fail (printf "nixBuilders.builders[%d].maxJobs must be positive" $i) }}{{ end }}
+{{- if le (int $builder.speedFactor) 0 }}{{ fail (printf "nixBuilders.builders[%d].speedFactor must be positive" $i) }}{{ end }}
+{{- end }}
+{{- end }}
 {{- $root := . }}
 {{- range $name, $p := .Values.scaleSets }}
 {{- /*
@@ -18,8 +44,9 @@ controller to recycle the listener — same mechanism as upstream.
      meaningless (a set that can never run a job). */}}
 {{- $min := $root.Values.minRunners }}
 {{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
+{{- $nixConfig := include "arc-runners.nixConfig" $root }}
 {{- $nixConfigName := include "arc-runners.nixConfigName" $root }}
-{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $root.Values.nixConfig }}
+{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $nixConfig "nixBuilders" $root.Values.nixBuilders }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -65,6 +92,9 @@ spec:
       {{- with $root.Values.runnerServiceAccountName }}
       serviceAccountName: {{ . }}
       {{- end }}
+      {{- if $root.Values.nixBuilders.enabled }}
+      automountServiceAccountToken: false
+      {{- end }}
       {{- with $root.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -73,6 +103,62 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $root.Values.nixBuilders.enabled }}
+      initContainers:
+        - name: prepare-nix-builder-ssh
+          image: {{ include "arc-runners.runnerImage" $root }}
+          command: ["/usr/local/bin/nix-worker-client-setup"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: NIX_BUILDER_OPENBAO_ADDRESS
+              value: {{ $root.Values.nixBuilders.openbao.address | quote }}
+            - name: NIX_BUILDER_OPENBAO_NAMESPACE
+              value: {{ $root.Values.nixBuilders.openbao.namespace | quote }}
+            - name: NIX_BUILDER_OPENBAO_AUTH_MOUNT
+              value: {{ $root.Values.nixBuilders.openbao.authMount | quote }}
+            - name: NIX_BUILDER_OPENBAO_AUTH_ROLE
+              value: {{ $root.Values.nixBuilders.openbao.authRole | quote }}
+            - name: NIX_BUILDER_OPENBAO_SSH_MOUNT
+              value: {{ $root.Values.nixBuilders.openbao.sshMount | quote }}
+            - name: NIX_BUILDER_OPENBAO_SSH_ROLE
+              value: {{ $root.Values.nixBuilders.openbao.sshRole | quote }}
+            - name: NIX_BUILDER_CERTIFICATE_TTL
+              value: {{ $root.Values.nixBuilders.openbao.certificateTTL | quote }}
+            - name: NIX_BUILDER_REQUEST_TIMEOUT
+              value: {{ $root.Values.nixBuilders.openbao.requestTimeout | quote }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
+            - name: nix-builder-config
+              mountPath: /var/run/nix-builder-config
+              readOnly: true
+            - name: nix-builder-openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: nix-builder-ssh
+              mountPath: /var/run/nix-builder-ssh
+            - name: nix-builders
+              mountPath: /var/run/nix-builders
+      {{- end }}
       containers:
         - name: runner
           image: {{ include "arc-runners.runnerImage" $root }}
@@ -80,7 +166,7 @@ spec:
           env:
             - name: GOMAXPROCS
               value: {{ $p.gomaxprocs | quote }}
-            {{- with $root.Values.nixConfig }}
+            {{- if $nixConfig }}
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
@@ -89,6 +175,49 @@ spec:
             {{- end }}
           resources:
             {{- toYaml $p.resources | nindent 12 }}
+          {{- if $root.Values.nixBuilders.enabled }}
+          volumeMounts:
+            - name: nix-builder-ssh
+              mountPath: /home/runner/.ssh
+              readOnly: true
+            - name: nix-builders
+              mountPath: /etc/nix-builders
+              readOnly: true
+          {{- end }}
+      {{- if $root.Values.nixBuilders.enabled }}
+      volumes:
+        - name: nix-builder-known-hosts
+          secret:
+            secretName: {{ $root.Values.nixBuilders.knownHosts.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ $root.Values.nixBuilders.knownHosts.key }}
+                path: known_hosts
+        - name: nix-builder-config
+          configMap:
+            name: {{ $nixConfigName }}
+            items:
+              - key: machines.template
+                path: machines.template
+              - key: ssh_config
+                path: ssh_config
+              - key: openbao-ca.crt
+                path: openbao-ca.crt
+              - key: ssh-client-ca.pub
+                path: ssh-client-ca.pub
+        - name: nix-builder-openbao-token
+          projected:
+            defaultMode: 0400
+            sources:
+              - serviceAccountToken:
+                  audience: {{ $root.Values.nixBuilders.openbao.audience | quote }}
+                  expirationSeconds: {{ $root.Values.nixBuilders.openbao.tokenExpirationSeconds }}
+                  path: token
+        - name: nix-builder-ssh
+          emptyDir: {}
+        - name: nix-builders
+          emptyDir: {}
+      {{- end }}
 ---
 # The controller's per-scale-set manager Role — mirrors the upstream
 # chart: the controller SA needs these in the runner namespace to run
