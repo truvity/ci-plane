@@ -1,0 +1,213 @@
+{{- if .Values.nixWorkers.enabled }}
+{{- $n := .Values.nixWorkers }}
+{{- if not $n.ssh.existingSecret }}{{ fail "nixWorkers.ssh.existingSecret is required when nixWorkers is enabled" }}{{ end }}
+{{- if not $n.ssh.hostPrivateKeyKey }}{{ fail "nixWorkers.ssh.hostPrivateKeyKey is required when nixWorkers is enabled" }}{{ end }}
+{{- if not $n.ssh.trustedUserCAKeys }}{{ fail "nixWorkers.ssh.trustedUserCAKeys is required when nixWorkers is enabled" }}{{ end }}
+{{- range $key := $n.ssh.trustedUserCAKeys }}{{ if not ($key | trim) }}{{ fail "nixWorkers.ssh.trustedUserCAKeys may not contain an empty key" }}{{ end }}{{ end }}
+{{- if not $n.archs }}{{ fail "nixWorkers.archs is required when nixWorkers is enabled" }}{{ end }}
+{{- if le (int $n.maxJobs) 0 }}{{ fail "nixWorkers.maxJobs must be positive" }}{{ end }}
+{{- if le (int $n.cores) 0 }}{{ fail "nixWorkers.cores must be positive" }}{{ end }}
+{{- $trustedCAs := join "\n" $n.ssh.trustedUserCAKeys }}
+{{- $caName := printf "nix-worker-trusted-user-ca-%s" ($trustedCAs | sha256sum | trunc 12) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $caName }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-cache
+data:
+  trusted_user_ca_keys: |-
+    {{- $trustedCAs | nindent 4 }}
+immutable: true
+{{- range $arch := $n.archs }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nix-worker-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-cache
+    ci-plane.io/arch: {{ $arch }}
+spec:
+  selector:
+    app.kubernetes.io/name: nix-worker
+    ci-plane.io/arch: {{ $arch }}
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: ssh
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nix-worker-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-cache
+    ci-plane.io/arch: {{ $arch }}
+spec:
+  serviceName: nix-worker-{{ $arch }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nix-worker
+      ci-plane.io/arch: {{ $arch }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nix-worker
+        app.kubernetes.io/part-of: ci-cache
+        ci-plane.io/arch: {{ $arch }}
+      {{- with $n.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- $sched := (index $n.scheduling $arch) | default dict }}
+      {{- if $sched.nodeSelector }}
+      nodeSelector:
+        {{- toYaml $sched.nodeSelector | nindent 8 }}
+      {{- else }}
+      nodeSelector:
+        kubernetes.io/arch: {{ $arch }}
+        {{- with $.Values.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- if $sched.tolerations }}
+      tolerations:
+        {{- toYaml $sched.tolerations | nindent 8 }}
+      {{- else }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+        - name: seed-store
+          image: {{ include "ci-cache.runnerImage" $ }}
+          command: ["/usr/local/bin/nix-worker-seed"]
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: store
+              mountPath: /seed/nix
+            - name: runtime
+              mountPath: /runtime
+      containers:
+        - name: nix-worker
+          image: {{ include "ci-cache.runnerImage" $ }}
+          command: ["/usr/bin/tini", "--", "/usr/local/bin/nix-worker-entrypoint"]
+          env:
+            - name: NIX_WORKER_MAX_JOBS
+              value: {{ $n.maxJobs | quote }}
+            - name: NIX_WORKER_CORES
+              value: {{ $n.cores | quote }}
+            - name: NIX_WORKER_MIN_FREE_BYTES
+              value: {{ $n.minFreeBytes | quote }}
+            - name: NIX_WORKER_MAX_FREE_BYTES
+              value: {{ $n.maxFreeBytes | quote }}
+          ports:
+            - name: ssh
+              containerPort: 2222
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            privileged: true
+            readOnlyRootFilesystem: true
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/nix-worker-healthcheck"]
+            failureThreshold: 60
+            periodSeconds: 2
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/nix-worker-healthcheck"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/nix-worker-healthcheck"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml $n.resources | nindent 12 }}
+          volumeMounts:
+            - name: store
+              mountPath: /nix
+            - name: runtime
+              mountPath: /run/nix-worker
+            - name: build
+              mountPath: /build
+            - name: tmp
+              mountPath: /tmp
+            - name: ssh
+              mountPath: /etc/nix-worker/ssh
+              readOnly: true
+            - name: trusted-user-ca
+              mountPath: /etc/nix-worker/ca
+              readOnly: true
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: build
+          emptyDir:
+            sizeLimit: {{ $n.buildDirSize }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: ssh
+          secret:
+            secretName: {{ $n.ssh.existingSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ $n.ssh.hostPrivateKeyKey }}
+                path: ssh_host_ed25519_key
+        - name: trusted-user-ca
+          configMap:
+            name: {{ $caName }}
+            defaultMode: 0444
+  volumeClaimTemplates:
+    - metadata:
+        name: store
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $.Values.storageClassName }}
+        resources:
+          requests:
+            storage: {{ $n.storeSize }}
+{{- if $n.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nix-worker-{{ $arch }}-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nix-worker
+      ci-plane.io/arch: {{ $arch }}
+  policyTypes: ["Ingress"]
+  {{- if $n.networkPolicy.consumerNamespaces }}
+  ingress:
+    - from:
+        {{- range $ns := $n.networkPolicy.consumerNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+        {{- end }}
+      ports:
+        - port: 2222
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

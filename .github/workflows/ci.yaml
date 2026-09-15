@@ -38,6 +38,9 @@ jobs:
             --set goModproxy.enabled=true \
             --set goModproxy.s3.bucket=example \
             --set goModproxy.s3.region=eu-central-1 \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-truvity,arc-runners-trustform}' \
             --set runnerImage.registry=example.ecr/github \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
@@ -45,8 +48,17 @@ jobs:
             --set githubConfigUrl=https://github.com/example \
             --set runnerServiceAccountName=preview-runner \
             --set nodeSelector."karpenter\.sh/nodepool"=ci \
+            --set nixBuilders.enabled=true \
+            --set nixBuilders.openbao.address=https://openbao.example \
+            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.caBundle=dGVzdA== \
+            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
+            --set nixBuilders.knownHosts.revision=test-v1 \
+            --set nixBuilders.openbao.authRole=nix-builder-example \
+            --set nixBuilders.openbao.sshRole=nix-builder-example \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
+          bash -n image/nix-worker-*.sh
           echo "charts OK"
 
   image:

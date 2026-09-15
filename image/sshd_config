@@ -1,0 +1,29 @@
+Port 2222
+ListenAddress 0.0.0.0
+AddressFamily any
+HostKey /etc/nix-worker/ssh/ssh_host_ed25519_key
+PidFile /run/nix-worker/sshd.pid
+AuthorizedKeysFile none
+TrustedUserCAKeys /etc/nix-worker/ca/trusted_user_ca_keys
+
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+UsePAM no
+AllowUsers nixremote
+StrictModes yes
+DisableForwarding yes
+
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+PermitTunnel no
+PermitTTY no
+X11Forwarding no
+PermitUserEnvironment no
+GatewayPorts no
+
+ForceCommand /usr/local/bin/nix-worker-ssh-command
+LogLevel VERBOSE

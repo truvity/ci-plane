@@ -102,7 +102,61 @@ survives builder replacement — expect one slower build cycle after a
 PVC reset, not breakage. The nix cache and module proxy degrade to
 upstream when down.
 
-### npm read-through (verdaccio)
+## Persistent Nix worker operations
+
+The workers are CI-only. Diagnose them from an in-cluster Job or a
+manually dispatched ARC workflow. Each private key is unique to one pod
+and never persisted in a Kubernetes Secret, but trusted workflow code can
+read and copy it from `/home/runner/.ssh`; namespace ingress and the
+72-hour certificate lifetime bound that accepted CI-only risk. A useful
+smoke builds one tiny derivation on each advertised
+system, repeats it to prove store reuse, rejects an arbitrary SSH
+command, and then makes OpenBao unavailable to prove local fallback.
+
+Each architecture owns a disposable persistent store. Deleting its PVC
+loses reuse but not source artifacts; the init container reseeds the Nix
+runtime closure and later CI jobs warm it again. Worker readiness checks
+the daemon socket, daemon PID, sshd PID, trusted client CA and local SSH
+port. An SSH connection is not sufficient proof: verify a remote
+derivation and copied-back output.
+
+### Signer outage and authorization failures
+
+Runner init writes an empty `/etc/nix-builders/machines` before contacting
+OpenBao. DNS, TLS, login or signing failure logs one warning, removes any
+staged key and exits successfully; the job then builds locally. A missing
+CA/config/known-hosts mount is a deployment error and correctly blocks
+init rather than silently weakening trust.
+
+The Truvity and TrustForm JWT roles are independently revocable. Removing
+one role or its sign-only policy prevents new certificates immediately,
+but already-issued certificates remain valid for at most 72 hours.
+Removing the shared CA public key from workers revokes both organizations
+immediately and is therefore a break-glass action.
+
+### SSH client-CA rotation
+
+Never replace the protected CA in place. Create a second protected signer
+mount (for example `ssh-client-signer-v2`) and export both public keys.
+Workers first roll to trust both; then runner configuration moves signing
+to v2. Recycle all warm runners or wait the old 72-hour maximum before
+removing the old public key. Only after a reviewed snapshot and explicit
+unprotect operation may the old mount be deleted.
+
+### Host-key rotation
+
+Host rotation is independent from the client CA and affects both
+organizations. It requires a maintenance window because sshd loads its
+host private key only at process start. First add the new host public key
+alongside the old one in both namespace-local `known_hosts` values,
+bump `nixBuilders.knownHosts.revision`, and verify ARC has recycled every
+warm runner before changing the server key. Then update the server host
+key, sync its Secret,
+and restart both worker StatefulSets. Smoke both organizations and
+architectures before removing the old `known_hosts` entries. Roll back by
+restoring the previous server key and restarting both StatefulSets.
+
+## npm read-through (verdaccio)
 
 Adoption is one line: ARC-pooled repos pass `node-cache: true` to the
 shared `check.yaml` (ci-workflows ≥ v2.13.0). The job probes

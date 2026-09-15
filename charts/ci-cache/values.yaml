@@ -92,6 +92,44 @@ buildkitd:
     arm64: {}
     amd64: {}
 
+nixWorkers:
+  # Persistent remote Nix builders, one native worker per architecture.
+  # Disabled by default because enabling requires a stable SSH host key
+  # in `ssh.existingSecret` and at least one OpenBao SSH client CA public
+  # key. Client private keys are ephemeral and never enter a Secret.
+  enabled: false
+  archs: [arm64, amd64]
+  ssh:
+    existingSecret: nix-builder-server
+    hostPrivateKeyKey: ssh_host_ed25519_key
+    trustedUserCAKeys: []
+  # Each architecture owns its store. The stores are deliberately not
+  # shared with BuildKit: independent capacity, GC and failure domains.
+  storeSize: 100Gi
+  buildDirSize: 40Gi
+  maxJobs: 2
+  cores: 4
+  minFreeBytes: "10737418240" # 10 GiB: start GC pressure handling
+  maxFreeBytes: "21474836480" # 20 GiB: GC back to this headroom
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+      ephemeral-storage: 10Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+      ephemeral-storage: 50Gi
+  networkPolicy:
+    enabled: true
+    consumerNamespaces:
+      - arc-runners-truvity
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+  scheduling:
+    arm64: {}
+    amd64: {}
+
 nixCache:
   # Transparent read-through cache of the nix upstream, consumed as an
   # ordinary HTTP SUBSTITUTER (not a forward proxy). Runners list this
