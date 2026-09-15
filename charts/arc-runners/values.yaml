@@ -72,6 +72,48 @@ nixConfig: |
   connect-timeout = 30
   stalled-download-timeout = 300
 
+# Optional persistent remote builders. Each runner pod creates an
+# ephemeral Ed25519 key and exchanges a narrowly projected ServiceAccount
+# JWT for a short-lived OpenBao SSH certificate. The estate supplies only
+# pinned host identity and OpenBao routing/CA data; no client private key
+# enters a Kubernetes Secret. If signing is unavailable, setup publishes
+# an empty machines file and ordinary local Nix builds remain enabled.
+nixBuilders:
+  enabled: false
+  sshUser: nixremote
+  knownHosts:
+    existingSecret: nix-builder-known-hosts
+    key: known_hosts
+    # Bump whenever Secret contents change; participates in the immutable
+    # ConfigMap and ARC values hashes, recycling warm runners deterministically.
+    revision: ""
+  openbao:
+    address: ""
+    namespace: ""
+    caBundle: "" # base64-encoded PEM of OpenBao's HTTPS issuer CA
+    sshCAPublicKeys: [] # one or more OpenSSH Ed25519 CA public keys
+    authMount: jwt-devel
+    authRole: ""
+    sshMount: ssh-client-signer
+    sshRole: ""
+    audience: openbao
+    tokenExpirationSeconds: 600
+    certificateTTL: 72h
+    requestTimeout: 15s
+  builders:
+    - host: nix-worker-amd64.ci-cache.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []
+    - host: nix-worker-arm64.ci-cache.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []
+
 # Runner pod scheduling. The tolerations are no-ops on untainted
 # clusters; estates with tainted worker/CI pools get the doctrine for
 # free. nodeSelector is estate-specific (e.g. a dedicated CI pool).

@@ -25,6 +25,20 @@ Order matters: caches before runners, controller before both charts.
 5. For the Go module proxy: an **S3 bucket** and pod-identity/IRSA
    wiring for its ServiceAccount, scoped to the cache prefix. Skip it
    (`goModproxy.enabled=false`, the default) if you have neither.
+6. For persistent Nix workers:
+   - `ci-cache/nix-builder-server`, delivered by the estate's secret
+     manager, containing the stable `ssh_host_ed25519_key` (and its
+     public half for operations);
+   - `<runner namespace>/nix-builder-known-hosts`, containing only
+     `known_hosts` for both worker Service FQDNs;
+   - an OpenBao SSH client-signer CA, company-specific JWT/signing roles,
+     and its public CA keys in `nixWorkers.ssh.trustedUserCAKeys`;
+   - a runner ServiceAccount exactly bound by the OpenBao JWT role.
+
+   Each runner generates its client key inside its own pod and receives a
+   short-lived certificate. No client private key or `authorized_keys`
+   Secret exists. Do not add engineer keys or expose worker Services
+   outside the cluster.
 
 ## Install the cache plane
 
@@ -32,13 +46,19 @@ Order matters: caches before runners, controller before both charts.
 helm install ci-cache oci://ghcr.io/truvity/charts/ci-cache \
   --version <X.Y.Z> -n ci-cache \
   --set buildkitd.networkPolicy.consumerNamespaces={arc-runners-<org>} \
-  # per-arch pool split, storage class, sizes, registry overrides as needed
+  --set nixWorkers.enabled=true \
+  --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 <CA-PUBLIC-BODY>' \
+  --set nixWorkers.networkPolicy.consumerNamespaces={arc-runners-<org>} \
+  # per-arch dedicated pool split, storage class, sizes, registry overrides as needed
 ```
 
 Key values (see the chart's values.yaml for the full annotated set):
 `buildkitd.archs`, `buildkitd.scheduling.<arch>` (nodeSelector +
 tolerations per arch, REPLACING the default when set),
-`storageClassName`, `nixCache.upstream`, `goModproxy.s3.*`.
+`nixWorkers.scheduling.<arch>`, `storageClassName`,
+`nixCache.upstream`, `goModproxy.s3.*`. A Nix worker is privileged so
+its daemon can create Linux sandboxes: enabling it without selecting a
+dedicated, tainted CI/build pool is not a supported production shape.
 
 ## Install the runner scale sets (one release per org)
 
@@ -47,7 +67,16 @@ helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
   --version <X.Y.Z> -n arc-runners-<org> \
   --set githubConfigUrl=https://github.com/<org> \
   --set arcVersion=<INSTALLED CONTROLLER VERSION> \
-  --set runnerServiceAccountName=<plumbing SA> \
+  --set nixBuilders.enabled=true \
+  --set nixBuilders.openbao.address=https://<OPENBAO-ENDPOINT> \
+  --set nixBuilders.openbao.namespace=<ENVIRONMENT> \
+  --set nixBuilders.openbao.caBundle=<BASE64-HTTPS-CA-PEM> \
+  --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 <CA-PUBLIC-BODY>' \
+  --set nixBuilders.knownHosts.revision=host-v1 \
+  --set nixBuilders.openbao.authMount=jwt-<CLUSTER> \
+  --set nixBuilders.openbao.authRole=<COMPANY-SIGNER-AUTH-ROLE> \
+  --set nixBuilders.openbao.sshRole=<COMPANY-SSH-ROLE> \
+  --set runnerServiceAccountName=<SIGNER-BOUND SA> \
   --set nodeSelector.<your CI pool label>=<value>
 ```
 

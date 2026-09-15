@@ -57,6 +57,16 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
  && cp "/go/bin/linux_${TARGETARCH}/go-cache-plugin" /out/ 2>/dev/null \
  || cp /go/bin/go-cache-plugin /out/
 
+# The OpenBao bootstrap is a static standard-library binary: JSON and TLS
+# handling are security boundaries, not shell parsing. It invokes only the
+# image's pinned OpenSSH client to create and inspect ephemeral keys.
+COPY nix-worker-client/ /src/nix-worker-client/
+RUN cd /src/nix-worker-client \
+ && go mod download \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags='-s -w' \
+      -o /out/nix-worker-client-setup .
+
 # ── the runner ──
 FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 ARG GORELEASER_VERSION
@@ -68,7 +78,7 @@ USER root
 # base ships without it.
 RUN ln -sf /bin/bash /bin/sh \
  && apt-get update -qq \
- && apt-get install -y -qq --no-install-recommends xz-utils \
+ && apt-get install -y -qq --no-install-recommends openssh-server tini xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # goreleaser-pro is deliberately ABSENT (INF-572): the Pro EULA's
@@ -78,6 +88,7 @@ RUN ln -sf /bin/bash /bin/sh \
 # callers via the install-goreleaser-pro input (ci-workflows v2.13.1).
 
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
+COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
 
 # docker client + buildx plugin (daemonless: CLIENT ONLY, builds go to
 # the shared rootless builders over --driver remote). Static binaries,
@@ -115,6 +126,28 @@ RUN ARCH=$(dpkg --print-architecture) \
  && tar -xz -C /usr/local/bin -f /tmp/devbox.tgz devbox \
  && rm /tmp/devbox.tgz \
  && devbox version
+
+# The same manifest also serves dedicated Nix workers when Kubernetes
+# overrides the command. ARC keeps the upstream runner command and user.
+# Worker-only packages and accounts are inert in ordinary job pods.
+RUN groupadd --system nixbld \
+ && for i in $(seq 1 32); do \
+      useradd --system --gid nixbld --home-dir /var/empty \
+        --shell /usr/sbin/nologin "nixbld${i}"; \
+    done \
+ && nixbld_members=$(for i in $(seq 1 32); do printf 'nixbld%s,' "$i"; done) \
+ && gpasswd -M "${nixbld_members%,}" nixbld \
+ && useradd --system --create-home --home-dir /home/nixremote \
+      --shell /bin/bash nixremote \
+ && passwd -d nixremote \
+ && mkdir -p /etc/nix-worker /run/sshd \
+ && chmod 0755 /run/sshd
+
+COPY --chmod=0755 nix-worker-seed.sh /usr/local/bin/nix-worker-seed
+COPY --chmod=0755 nix-worker-entrypoint.sh /usr/local/bin/nix-worker-entrypoint
+COPY --chmod=0755 nix-worker-ssh-command.sh /usr/local/bin/nix-worker-ssh-command
+COPY --chmod=0755 nix-worker-healthcheck.sh /usr/local/bin/nix-worker-healthcheck
+COPY --chmod=0644 sshd_config /etc/nix-worker/sshd_config
 
 USER runner
 # Docker's USER directive sets the uid, not the environment — nix's
@@ -154,5 +187,16 @@ RUN NIX_CONFIG="filter-syscalls = false" \
       'experimental-features = nix-command flakes' \
       'substituters = http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/' \
       > /home/runner/.config/nix/nix.conf
+
+# The worker mounts its PVC at /nix, hiding the profile links created by
+# the installer. Preserve multicall aliases outside /nix; their targets
+# are in the Nix closure seeded onto each worker PVC.
+USER root
+RUN mkdir -p /usr/local/libexec/nix-worker \
+ && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-daemon)" \
+      /usr/local/libexec/nix-worker/nix-daemon \
+ && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-store)" \
+      /usr/local/libexec/nix-worker/nix-store
+USER runner
 
 ENV PATH="/home/runner/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
