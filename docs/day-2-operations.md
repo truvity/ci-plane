@@ -22,16 +22,30 @@ With renovate automerging pin bumps on master, the weekly
 `auto-release` workflow can cut the patch tag itself. It is doubly
 guarded and dark by default; enabling it takes:
 
-1. the CI automation App's credentials on this repo
-   (`CI_AUTOMATION_APP_ID` variable + `CI_AUTOMATION_PRIVATE_KEY`
-   secret — at Truvity, set from the SSM mirror of the 1Password item);
+1. a way for the job to get the CI automation App's token. This repo
+   uses the keyless one: `auto-release.yaml` exchanges the run's own
+   GitHub OIDC identity at the access-roster issuer for an installation
+   token of the catalogue App (`token-source: access-roster`,
+   `github-app: truvity-ci-automation`), so what has to be in place is
+   `vars.ACCESS_ROSTER_ISSUER` and an issuer grant covering this
+   repository's auto-release job. **No App private key lives on this
+   repo**: the `CI_AUTOMATION_PRIVATE_KEY` secret was deleted on
+   2026-09-18 when the exchange went live, and the
+   `CI_AUTOMATION_APP_ID` variable that outlived it is read by nothing.
+   Do not recreate either — an empty exchange is a configuration fix at
+   the issuer, never a new key here. (The shared workflow still offers
+   the classic `app-key` source, App id variable + private-key secret,
+   for callers with no issuer to exchange against.)
 2. the App as a bypass actor on the `v*` tag ruleset;
 3. `gh variable set AUTO_RELEASE --body true`.
 
 Why an App and not the built-in token: an App-pushed tag *triggers* the
 Release workflow (a `GITHUB_TOKEN` push is inert), and the tagging
 privilege stays one named, revocable actor instead of "every workflow
-in the repo".
+in the repo". Why an exchange and not the App's key: the token is
+minted per run and narrowed to this repository, so there is nothing
+stored to rotate or leak, and taking the privilege away is a grant edit
+at the issuer rather than a secret deletion in every repo that tags.
 
 ## Consumer-side promotion (the Truvity wiring, reusable anywhere)
 
