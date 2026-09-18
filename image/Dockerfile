@@ -120,7 +120,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # refuses even for root) and downloads an arch-opaque URL — useless
 # under a QEMU multi-arch build.
 # renovate: datasource=github-releases depName=jetify-com/devbox
-ARG DEVBOX_VERSION=0.18.1
+ARG DEVBOX_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) \
  && curl -fsSL -o /tmp/devbox.tgz "https://github.com/jetify-com/devbox/releases/download/${DEVBOX_VERSION}/devbox_${DEVBOX_VERSION}_linux_${ARCH}.tar.gz" \
  && tar -xz -C /usr/local/bin -f /tmp/devbox.tgz devbox \
