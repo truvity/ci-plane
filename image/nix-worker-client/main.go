@@ -17,6 +17,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,17 @@ import (
 const (
 	maxResponseBytes = 1 << 20
 	workerPrincipal  = "nixremote"
+
+	// The signing role caps certificates at one hour, so asking for more
+	// is a configuration error, never a silently truncated certificate.
+	defaultCertificateTTL = time.Hour
+	minCertificateTTL     = 5 * time.Minute
+	maxCertificateTTL     = time.Hour
+
+	// permitPTY is the one extension a certificate may carry: the signing
+	// role always adds it. It is inert on the workers (sshd PermitTTY no);
+	// any other extension or any critical option is refused.
+	permitPTY = "permit-pty"
 )
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -120,12 +132,12 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	cfg.certificateTTL = envOr("NIX_BUILDER_CERTIFICATE_TTL", "72h")
-	ttl, err := time.ParseDuration(cfg.certificateTTL)
-	if err != nil || ttl < time.Hour || ttl > 7*24*time.Hour {
-		return cfg, errors.New("NIX_BUILDER_CERTIFICATE_TTL must be between 1h and 168h")
+	ttl, err := parseCertificateTTL(os.Getenv("NIX_BUILDER_CERTIFICATE_TTL"))
+	if err != nil {
+		return cfg, err
 	}
 	cfg.certificateDuration = ttl
+	cfg.certificateTTL = fmt.Sprintf("%ds", int64(ttl/time.Second))
 
 	cfg.timeout, err = time.ParseDuration(envOr("NIX_BUILDER_REQUEST_TIMEOUT", "15s"))
 	if err != nil || cfg.timeout < time.Second || cfg.timeout > time.Minute {
@@ -134,7 +146,7 @@ func loadConfig() (config, error) {
 
 	cfg.tokenFile = envOr("NIX_BUILDER_TOKEN_FILE", "/var/run/secrets/openbao/token")
 	cfg.caFile = envOr("NIX_BUILDER_OPENBAO_CA_FILE", "/var/run/nix-builder-config/openbao-ca.crt")
-	cfg.sshCAFile = envOr("NIX_BUILDER_SSH_CA_FILE", "/var/run/nix-builder-config/ssh-client-ca.pub")
+	cfg.sshCAFile = envOr("NIX_BUILDER_SSH_CA_FILE", "/var/run/nix-builder-config/ssh-user-ca.pub")
 	cfg.knownHostsSource = envOr("NIX_BUILDER_KNOWN_HOSTS_FILE", "/var/run/nix-builder-known-hosts/known_hosts")
 	cfg.sshConfigSource = envOr("NIX_BUILDER_SSH_CONFIG_FILE", "/var/run/nix-builder-config/ssh_config")
 	cfg.machinesSource = envOr("NIX_BUILDER_MACHINES_TEMPLATE", "/var/run/nix-builder-config/machines.template")
@@ -204,7 +216,7 @@ func prepareOutputs(cfg config) error {
 		return errors.New("OpenBao CA bundle contains no PEM certificate")
 	}
 	if _, err := readSSHAuthorities(cfg.sshCAFile); err != nil {
-		return fmt.Errorf("read SSH client CA: %w", err)
+		return fmt.Errorf("read SSH user CA: %w", err)
 	}
 
 	return nil
@@ -230,7 +242,7 @@ func configureRemote(cfg config) error {
 	}
 	authorities, err := readSSHAuthorities(cfg.sshCAFile)
 	if err != nil {
-		return fmt.Errorf("read SSH client CA: %w", err)
+		return fmt.Errorf("read SSH user CA: %w", err)
 	}
 
 	client := &http.Client{
@@ -355,9 +367,26 @@ func readSSHAuthorities(path string) ([]ssh.PublicKey, error) {
 		data = rest
 	}
 	if len(authorities) == 0 {
-		return nil, errors.New("SSH client CA file contains no public key")
+		return nil, errors.New("SSH user CA file contains no public key")
 	}
 	return authorities, nil
+}
+
+// parseCertificateTTL returns the requested certificate lifetime: 1h when
+// unset, and an error outside 5m..1h.
+func parseCertificateTTL(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultCertificateTTL, nil
+	}
+	ttl, err := time.ParseDuration(value)
+	if err != nil || ttl < minCertificateTTL || ttl > maxCertificateTTL {
+		return 0, fmt.Errorf("NIX_BUILDER_CERTIFICATE_TTL %q must be between %s and %s (the signing role's ceiling)", value, minCertificateTTL, maxCertificateTTL)
+	}
+	if ttl%time.Second != 0 {
+		return 0, fmt.Errorf("NIX_BUILDER_CERTIFICATE_TTL %q must be a whole number of seconds", value)
+	}
+	return ttl, nil
 }
 
 func validateCertificate(certData, publicKeyData []byte, authorities []ssh.PublicKey, principal string, requestedTTL time.Duration) error {
@@ -380,8 +409,13 @@ func validateCertificate(certData, publicKeyData []byte, authorities []ssh.Publi
 	if len(cert.ValidPrincipals) != 1 || cert.ValidPrincipals[0] != principal {
 		return fmt.Errorf("certificate principals are %v, want only %s", cert.ValidPrincipals, principal)
 	}
-	if len(cert.CriticalOptions) != 0 || len(cert.Extensions) != 0 {
-		return errors.New("certificate carries unexpected critical options or extensions")
+	if len(cert.CriticalOptions) != 0 {
+		return fmt.Errorf("certificate carries critical options %v; want none", sortedKeys(cert.CriticalOptions))
+	}
+	for name, value := range cert.Extensions {
+		if name != permitPTY || value != "" {
+			return fmt.Errorf("certificate carries extensions %v; only %s is accepted", sortedKeys(cert.Extensions), permitPTY)
+		}
 	}
 
 	trustedAuthority := false
@@ -412,6 +446,15 @@ func validateCertificate(certData, publicKeyData []byte, authorities []ssh.Publi
 		return fmt.Errorf("certificate remaining lifetime %s exceeds requested TTL %s", remaining.Round(time.Second), requestedTTL)
 	}
 	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func postJSON(ctx context.Context, client *http.Client, cfg config, endpoint, token string, payload any, target any) error {

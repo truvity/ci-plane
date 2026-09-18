@@ -74,10 +74,14 @@ nixConfig: |
 
 # Optional persistent remote builders. Each runner pod creates an
 # ephemeral Ed25519 key and exchanges a narrowly projected ServiceAccount
-# JWT for a short-lived OpenBao SSH certificate. The estate supplies only
-# pinned host identity and OpenBao routing/CA data; no client private key
-# enters a Kubernetes Secret. If signing is unavailable, setup publishes
-# an empty machines file and ordinary local Nix builds remain enabled.
+# JWT for a short-lived OpenBao SSH user certificate. The estate supplies
+# only pinned host identity and OpenBao routing/CA data; no client private
+# key enters a Kubernetes Secret. If signing is unavailable, setup
+# publishes an empty machines file and ordinary local Nix builds remain.
+#
+# Signing is PER JOB: the init container signs for a cold pod, and an
+# ACTIONS_RUNNER_HOOK_JOB_STARTED script signs again when the job starts,
+# because a certificate lives at most one hour and a warm pod idles longer.
 nixBuilders:
   enabled: false
   sshUser: nixremote
@@ -91,14 +95,20 @@ nixBuilders:
     address: ""
     namespace: ""
     caBundle: "" # base64-encoded PEM of OpenBao's HTTPS issuer CA
-    sshCAPublicKeys: [] # one or more OpenSSH Ed25519 CA public keys
-    authMount: jwt-devel
-    authRole: ""
-    sshMount: ssh-client-signer
-    sshRole: ""
+    # One or more OpenSSH Ed25519 public keys of the SSH user CA that signs
+    # (the same keys the workers trust as nixWorkers.ssh.trustedUserCAKeys).
+    sshCAPublicKeys: []
+    # REQUIRED when enabled, no default: the auth mount the runner's
+    # projected ServiceAccount token logs in on (one per environment).
+    authMount: ""
+    authRole: "" # REQUIRED when enabled: the login role bound to runnerServiceAccountName
+    sshMount: ssh # the SSH secrets engine mount
+    sshRole: user # its signing role; must allow principal sshUser
     audience: openbao
     tokenExpirationSeconds: 600
-    certificateTTL: 72h
+    # 5m..1h. The signing role caps certificates at one hour; a value above
+    # that is a render error, never a silently truncated certificate.
+    certificateTTL: 1h
     requestTimeout: 15s
   builders:
     - host: nix-worker-amd64.ci-cache.svc.cluster.local

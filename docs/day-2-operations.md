@@ -106,10 +106,11 @@ upstream when down.
 
 The workers are CI-only. Diagnose them from an in-cluster Job or a
 manually dispatched ARC workflow. Each private key is unique to one pod
-and never persisted in a Kubernetes Secret, but trusted workflow code can
-read and copy it from `/home/runner/.ssh`; namespace ingress and the
-72-hour certificate lifetime bound that accepted CI-only risk. A useful
-smoke builds one tiny derivation on each advertised
+and never persisted in a Kubernetes Secret, but trusted workflow code
+can read and copy it from `/home/runner/.ssh`, and read the projected
+token the job-started hook signs with; namespace ingress, the one-hour
+certificate lifetime and the single-job pod bound that accepted CI-only
+risk. A useful smoke builds one tiny derivation on each advertised
 system, repeats it to prove store reuse, rejects an arbitrary SSH
 command, and then makes OpenBao unavailable to prove local fallback.
 
@@ -122,26 +123,31 @@ derivation and copied-back output.
 
 ### Signer outage and authorization failures
 
-Runner init writes an empty `/etc/nix-builders/machines` before contacting
-OpenBao. DNS, TLS, login or signing failure logs one warning, removes any
-staged key and exits successfully; the job then builds locally. A missing
-CA/config/known-hosts mount is a deployment error and correctly blocks
-init rather than silently weakening trust.
+Signing runs twice per runner: in the init container for a cold pod and
+in the `ACTIONS_RUNNER_HOOK_JOB_STARTED` script when the job starts. Both
+write an empty `/etc/nix-builders/machines` before contacting OpenBao.
+DNS, TLS, login or signing failure logs one warning, removes any staged
+key and exits successfully; the job then builds locally. In init, a
+missing CA/config/known-hosts mount is a deployment error and correctly
+blocks the pod rather than silently weakening trust. In the hook nothing
+fails the job: any error, including a crash or the two-minute timeout,
+empties the machines file and removes the key. The job log's
+"job started" hook step says which way it went (`remote builders
+enabled` or `Nix builds locally`).
 
-The Truvity and TrustForm JWT roles are independently revocable. Removing
-one role or its sign-only policy prevents new certificates immediately,
-but already-issued certificates remain valid for at most 72 hours.
-Removing the shared CA public key from workers revokes both organizations
-immediately and is therefore a break-glass action.
+Each organization's login role is independently revocable. Removing one
+role or its sign-only policy prevents new certificates immediately, but
+already-issued certificates remain valid for at most one hour. Removing
+the CA public key from workers revokes every organization immediately
+and is therefore a break-glass action.
 
-### SSH client-CA rotation
+### SSH user-CA rotation
 
-Never replace the protected CA in place. Create a second protected signer
-mount (for example `ssh-client-signer-v2`) and export both public keys.
-Workers first roll to trust both; then runner configuration moves signing
-to v2. Recycle all warm runners or wait the old 72-hour maximum before
-removing the old public key. Only after a reviewed snapshot and explicit
-unprotect operation may the old mount be deleted.
+Never replace the CA in place. Stand up the new CA (for example a second
+SSH mount) and export both public keys. Workers first roll to trust
+both; then runner configuration (`sshMount`, `sshCAPublicKeys`) moves
+signing to the new one. Recycle all warm runners or wait the one-hour
+maximum before removing the old public key from the workers.
 
 ### Host-key rotation
 
