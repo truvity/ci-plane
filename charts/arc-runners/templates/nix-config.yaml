@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
 data:
-  nix.conf: |-
+  nix.conf: |
     {{- $payload | nindent 4 }}
   {{- if .Values.nixBuilders.enabled }}
   machines.template: |-
@@ -18,8 +18,10 @@ data:
     {{- include "arc-runners.nixSSHConfig" . | nindent 4 }}
   openbao-ca.crt: |-
     {{- .Values.nixBuilders.openbao.caBundle | b64dec | nindent 4 }}
-  ssh-client-ca.pub: |-
+  ssh-user-ca.pub: |-
     {{- join "\n" .Values.nixBuilders.openbao.sshCAPublicKeys | nindent 4 }}
+  job-started.sh: |-
+    {{- include "arc-runners.nixJobStartedHook" . | nindent 4 }}
   {{- end }}
 immutable: true
 {{- end }}

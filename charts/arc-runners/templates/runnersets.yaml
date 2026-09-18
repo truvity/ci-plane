@@ -11,11 +11,18 @@
 {{- if not .Values.nixBuilders.openbao.caBundle }}{{ fail "nixBuilders.openbao.caBundle is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.sshCAPublicKeys }}{{ fail "nixBuilders.openbao.sshCAPublicKeys is required when nixBuilders is enabled" }}{{ end }}
 {{- range $key := .Values.nixBuilders.openbao.sshCAPublicKeys }}{{ if not ($key | trim) }}{{ fail "nixBuilders.openbao.sshCAPublicKeys may not contain an empty key" }}{{ end }}{{ end }}
-{{- if not .Values.nixBuilders.openbao.authMount }}{{ fail "nixBuilders.openbao.authMount is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.openbao.authMount }}{{ fail "nixBuilders.openbao.authMount is required when nixBuilders is enabled: the OpenBao JWT/Kubernetes auth mount the runners log in on (one per environment, e.g. jwt-<environment>); there is no default because a wrong mount fails every login silently into local builds" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.authRole }}{{ fail "nixBuilders.openbao.authRole is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.sshMount }}{{ fail "nixBuilders.openbao.sshMount is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.sshRole }}{{ fail "nixBuilders.openbao.sshRole is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.audience }}{{ fail "nixBuilders.openbao.audience is required when nixBuilders is enabled" }}{{ end }}
+{{- /* The certificate TTL is checked here AND in the setup binary: the
+     signing role caps certificates at one hour, and asking for more must
+     be a render error, not a silently truncated certificate. */}}
+{{- $certTTL := toString .Values.nixBuilders.openbao.certificateTTL }}
+{{- if not (regexMatch "^[0-9]+[smh]$" $certTTL) }}{{ fail (printf "nixBuilders.openbao.certificateTTL %q must be a whole number of s, m or h (e.g. 1h)" $certTTL) }}{{ end }}
+{{- $certSeconds := mul (int (regexFind "^[0-9]+" $certTTL)) (get (dict "s" 1 "m" 60 "h" 3600) (regexFind "[smh]$" $certTTL)) }}
+{{- if or (lt (int $certSeconds) 300) (gt (int $certSeconds) 3600) }}{{ fail (printf "nixBuilders.openbao.certificateTTL %q must be between 5m and 1h: the signing role caps certificates at one hour" $certTTL) }}{{ end }}
 {{- $tokenTTL := int .Values.nixBuilders.openbao.tokenExpirationSeconds }}
 {{- if or (lt $tokenTTL 600) (gt $tokenTTL 3600) }}{{ fail "nixBuilders.openbao.tokenExpirationSeconds must be between 600 and 3600" }}{{ end }}
 {{- range $i, $builder := .Values.nixBuilders.builders }}
@@ -46,7 +53,13 @@ controller to recycle the listener — same mechanism as upstream.
 {{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
 {{- $nixConfig := include "arc-runners.nixConfig" $root }}
 {{- $nixConfigName := include "arc-runners.nixConfigName" $root }}
-{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $nixConfig "nixBuilders" $root.Values.nixBuilders }}
+{{- /* Disabled, the hash input is exactly the pre-nixBuilders one, so a
+     release that only carries the (off) feature recycles no listener. */}}
+{{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $root.Values.nixConfig }}
+{{- if $root.Values.nixBuilders.enabled }}
+{{- $_ := set $spec "nixBuilders" $root.Values.nixBuilders }}
+{{- $_ := set $spec "nixConfigName" $nixConfigName }}
+{{- end }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -109,41 +122,20 @@ spec:
           image: {{ include "arc-runners.runnerImage" $root }}
           command: ["/usr/local/bin/nix-worker-client-setup"]
           env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: POD_UID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.uid
-            - name: NIX_BUILDER_OPENBAO_ADDRESS
-              value: {{ $root.Values.nixBuilders.openbao.address | quote }}
-            - name: NIX_BUILDER_OPENBAO_NAMESPACE
-              value: {{ $root.Values.nixBuilders.openbao.namespace | quote }}
-            - name: NIX_BUILDER_OPENBAO_AUTH_MOUNT
-              value: {{ $root.Values.nixBuilders.openbao.authMount | quote }}
-            - name: NIX_BUILDER_OPENBAO_AUTH_ROLE
-              value: {{ $root.Values.nixBuilders.openbao.authRole | quote }}
-            - name: NIX_BUILDER_OPENBAO_SSH_MOUNT
-              value: {{ $root.Values.nixBuilders.openbao.sshMount | quote }}
-            - name: NIX_BUILDER_OPENBAO_SSH_ROLE
-              value: {{ $root.Values.nixBuilders.openbao.sshRole | quote }}
-            - name: NIX_BUILDER_CERTIFICATE_TTL
-              value: {{ $root.Values.nixBuilders.openbao.certificateTTL | quote }}
-            - name: NIX_BUILDER_REQUEST_TIMEOUT
-              value: {{ $root.Values.nixBuilders.openbao.requestTimeout | quote }}
+            {{- include "arc-runners.nixBuilderEnv" $root | nindent 12 }}
           securityContext:
             runAsUser: 0
             runAsGroup: 0
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            # Root hands both emptyDirs (and every file it writes into
+            # them) to `runner`, which the job-started hook runs as: CHOWN
+            # for the handover, DAC_OVERRIDE to keep writing into the
+            # now runner-owned 0700 directory. Without either, init fails
+            # with EPERM/EACCES and the pod never starts.
             capabilities:
               drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE"]
           volumeMounts:
             - name: nix-builder-known-hosts
               mountPath: /var/run/nix-builder-known-hosts
@@ -173,16 +165,40 @@ spec:
                   name: {{ $nixConfigName }}
                   key: nix.conf
             {{- end }}
+            {{- if $root.Values.nixBuilders.enabled }}
+            # Per-job signing: the runner runs this hook as `runner` before
+            # the job's first step (see arc-runners.nixJobStartedHook). The
+            # init container's certificate covers only a job that starts
+            # within the hour; a warm pod outlives it.
+            - name: ACTIONS_RUNNER_HOOK_JOB_STARTED
+              value: /var/run/nix-builder-config/job-started.sh
+            - name: NIX_BUILDER_SSH_DIR
+              value: /home/runner/.ssh
+            - name: NIX_BUILDER_MACHINES_DIR
+              value: /etc/nix-builders
+            {{- include "arc-runners.nixBuilderEnv" $root | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml $p.resources | nindent 12 }}
           {{- if $root.Values.nixBuilders.enabled }}
+          # Writable by `runner` (the init container chowns both emptyDirs to
+          # it): the job-started hook replaces the key, certificate and
+          # machines file. The projected token is here for the same hook, so
+          # workflow code can read it too — see docs/architecture.md.
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
+            - name: nix-builder-config
+              mountPath: /var/run/nix-builder-config
+              readOnly: true
+            - name: nix-builder-openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
             - name: nix-builder-ssh
               mountPath: /home/runner/.ssh
-              readOnly: true
             - name: nix-builders
               mountPath: /etc/nix-builders
-              readOnly: true
           {{- end }}
       {{- if $root.Values.nixBuilders.enabled }}
       volumes:
@@ -203,11 +219,18 @@ spec:
                 path: ssh_config
               - key: openbao-ca.crt
                 path: openbao-ca.crt
-              - key: ssh-client-ca.pub
-                path: ssh-client-ca.pub
+              - key: ssh-user-ca.pub
+                path: ssh-user-ca.pub
+              - key: job-started.sh
+                path: job-started.sh
+                mode: 0555
+        # 0444: the runner container runs as `runner`, not root, and its
+        # job-started hook must read the token. The boundary is which
+        # containers mount it, not the mode: every process in the runner
+        # container is the job's own user.
         - name: nix-builder-openbao-token
           projected:
-            defaultMode: 0400
+            defaultMode: 0444
             sources:
               - serviceAccountToken:
                   audience: {{ $root.Values.nixBuilders.openbao.audience | quote }}

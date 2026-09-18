@@ -95,8 +95,10 @@ buildkitd:
 nixWorkers:
   # Persistent remote Nix builders, one native worker per architecture.
   # Disabled by default because enabling requires a stable SSH host key
-  # in `ssh.existingSecret` and at least one OpenBao SSH client CA public
-  # key. Client private keys are ephemeral and never enter a Secret.
+  # in `ssh.existingSecret` and at least one public key of the OpenBao SSH
+  # user CA the runners sign on (`ssh.trustedUserCAKeys`, the same keys as
+  # arc-runners' nixBuilders.openbao.sshCAPublicKeys). Client private keys
+  # are ephemeral and never enter a Secret.
   enabled: false
   archs: [arm64, amd64]
   ssh:

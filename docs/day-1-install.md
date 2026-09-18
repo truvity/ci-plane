@@ -31,9 +31,14 @@ Order matters: caches before runners, controller before both charts.
      public half for operations);
    - `<runner namespace>/nix-builder-known-hosts`, containing only
      `known_hosts` for both worker Service FQDNs;
-   - an OpenBao SSH client-signer CA, company-specific JWT/signing roles,
-     and its public CA keys in `nixWorkers.ssh.trustedUserCAKeys`;
-   - a runner ServiceAccount exactly bound by the OpenBao JWT role.
+   - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
+     signing role (default `user`) that allows the principal `nixremote`
+     and caps certificates at one hour; its public keys go to
+     `nixWorkers.ssh.trustedUserCAKeys` here and to
+     `nixBuilders.openbao.sshCAPublicKeys` in each runner release;
+   - per organization, an OpenBao JWT login role on the environment's
+     auth mount, bound exactly to the runner ServiceAccount, whose token
+     may only sign on that role.
 
    Each runner generates its client key inside its own pod and receives a
    short-lived certificate. No client private key or `authorized_keys`
@@ -73,9 +78,8 @@ helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
   --set nixBuilders.openbao.caBundle=<BASE64-HTTPS-CA-PEM> \
   --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 <CA-PUBLIC-BODY>' \
   --set nixBuilders.knownHosts.revision=host-v1 \
-  --set nixBuilders.openbao.authMount=jwt-<CLUSTER> \
-  --set nixBuilders.openbao.authRole=<COMPANY-SIGNER-AUTH-ROLE> \
-  --set nixBuilders.openbao.sshRole=<COMPANY-SSH-ROLE> \
+  --set nixBuilders.openbao.authMount=<JWT-AUTH-MOUNT> \
+  --set nixBuilders.openbao.authRole=<ORG-LOGIN-ROLE> \
   --set runnerServiceAccountName=<SIGNER-BOUND SA> \
   --set nodeSelector.<your CI pool label>=<value>
 ```

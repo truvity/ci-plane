@@ -93,23 +93,41 @@ commands; its force-command accepts only `nix-store --serve` and
 
 The estate supplies only a stable server host key in `ci-cache`, public
 `known_hosts` in each ARC namespace, the OpenBao HTTPS CA, and one or
-more public SSH client-CA keys. Client private keys never enter Helm,
-OpenBao KV, ESO or Kubernetes Secrets: each runner init generates an
-Ed25519 key in its pod-local `emptyDir`, exchanges a narrowly projected
-ServiceAccount JWT for a 72-hour OpenBao certificate, and publishes
-the remote machines file only after validating that certificate. The
-projected token is mounted only in init, never into workflow code.
+more public keys of the environment's SSH user CA (exported, for
+example, as `sshUserCaPublicKeys`; the workers trust the same keys).
+Client private keys never enter Helm, OpenBao KV, ESO or Kubernetes
+Secrets: the runner generates an Ed25519 key in its pod-local
+`emptyDir`, exchanges a narrowly projected ServiceAccount JWT for an
+OpenBao SSH user certificate of at most one hour, and publishes the
+remote machines file only after validating that certificate: the one
+principal, the expected CA, the generated key, the requested lifetime,
+no critical options and no extension except `permit-pty` (signing roles
+commonly add it; the workers' `PermitTTY no` makes it inert).
+
+**Signing is per job, not per pod.** One hour is the signing role's
+ceiling and a warm runner idles far longer, so a certificate signed when
+the pod started would be expired by the time its job runs. The init
+container signs for a cold pod; an `ACTIONS_RUNNER_HOOK_JOB_STARTED`
+script re-runs the same setup as `runner` before the job's first step.
+That is why the runner container mounts the projected token and why its
+`~/.ssh` and `/etc/nix-builders` are writable `emptyDir`s: workflow code
+can read the token and the key, and could sign certificates of its own
+for the life of its pod. Namespace-only worker ingress, the one-hour
+certificate and the ephemeral single-job pod are the boundary; the token
+carries only the SSH signing policy. A job that runs longer than the
+certificate keeps building locally once its remote connections need a
+fresh certificate.
 
 OpenBao/network/signing failure publishes an empty machines file and
-starts the runner normally, so local Nix remains the outage path. Stable
-host verification is mandatory and independent from client-certificate
-trust. NetworkPolicy admits only the listed runner namespaces. The
-worker has no service-account token, but egress remains available because
-fixed-output derivations must fetch sources; treat code admitted to this
-CI plane as trusted and keep the privileged workers on a dedicated,
-tainted build pool. Engineer keys, public ingress and workstation
-integration are intentionally absent: these workers are shared CI
-infrastructure, not developer machines.
+starts the runner (or the job) normally, so local Nix remains the outage
+path. Stable host verification is mandatory and independent from
+client-certificate trust. NetworkPolicy admits only the listed runner
+namespaces. The worker has no service-account token, but egress remains
+available because fixed-output derivations must fetch sources; treat
+code admitted to this CI plane as trusted and keep the privileged
+workers on a dedicated, tainted build pool. Engineer keys, public
+ingress and workstation integration are intentionally absent: these
+workers are shared CI infrastructure, not developer machines.
 
 ARC adds a machines file and `builders-use-substitutes`, but does not set
 `max-jobs = 0`; local execution remains the outage fallback. The shared

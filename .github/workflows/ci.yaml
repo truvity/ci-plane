@@ -40,7 +40,7 @@ jobs:
             --set goModproxy.s3.region=eu-central-1 \
             --set nixWorkers.enabled=true \
             --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
-            --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-truvity,arc-runners-trustform}' \
+            --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a,arc-runners-org-b}' \
             --set runnerImage.registry=example.ecr/github \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
@@ -54,12 +54,31 @@ jobs:
             --set nixBuilders.openbao.caBundle=dGVzdA== \
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
             --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authRole=nix-builder-example \
-            --set nixBuilders.openbao.sshRole=nix-builder-example \
+            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authRole=runner-example \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
           bash -n image/nix-worker-*.sh
           echo "charts OK"
+
+  # The OpenBao bootstrap's certificate policy (one principal, permit-pty
+  # only, no critical options, <= 1h) and its fail-open setup path.
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: image/nix-worker-client/go.mod
+          cache-dependency-path: image/nix-worker-client/go.sum
+      - name: Vet and test
+        working-directory: image/nix-worker-client
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 ./...
 
   image:
     runs-on: ubuntu-latest
@@ -72,9 +91,9 @@ jobs:
 
   # A stable name for branch protection to require.
   check:
-    needs: [charts, image]
+    needs: [charts, go, image]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: '[ "${{ needs.charts.result }}" = "success" ] && [ "${{ needs.image.result }}" = "success" ]'
+      - run: '[ "${{ needs.charts.result }}" = "success" ] && [ "${{ needs.go.result }}" = "success" ] && [ "${{ needs.image.result }}" = "success" ]'
