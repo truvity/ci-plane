@@ -22,9 +22,15 @@ Order matters: caches before runners, controller before both charts.
    hosting account, so image pulls are same-region and unthrottled. The
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
-5. For the Go module proxy: an **S3 bucket** and pod-identity/IRSA
-   wiring for its ServiceAccount, scoped to the cache prefix. Skip it
-   (`goModproxy.enabled=false`, the default) if you have neither.
+5. For the Go module proxy: an **object-store bucket** and a way for the
+   pod to reach it, scoped to the cache prefix. On AWS that is
+   pod-identity/IRSA wiring for its ServiceAccount. On an S3-compatible
+   store — Cloudflare R2, MinIO, Ceph — set `goModproxy.s3.endpoint`, and
+   supply keys through `goModproxy.s3.existingSecret` if the store has no
+   pod identity; `goModproxy.s3.pathStyle` if its certificate does not
+   cover a bucket subdomain. R2 wants `region: auto`, which also skips the
+   bucket-location lookup it does not serve. Skip the proxy entirely
+   (`goModproxy.enabled=false`, the default) if you have none of this.
 6. For persistent Nix workers:
    - `ci-cache/nix-builder-server`, delivered by the estate's secret
      manager, containing the stable `ssh_host_ed25519_key` (and its
