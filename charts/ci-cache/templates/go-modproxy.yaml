@@ -78,6 +78,24 @@ spec:
               value: {{ $g.s3.region | quote }}
             - name: GOCACHE_KEY_PREFIX
               value: {{ $g.s3.keyPrefix | quote }}
+            {{- with $g.s3.endpoint }}
+            # Only when set: an empty endpoint would be taken literally by
+            # the SDK rather than falling back to the AWS default.
+            - name: GOCACHE_S3_ENDPOINT_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $g.s3.pathStyle }}
+            - name: GOCACHE_S3_PATH_STYLE
+              value: "true"
+            {{- end }}
+          {{- with $g.s3.existingSecret }}
+          # A store with no pod identity supplies keys here. envFrom rather
+          # than named env so a session token is carried too, without the
+          # chart having to name every variable the SDK may read.
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 5970
