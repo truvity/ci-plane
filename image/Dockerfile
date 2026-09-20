@@ -11,9 +11,22 @@
 # per job from the repo's own devbox.json through the nix cache.
 # Repo-specific OR cluster-specific content in this image is a bug
 # (builder registration lives in workflows, not here). The one known
-# debt to that rule is the extra-substituters line near the bottom:
-# it names Truvity's in-cluster nix cache, harmless elsewhere (dead
-# substituter, upstream fallback) but Truvity-shaped.
+# debt to that rule is the substituters line near the bottom: it names
+# an in-cluster nix cache, which is cluster-shaped. It is a build ARG
+# (NIX_SUBSTITUTERS) so a fleet building its own image sets its own; the
+# default is unchanged.
+#
+# IT IS NOT FREE ON A CLUSTER WITHOUT THAT CACHE, which an earlier
+# version of this comment claimed ("harmless elsewhere"). If the name
+# does not resolve, nix retries before falling through -- measured on a
+# consumer cluster, eight attempts with the runners chart's backoff:
+#
+#   Could not resolve host: nix-cache.ci-cache.svc.cluster.local;
+#   retrying in 4281 ms (attempt 1/8) ... 11382 ... 36723 ... 58570
+#
+# Minutes per job, on every nix invocation. Consumers of the PUBLISHED
+# image override it without rebuilding: arc-runners delivers nixConfig
+# as NIX_CONFIG, which beats this file.
 #
 # Multi-arch: built as a manifest list (amd64 + arm64) by
 # .github/workflows/release.yaml on a v* tag; consumers pin by DIGEST
@@ -37,6 +50,13 @@
 # controller chart stream moves.
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
 ARG RUNNER_VERSION=2.337.0
+
+# The nix substituter list baked into the image. Default unchanged, so a
+# rebuild produces what it always did; a fleet whose cache lives
+# elsewhere overrides it here rather than patching the file. Name the
+# FULL list -- the `extra-` form appends to nix's default and the cache
+# is then never chosen (INF-621, 155 GB/day from upstream).
+ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
 # ── go-cache-plugin: built from source (upstream publishes no binary
 # releases). CROSS-compiled on the build platform: the previous form
@@ -180,12 +200,20 @@ ENV USER=runner \
 # QEMU user emulation, where nix's seccomp BPF load fails ("Invalid
 # argument"); real arm64 hardware at runtime is unaffected and the
 # baked nix.conf stays clean.
+# Re-declared INSIDE the stage: an ARG before the first FROM is global and
+# is NOT in scope in a build stage until named again. Without this line
+# ${NIX_SUBSTITUTERS} expands to empty and the image ships
+# `substituters = `, which is not a fallback to upstream -- it is NO
+# substituter at all, and every job builds the world from source. Same
+# pattern as ARG GORELEASER_VERSION after the FROM above. No default here,
+# so the value comes from the global ARG or the caller's --build-arg.
+ARG NIX_SUBSTITUTERS
 RUN NIX_CONFIG="filter-syscalls = false" \
     sh <(curl -fsSL https://nixos.org/nix/install) --no-daemon \
  && mkdir -p /home/runner/.config/nix \
  && printf '%s\n' \
       'experimental-features = nix-command flakes' \
-      'substituters = http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/' \
+      "substituters = ${NIX_SUBSTITUTERS}" \
       > /home/runner/.config/nix/nix.conf
 
 # The worker mounts its PVC at /nix, hiding the profile links created by

@@ -166,6 +166,25 @@ listenerTolerations:
 # The map key IS the identifier: k8s object name == GitHub scale-set
 # name == the workflow's `runs-on` label. Renaming one prunes the old
 # set and strands queued jobs — add alongside, never rename.
+# HELM MERGES MAPS, SO THESE THREE ARE INHERITED, NOT REPLACED. A caller
+# that adds a profile of its own gets FOUR scale sets, not one: these three
+# are sized for a cloud pool (24Gi, 14Gi, 6Gi), and on a smaller estate they
+# are admitted, never schedule, and each registers a runner label with the
+# organisation that nothing can satisfy.
+#
+# Delete the ones you do not want by setting them to null:
+#
+#   scaleSets:
+#     preview-large: null
+#     preview-medium: null
+#     preview-small: null
+#     my-profile: {...}
+#
+# And note WHERE you write that: Argo CD strips nulls out of
+# `helm.valuesObject`, so the deletion silently does not happen there. Use
+# `helm.values` (a string) or a values file. Truvity's own fleet and a
+# consumer estate hit this independently, which is why it is written down
+# rather than left to be rediscovered.
 scaleSets:
   preview-large:
     gomaxprocs: 4
