@@ -155,9 +155,22 @@ spec:
         - name: runner
           image: {{ include "arc-runners.runnerImage" $root }}
           command: ["/home/runner/run.sh"]
+          {{- with $root.Values.extraEnvFrom }}
+          # Credentials the runner needs that this chart must not know: an
+          # object store with no pod identity wants an access key, and the
+          # right place for it is a Secret in the cluster -- delivered by
+          # whatever the estate uses -- rather than a repository secret in
+          # GitHub. envFrom rather than named entries, so a provider that
+          # reads three variables needs no chart change to read a fourth.
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: GOMAXPROCS
               value: {{ $p.gomaxprocs | quote }}
+            {{- with $root.Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- if $nixConfig }}
             - name: NIX_CONFIG
               valueFrom:

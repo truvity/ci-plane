@@ -127,6 +127,32 @@ nixBuilders:
 # Runner pod scheduling. The tolerations are no-ops on untainted
 # clusters; estates with tainted worker/CI pools get the doctrine for
 # free. nodeSelector is estate-specific (e.g. a dedicated CI pool).
+# Extra environment for the RUNNER container, both empty by default so an
+# existing installation renders byte-identically.
+#
+# THE CASE THIS EXISTS FOR. The Go build cache (setup-devbox's GOCACHEPROG)
+# and the module proxy speak S3. On AWS the runner's own pod identity
+# answers and neither of these is needed. On an S3-COMPATIBLE store --
+# Cloudflare R2, MinIO, Ceph -- there is no pod identity and there was no
+# way to hand the runner a key at all, because every entry under `env:` was
+# hard-coded. The answer is a Secret in the cluster, put there by the
+# estate's own secret machinery, rather than a repository secret in GitHub:
+# the credential then never leaves the cluster and never appears in a
+# workflow file.
+#
+#   extraEnvFrom:
+#     - secretRef: {name: gocache-r2}
+#
+# envFrom rather than named entries, so a provider that reads three
+# variables needs no chart change to read a fourth.
+extraEnvFrom: []
+# For values that are not secret and not worth a Secret of their own.
+#
+#   extraEnv:
+#     - name: AWS_ENDPOINT_URL_S3
+#       value: https://<account>.r2.cloudflarestorage.com
+extraEnv: []
+
 nodeSelector: {}
 tolerations:
   - key: arch
