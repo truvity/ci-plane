@@ -4,7 +4,7 @@
 # Doctrine (Oleg, 2026-08-13): the image contains ONLY what devbox
 # cannot deliver — the bootstrap (nix + devbox), pre-devbox shell
 # semantics (bash as sh), binaries outside nixpkgs (runner,
-# license-gated; go-cache-plugin: must pre-exist before any go
+# license-gated; the Go cache agent: must pre-exist before any go
 # invocation it caches), and the docker toolchain (client + buildx:
 # essential, ruled in-image 2026-08-13 — daemonless, the daemon never
 # ships). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
@@ -107,6 +107,24 @@ RUN ln -sf /bin/bash /bin/sh \
 # runners — bar via its proto pin (.prototools), release-private
 # callers via the install-goreleaser-pro input (ci-workflows v2.13.1).
 
+# The Go cache agent. A COPY from a published multi-arch image, not a
+# build: ko already built it for both architectures, so the arm64 half
+# costs a layer pull instead of the emulated `go install` that made the
+# stage above 841s of an 18.5-minute build. Docker resolves the right
+# architecture for TARGETPLATFORM by itself here, which is the whole
+# reason this is a plain COPY --from and not another cross-compile
+# stage.
+#
+# renovate: datasource=docker depName=ghcr.io/truvity/ci-cache/ci-cache
+COPY --from=ghcr.io/truvity/ci-cache/ci-cache:0.1.0 /ko-app/ci-cache /usr/local/bin/ci-cache
+
+# go-cache-plugin stays FOR ONE RELEASE, beside it and not instead of
+# it. GOCACHEPROG names a binary that must exist before the first `go`
+# invocation of a job, so a ci-workflows pin still asking for the old
+# one would fail every build the moment this image shipped without it
+# -- and pins move on their own schedule, not this repository's. It
+# goes in the next image release, once the shared workflows point at
+# `ci-cache agent`.
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
 
