@@ -30,14 +30,11 @@ jobs:
             helm lint "$c"
           done
           # arc-runners deliberately fails to render without
-          # githubConfigUrl, so only ci-cache templates bare; both get
-          # the estate-shaped overlay below.
-          helm template test charts/ci-cache > /dev/null
+          # githubConfigUrl, so only ci-builders templates bare; both
+          # get the estate-shaped overlay below.
+          helm template test charts/ci-builders > /dev/null
           # Estate-shaped overlay: the paths gitops actually exercises.
-          helm template test charts/ci-cache \
-            --set goModproxy.enabled=true \
-            --set goModproxy.s3.bucket=example \
-            --set goModproxy.s3.region=eu-central-1 \
+          helm template test charts/ci-builders \
             --set nixWorkers.enabled=true \
             --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
             --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a,arc-runners-org-b}' \
@@ -59,6 +56,14 @@ jobs:
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
           bash -n image/nix-worker-*.sh
+          # The removed-values guard has to FAIL, and a guard nobody
+          # ever proves failing is a comment. An estate porting values
+          # from the old chart name is exactly the caller it protects.
+          if helm template test charts/ci-builders \
+               --set goModproxy.enabled=false > /dev/null 2>&1; then
+            echo "removed-values guard did not fire on goModproxy" >&2
+            exit 1
+          fi
           echo "charts OK"
 
   # The OpenBao bootstrap's certificate policy (one principal, permit-pty

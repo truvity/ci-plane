@@ -1,11 +1,17 @@
-# ci-cache — the in-cluster CI cache plane.
+# ci-builders — the in-cluster CI builder and cache plane.
+#
+# Named for where it is going, not only for what it holds today: the
+# Go module proxy left in 2.0.0 and the nix, npm and Bazel caches
+# follow as truvity/ci-cache grows a front end for each. What cannot
+# leave is the pair that builds — buildkitd and the nix workers.
 #
 # Image references are split {registry}/{repository}:{tag} so an estate
 # with an ECR pull-through cache overrides ONLY `registry` per
 # component family and inherits everything else. Empty registry means
 # the upstream registry (docker.io / ghcr.io).
 
-# The runner image (go-modproxy runs it — it bakes go-cache-plugin).
+# The runner image. The nix workers run it, so its nix and its SSH
+# surface are the ones a remote build lands on.
 # `digest` is stamped by the release workflow; consumers override
 # `registry` (e.g. "712….dkr.ecr.…amazonaws.com/github") and inherit
 # the digest, staying transitively digest-pinned by the chart version.
@@ -150,53 +156,6 @@ nixCache:
     repository: library/nginx
     # renovate: datasource=docker depName=nginx
     tag: 1.31.6-alpine
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      memory: 1Gi
-
-goModproxy:
-  # go-cache-plugin `serve` — a caching Go module + sumdb proxy backed
-  # by an S3 prefix. Runs the RUNNER IMAGE (it bakes the binary).
-  # Needs object-store access: on AWS that is the ServiceAccount's own
-  # identity (pod identity / IRSA, estate-side wiring); on a store with no
-  # such mechanism it is `existingSecret` below. Disabled by default for
-  # that reason.
-  enabled: false
-  s3:
-    bucket: ""
-    region: ""
-    keyPrefix: modcache
-    # S3-COMPATIBLE STORES. Empty keeps the AWS endpoint, so nothing
-    # changes for an AWS caller. go-cache-plugin has understood
-    # --s3-endpoint-url all along; this chart simply never passed it,
-    # which made the module proxy AWS-only by omission rather than by
-    # decision.
-    #
-    # Cloudflare R2: endpoint https://<account>.r2.cloudflarestorage.com
-    # with region "auto" — R2 serves one region and rejects a
-    # bucket-location lookup, which go-cache-plugin skips entirely when
-    # region is set.
-    endpoint: ""
-    # Address the bucket as endpoint/bucket/key rather than
-    # bucket.endpoint/key. A property of the store's certificate — does
-    # its wildcard cover a bucket subdomain? — not of the endpoint, so it
-    # is its own switch.
-    pathStyle: false
-    # Static credentials for a store with no pod identity, as
-    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (and optionally
-    # AWS_SESSION_TOKEN) in an existing Secret. Empty keeps the pod's
-    # ambient identity, which is the right default on AWS: asking for keys
-    # there would be asking for the thing IRSA exists to remove.
-    existingSecret: ""
-  sumdb: sum.golang.org
-  serviceAccount:
-    create: true
-    name: go-modproxy
-    annotations: {}
-  stagingSize: 10Gi
   resources:
     requests:
       cpu: 250m

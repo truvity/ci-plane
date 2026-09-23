@@ -16,7 +16,7 @@ metadata:
   name: nix-cache-nginx-v3
   labels:
     app.kubernetes.io/name: nix-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 data:
   nginx.conf: |
     worker_processes auto;
@@ -136,7 +136,7 @@ metadata:
   name: nix-cache
   labels:
     app.kubernetes.io/name: nix-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   replicas: 1
   strategy:
@@ -148,7 +148,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nix-cache
-        app.kubernetes.io/part-of: ci-cache
+        app.kubernetes.io/part-of: ci-builders
     spec:
       enableServiceLinks: false
       {{- with .Values.nodeSelector }}
@@ -161,7 +161,7 @@ spec:
       {{- end }}
       containers:
         - name: nginx
-          image: {{ include "ci-cache.image" $n.image }}
+          image: {{ include "ci-builders.image" $n.image }}
           command: ["nginx", "-c", "/etc/nginx-cache/nginx.conf", "-g", "daemon off;"]
           ports:
             - name: http
@@ -213,7 +213,7 @@ metadata:
   name: nix-cache
   labels:
     app.kubernetes.io/name: nix-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   selector:
     app.kubernetes.io/name: nix-cache

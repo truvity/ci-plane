@@ -1,0 +1,17 @@
+{{- /*
+Keys this chart no longer honours.
+
+A chart that quietly ignores a value the caller still sets is the worst
+shape an upgrade can take: helm reports success, argo reports Synced,
+and the feature the caller asked for is simply gone. Renaming the chart
+makes that failure MORE likely, not less, because a caller porting
+their values from `ci-cache` to `ci-builders` is already editing this
+file and will carry the old block across.
+
+So each removed key fails the render and says where the feature went.
+The check is hasKey, not truthiness: `goModproxy.enabled: false` is
+still a caller who believes this chart owns their module proxy.
+*/ -}}
+{{- if hasKey .Values "goModproxy" }}
+{{- fail "ci-builders 2.0.0 removed `goModproxy`. The Go module proxy is now its own product: truvity/ci-cache, chart oci://ghcr.io/truvity/charts/ci-cache, which caches the Go BUILD cache as well as modules and is not AWS-only. Delete the goModproxy block from your values and install that chart instead." }}
+{{- end }}

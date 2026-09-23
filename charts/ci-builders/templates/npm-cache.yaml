@@ -16,7 +16,7 @@ metadata:
   name: npm-cache-config-v1
   labels:
     app.kubernetes.io/name: npm-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 data:
   config.yaml: |
     storage: /verdaccio/storage
@@ -62,7 +62,7 @@ metadata:
   name: npm-cache
   labels:
     app.kubernetes.io/name: npm-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   replicas: 1
   strategy:
@@ -74,7 +74,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: npm-cache
-        app.kubernetes.io/part-of: ci-cache
+        app.kubernetes.io/part-of: ci-builders
     spec:
       enableServiceLinks: false
       {{- with .Values.nodeSelector }}
@@ -93,7 +93,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: verdaccio
-          image: {{ include "ci-cache.image" $n.image }}
+          image: {{ include "ci-builders.image" $n.image }}
           # No args: the image's entrypoint is `dumb-init --` with
           # `verdaccio --config /verdaccio/conf/config.yaml` as CMD —
           # args REPLACE the CMD, so passing flags alone makes
@@ -141,7 +141,7 @@ metadata:
   name: npm-cache
   labels:
     app.kubernetes.io/name: npm-cache
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   selector:
     app.kubernetes.io/name: npm-cache
