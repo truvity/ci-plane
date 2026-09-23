@@ -138,14 +138,28 @@ identity can submit writes to the same architecture store.
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
-bootstrap, bash-as-sh, the daemonless docker client + buildx,
-go-cache-plugin, and the goreleaser-pro binary (its license key is a
-secret and never ships). go-cache-plugin is on its way out: it served
-the module proxy that left in 2.0.0, and the truvity/ci-cache agent
-replaces it once the shared workflows point at that service. Everything else arrives per job from each
+bootstrap, bash-as-sh, the daemonless docker client + buildx, the Go
+cache agent, and the goreleaser-pro binary (its license key is a secret
+and never ships). Everything else arrives per job from each
 repository's own `devbox.json`. Repo- or cluster-specific content in
 the image is a bug; the one documented debt is the baked in-cluster nix
 substituter (dead elsewhere, upstream fallback).
+
+**Two Go cache binaries ship at once, on purpose.** `ci-cache` is the
+agent of [truvity/ci-cache](https://github.com/truvity/ci-cache), which
+is what a job should use; `go-cache-plugin` is the tool it replaces and
+is kept for one release beside it. `GOCACHEPROG` names a binary that
+must exist before the first `go` invocation of a job, and the shared
+workflows pin their own version of this image on their own schedule --
+so shipping the replacement and removing the original in one release
+would fail every build using a pin that had not moved yet. The plugin
+goes in the next image release.
+
+A cache binary is in the image at all only because of that ordering
+rule: it has to pre-exist the `go` invocation it caches, which is
+exactly the kind of thing devbox cannot deliver in time. What it talks
+to, and everything about the cache itself, belongs to that repository
+and is not described here.
 
 Every version pin in the Dockerfile carries a `# renovate:` annotation
 — a pin without one is invisible, and invisible is indistinguishable
