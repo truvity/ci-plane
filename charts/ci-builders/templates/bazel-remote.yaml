@@ -22,7 +22,7 @@ metadata:
   name: bazel-remote
   labels:
     app.kubernetes.io/name: bazel-remote
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   replicas: 1
   strategy:
@@ -34,7 +34,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: bazel-remote
-        app.kubernetes.io/part-of: ci-cache
+        app.kubernetes.io/part-of: ci-builders
     spec:
       # The Service is named bazel-remote → k8s service links inject
       # BAZEL_REMOTE_PORT=tcp://ip:8080, which the binary parses as its
@@ -56,7 +56,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bazel-remote
-          image: {{ include "ci-cache.image" $z.image }}
+          image: {{ include "ci-builders.image" $z.image }}
           imagePullPolicy: IfNotPresent
           args:
             - --dir=/data
@@ -89,7 +89,7 @@ metadata:
   name: bazel-remote
   labels:
     app.kubernetes.io/name: bazel-remote
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   selector:
     app.kubernetes.io/name: bazel-remote

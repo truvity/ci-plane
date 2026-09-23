@@ -8,7 +8,7 @@ metadata:
   name: buildkitd-{{ $arch }}
   labels:
     app.kubernetes.io/name: buildkitd
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   selector:
     app.kubernetes.io/name: buildkitd
@@ -28,7 +28,7 @@ metadata:
   name: buildkitd-{{ $arch }}
   labels:
     app.kubernetes.io/name: buildkitd
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 spec:
   serviceName: buildkitd-{{ $arch }}
   replicas: 1
@@ -40,7 +40,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: buildkitd
-        app.kubernetes.io/part-of: ci-cache
+        app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: {{ $arch }}
       {{- with $b.podAnnotations }}
       annotations:
@@ -74,13 +74,13 @@ spec:
         # Rootless buildkit needs user namespaces; the default sysctl
         # ceiling on minimal hosts is too low.
         - name: enable-userns
-          image: {{ include "ci-cache.image" $b.initImage }}
+          image: {{ include "ci-builders.image" $b.initImage }}
           command: ["sysctl", "-w", "user.max_user_namespaces=63359"]
           securityContext:
             privileged: true
       containers:
         - name: buildkitd
-          image: {{ include "ci-cache.image" $b.image }}
+          image: {{ include "ci-builders.image" $b.image }}
           args:
             - --addr
             - tcp://0.0.0.0:1234

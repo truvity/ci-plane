@@ -29,8 +29,16 @@ Supersedes [truvity/runner-image](https://github.com/truvity/runner-image).
 | Artifact | Published as |
 |---|---|
 | [`image/`](image/Dockerfile) — the runner image | `ghcr.io/truvity/ci-plane/runner:<version>` |
-| [`charts/ci-cache`](charts/ci-cache) — buildkitd (per-arch, daemonless), persistent Nix remote workers (per-arch, CI-only), nix read-through cache, Go module proxy, npm registry cache, Bazel-API remote cache | `oci://ghcr.io/truvity/charts/ci-cache` |
+| [`charts/ci-builders`](charts/ci-builders) — buildkitd (per-arch, daemonless), persistent Nix remote workers (per-arch, CI-only), nix read-through cache, npm registry cache, Bazel-API remote cache | `oci://ghcr.io/truvity/charts/ci-builders` |
 | [`charts/arc-runners`](charts/arc-runners) — AutoscalingRunnerSet CRs per profile + the #4307 stuck-runner janitor | `oci://ghcr.io/truvity/charts/arc-runners` |
+
+The Go module proxy used to be the sixth component here. It is now its
+own product, [truvity/ci-cache](https://github.com/truvity/ci-cache),
+which caches the Go **build** cache as well as modules and is not
+AWS-only; `charts/ci-builders` 2.0.0 dropped it and fails the render for
+anyone still setting `goModproxy`. Two names, one letter apart, so be
+precise: `ci-builders` is this repository's chart, `ci-cache` is that
+product **and** the namespace both of them are installed into.
 
 The ARC **controller** (and its CRDs) is deliberately NOT here — install
 it from the upstream `gha-runner-scale-set-controller` chart. The

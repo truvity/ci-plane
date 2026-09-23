@@ -15,22 +15,22 @@ Order matters: caches before runners, controller before both charts.
    runner namespace — delivered however your estate delivers secrets
    (ESO, sealed-secrets, by hand).
 3. **Runner namespaces**, one per organization (e.g.
-   `arc-runners-<org>`), plus a `ci-cache` namespace. Dedicated
+   `arc-runners-<org>`), plus a namespace for the build plane. This
+   estate calls it `ci-cache` and every FQDN below assumes that name;
+   it predates the chart rename and is deliberately unchanged, because
+   those service names are baked into runner images and shared
+   workflows. Dedicated
    namespaces — a general-purpose janitor that sweeps old releases will
    eventually collect a long-lived AutoscalingRunnerSet.
 4. Optional but recommended: a **registry pull-through cache** per
    hosting account, so image pulls are same-region and unthrottled. The
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
-5. For the Go module proxy: an **object-store bucket** and a way for the
-   pod to reach it, scoped to the cache prefix. On AWS that is
-   pod-identity/IRSA wiring for its ServiceAccount. On an S3-compatible
-   store — Cloudflare R2, MinIO, Ceph — set `goModproxy.s3.endpoint`, and
-   supply keys through `goModproxy.s3.existingSecret` if the store has no
-   pod identity; `goModproxy.s3.pathStyle` if its certificate does not
-   cover a bucket subdomain. R2 wants `region: auto`, which also skips the
-   bucket-location lookup it does not serve. Skip the proxy entirely
-   (`goModproxy.enabled=false`, the default) if you have none of this.
+5. Nothing here for Go any more. The module proxy left in 2.0.0 for
+   [truvity/ci-cache](https://github.com/truvity/ci-cache), which caches
+   the Go build cache as well as modules; install that chart alongside
+   this one, into the same namespace if you like. Setting `goModproxy`
+   here now fails the render rather than being ignored.
 6. For persistent Nix workers:
    - `ci-cache/nix-builder-server`, delivered by the estate's secret
      manager, containing the stable `ssh_host_ed25519_key` (and its
@@ -54,7 +54,7 @@ Order matters: caches before runners, controller before both charts.
 ## Install the cache plane
 
 ```bash
-helm install ci-cache oci://ghcr.io/truvity/charts/ci-cache \
+helm install ci-builders oci://ghcr.io/truvity/charts/ci-builders \
   --version <X.Y.Z> -n ci-cache \
   --set buildkitd.networkPolicy.consumerNamespaces={arc-runners-<org>} \
   --set nixWorkers.enabled=true \
@@ -67,7 +67,7 @@ Key values (see the chart's values.yaml for the full annotated set):
 `buildkitd.archs`, `buildkitd.scheduling.<arch>` (nodeSelector +
 tolerations per arch, REPLACING the default when set),
 `nixWorkers.scheduling.<arch>`, `storageClassName`,
-`nixCache.upstream`, `goModproxy.s3.*`. A Nix worker is privileged so
+`nixCache.upstream`. A Nix worker is privileged so
 its daemon can create Linux sandboxes: enabling it without selecting a
 dedicated, tainted CI/build pool is not a supported production shape.
 
@@ -116,7 +116,6 @@ Point `runs-on` at the scale-set names (via org variables so a rename
 is one change, not N). Runners reach the caches by cluster DNS:
 `buildkitd-<arch>.ci-cache.svc:1234` (buildx `--driver remote`),
 `nix-cache.ci-cache.svc` (nix extra-substituter),
-`go-modproxy.ci-cache.svc` (GOPROXY with a pipe-fallback to upstream),
 `bazel-remote.ci-cache.svc:9092` (moon remote cache),
 `npm-cache.ci-cache.svc` (yarn/npm/pnpm `npmRegistryServer`, public
 packages, behind a health-probe fallback to registry.npmjs.org).

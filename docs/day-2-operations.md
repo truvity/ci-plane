@@ -53,7 +53,7 @@ The producer releases and stops. In the consuming gitops repo:
 
 1. Annotate the pin —
    ```yaml
-   # renovate: datasource=docker depName=ghcr.io/truvity/charts/ci-cache
+   # renovate: datasource=docker depName=ghcr.io/truvity/charts/ci-builders
    ciPlane: "1.0.3"
    ```
    One chart is the sentinel; both always share a version.

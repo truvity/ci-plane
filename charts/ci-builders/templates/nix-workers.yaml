@@ -16,7 +16,7 @@ metadata:
   name: {{ $caName }}
   labels:
     app.kubernetes.io/name: nix-worker
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
 data:
   trusted_user_ca_keys: |-
     {{- $trustedCAs | nindent 4 }}
@@ -29,7 +29,7 @@ metadata:
   name: nix-worker-{{ $arch }}
   labels:
     app.kubernetes.io/name: nix-worker
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
     ci-plane.io/arch: {{ $arch }}
 spec:
   selector:
@@ -46,7 +46,7 @@ metadata:
   name: nix-worker-{{ $arch }}
   labels:
     app.kubernetes.io/name: nix-worker
-    app.kubernetes.io/part-of: ci-cache
+    app.kubernetes.io/part-of: ci-builders
     ci-plane.io/arch: {{ $arch }}
 spec:
   serviceName: nix-worker-{{ $arch }}
@@ -59,7 +59,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nix-worker
-        app.kubernetes.io/part-of: ci-cache
+        app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: {{ $arch }}
       {{- with $n.podAnnotations }}
       annotations:
@@ -90,7 +90,7 @@ spec:
       {{- end }}
       initContainers:
         - name: seed-store
-          image: {{ include "ci-cache.runnerImage" $ }}
+          image: {{ include "ci-builders.runnerImage" $ }}
           command: ["/usr/local/bin/nix-worker-seed"]
           securityContext:
             runAsUser: 0
@@ -103,7 +103,7 @@ spec:
               mountPath: /runtime
       containers:
         - name: nix-worker
-          image: {{ include "ci-cache.runnerImage" $ }}
+          image: {{ include "ci-builders.runnerImage" $ }}
           command: ["/usr/bin/tini", "--", "/usr/local/bin/nix-worker-entrypoint"]
           env:
             - name: NIX_WORKER_MAX_JOBS

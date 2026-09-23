@@ -2,7 +2,7 @@
 Render an image reference from a {registry, repository, tag} block.
 Empty registry means the repository's default registry.
 */ -}}
-{{- define "ci-cache.image" -}}
+{{- define "ci-builders.image" -}}
 {{- if .registry }}{{ .registry }}/{{ end }}{{ .repository }}:{{ .tag }}
 {{- end -}}
 
@@ -10,7 +10,7 @@ Empty registry means the repository's default registry.
 The runner image: digest-pinned when the release stamped one, tag
 otherwise (dev/lint renders).
 */ -}}
-{{- define "ci-cache.runnerImage" -}}
+{{- define "ci-builders.runnerImage" -}}
 {{- $i := .Values.runnerImage -}}
 {{- if $i.digest -}}
 {{ $i.registry }}/{{ $i.repository }}@{{ $i.digest }}

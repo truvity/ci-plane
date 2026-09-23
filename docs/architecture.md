@@ -58,14 +58,14 @@ tag-reactive workflow.
 
 This repository releases and stops. There is no cross-repo reach: the
 consumer's own renovate tracks the published chart version (one chart —
-`charts/ci-cache` — serves as the sentinel, since both charts always
+`charts/ci-builders` — serves as the sentinel, since both charts always
 share a version), bumps its pin, regenerates any derived files inside
 the update branch, and automerges on its own CI. See the Truvity wiring
 in [day-2-operations.md](day-2-operations.md).
 
 ## The cache doctrine
 
-Every `charts/ci-cache` component is a CACHE: disposable storage, zero
+Every `charts/ci-builders` component is disposable: no backups, zero
 IAM where possible, no backups; losing one costs a re-warm. A dead
 cache degrades to upstream — slower, never broken. buildkitd's PVC is
 the HOT layer only; the WARM layer is `cache-to type=registry` and
@@ -140,7 +140,9 @@ identity can submit writes to the same architecture store.
 The image contains only what devbox cannot deliver: the nix + devbox
 bootstrap, bash-as-sh, the daemonless docker client + buildx,
 go-cache-plugin, and the goreleaser-pro binary (its license key is a
-secret and never ships). Everything else arrives per job from each
+secret and never ships). go-cache-plugin is on its way out: it served
+the module proxy that left in 2.0.0, and the truvity/ci-cache agent
+replaces it once the shared workflows point at that service. Everything else arrives per job from each
 repository's own `devbox.json`. Repo- or cluster-specific content in
 the image is a bug; the one documented debt is the baked in-cluster nix
 substituter (dead elsewhere, upstream fallback).
