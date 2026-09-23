@@ -116,7 +116,7 @@ RUN ln -sf /bin/bash /bin/sh \
 # stage.
 #
 # renovate: datasource=docker depName=ghcr.io/truvity/ci-cache/ci-cache
-COPY --from=ghcr.io/truvity/ci-cache/ci-cache:0.1.2 /ko-app/ci-cache /usr/local/bin/ci-cache
+COPY --from=ghcr.io/truvity/ci-cache/ci-cache:0.1.3 /ko-app/ci-cache /usr/local/bin/ci-cache
 
 # go-cache-plugin stays FOR ONE RELEASE, beside it and not instead of
 # it. GOCACHEPROG names a binary that must exist before the first `go`
