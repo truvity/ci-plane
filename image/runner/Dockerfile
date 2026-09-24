@@ -58,6 +58,19 @@ ARG RUNNER_VERSION=2.337.0
 # is then never chosen (INF-621, 155 GB/day from upstream).
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
+# PINNED, and it must MATCH image/nix-worker/Dockerfile exactly.
+#
+# Remote building is a protocol between two nix installations. While one
+# manifest served both the runner and the worker they matched by
+# construction -- but nothing pinned them: the installer was fetched from
+# nixos.org/nix/install, whatever that served that day. Now that the
+# worker is its own image, two builds on different days would drift
+# silently, and a drift shows up as a confusing build failure rather than
+# as a version error. hack/nix-parity.sh refuses a release where the two
+# disagree.
+# renovate: datasource=github-releases depName=NixOS/nix
+ARG NIX_VERSION=2.35.2
+
 # ── go-cache-plugin: built from source (upstream publishes no binary
 # releases). CROSS-compiled on the build platform: the previous form
 # ran the arm64 half under QEMU, and that one emulated `go install`
@@ -226,8 +239,9 @@ ENV USER=runner \
 # pattern as ARG GORELEASER_VERSION after the FROM above. No default here,
 # so the value comes from the global ARG or the caller's --build-arg.
 ARG NIX_SUBSTITUTERS
+ARG NIX_VERSION
 RUN NIX_CONFIG="filter-syscalls = false" \
-    sh <(curl -fsSL https://nixos.org/nix/install) --no-daemon \
+    sh <(curl -fsSL "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install") --no-daemon \
  && mkdir -p /home/runner/.config/nix \
  && printf '%s\n' \
       'experimental-features = nix-command flakes' \

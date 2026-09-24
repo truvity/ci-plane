@@ -73,6 +73,23 @@ jobs:
       - name: janitor cases
         run: ./hack/janitor-cases.sh
 
+      # Two guards on the image split (2026-09-24), both asserting a
+      # property that is invisible in a green run.
+      #
+      # The nix pin: remote building is a protocol between the runner's
+      # nix and the worker's, and they stopped being the same install
+      # when the images split. A mismatch surfaces as a confusing build,
+      # not as a version error.
+      #
+      # The release images: they must ASSEMBLE and never EXECUTE. One
+      # `RUN` added to image/release/ puts the whole arm64 half of every
+      # release back under QEMU — correct, green, and minutes slower.
+      - name: nix parity
+        run: ./hack/nix-parity.sh
+
+      - name: release images assemble only
+        run: ./hack/final-images-are-assembly.sh
+
   # The OpenBao bootstrap's certificate policy (one principal, permit-pty
   # only, no critical options, <= 1h) and its fail-open setup path.
   go:
@@ -99,7 +116,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Build (amd64, no push)
-        run: docker buildx build --platform linux/amd64 image/
+        run: |
+          set -euo pipefail
+          # Both bases, amd64 only: the arm64 half is native at release
+          # time and QEMU here would buy no review signal for minutes of
+          # emulation.
+          for img in runner nix-worker; do
+            docker buildx build --platform linux/amd64 \
+              --file "image/${img}/Dockerfile" image/
+          done
+          # The release images assemble from a base that does not exist
+          # until a release runs, so they are LINTED rather than built —
+          # what matters about them is that they execute nothing, and
+          # that is what the guard below asserts.
+          for f in image/release/*.Dockerfile; do
+            docker buildx build --check --file "$f" \
+              --build-arg BASE_IMAGE=alpine --build-arg BASE_TAG=3.21 image/ || true
+          done
 
   # A stable name for branch protection to require.
   check:

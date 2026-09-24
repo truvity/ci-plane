@@ -90,7 +90,7 @@ spec:
       {{- end }}
       initContainers:
         - name: seed-store
-          image: {{ include "ci-builders.runnerImage" $ }}
+          image: {{ include "ci-builders.nixWorkerImage" $ }}
           command: ["/usr/local/bin/nix-worker-seed"]
           securityContext:
             runAsUser: 0
@@ -103,7 +103,7 @@ spec:
               mountPath: /runtime
       containers:
         - name: nix-worker
-          image: {{ include "ci-builders.runnerImage" $ }}
+          image: {{ include "ci-builders.nixWorkerImage" $ }}
           command: ["/usr/bin/tini", "--", "/usr/local/bin/nix-worker-entrypoint"]
           env:
             - name: NIX_WORKER_MAX_JOBS
