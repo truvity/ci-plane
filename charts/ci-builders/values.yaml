@@ -21,6 +21,25 @@ runnerImage:
   digest: "" # sha256:… — stamped at release; empty renders the tag instead
   tag: latest
 
+# The nix workers' own image (2026-09-24). They ran the RUNNER image
+# until now, with Kubernetes picking the role by overriding the command.
+# That worked and it meant neither half could be tuned: a worker wants a
+# store and an sshd, and was carrying a docker client, buildx, devbox,
+# goreleaser and two cache clients for nothing.
+#
+# Both images pin the SAME nix, and ci-plane's hack/nix-parity.sh refuses
+# a release where they disagree -- remote building is a protocol between
+# two nix installations, and a mismatch surfaces as a confusing build
+# rather than as a version error.
+#
+# An empty `repository` falls back to runnerImage, so a values file
+# written before the split renders exactly what it rendered before.
+nixWorkerImage:
+  registry: ghcr.io
+  repository: truvity/ci-plane/nix-worker
+  digest: "" # sha256:… — stamped at release; empty renders the tag instead
+  tag: latest
+
 # Scheduling defaults shared by every component. The upstream defaults
 # are empty; an estate with tainted worker pools sets tolerations here
 # once.

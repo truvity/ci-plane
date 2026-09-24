@@ -1,0 +1,70 @@
+# ci-plane releases IMAGES and CHARTS, and no binaries.
+#
+# `builds: skip` is not a workaround: goreleaser accepts an images-only
+# configuration, and this repository genuinely has no binary to publish.
+# The one Go program here, image/nix-worker-client, is a build stage of
+# the runner image and belongs to it.
+#
+# goreleaser is what PRODUCES the released images, rather than something
+# that happens to also build them, because it writes dist/artifacts.json
+# and helmctl reads that to fill the charts' image values. A digest the
+# charts get from anywhere else can be stale -- the failure the shared
+# release workflow describes as "it rendered, it pushed, the run was
+# green, and the chart could not install".
+version: 2
+project_name: ci-plane
+
+builds:
+  - skip: true
+
+# NOTHING HERE EXECUTES.
+#
+# Both Dockerfiles under image/release/ are `FROM` a manifest list plus
+# labels. The instructions that must run -- apt, the nix install, devbox,
+# the docker toolchain -- live in image/runner/ and image/nix-worker/,
+# each built once per architecture on a NATIVE runner and merged into
+# that manifest list before this file is reached.
+#
+# That is what makes a multi-platform release cost no emulation: buildx
+# resolves `FROM` per platform and assembles. Measured on this image: a
+# RUN-less arm64 stage is "DONE 0.0s" against two seconds for a single
+# `apk add` under QEMU. hack/final-images-are-assembly.sh keeps it that
+# way, because one `RUN` added here would put the whole arm64 half back
+# under emulation and still be green.
+dockers_v2:
+  - id: runner
+    images: ["{{ .Env.IMAGE_REPO }}/runner"]
+    dockerfile: image/release/runner.Dockerfile
+    platforms: [linux/amd64, linux/arm64]
+    tags: ["{{ .Version }}"]
+    build_args:
+      BASE_IMAGE: "{{ .Env.IMAGE_REPO }}/runner-base"
+      BASE_TAG: "{{ .Version }}"
+      VERSION: "{{ .Version }}"
+      REVISION: "{{ .FullCommit }}"
+
+  - id: nix-worker
+    images: ["{{ .Env.IMAGE_REPO }}/nix-worker"]
+    dockerfile: image/release/nix-worker.Dockerfile
+    platforms: [linux/amd64, linux/arm64]
+    tags: ["{{ .Version }}"]
+    build_args:
+      BASE_IMAGE: "{{ .Env.IMAGE_REPO }}/nix-worker-base"
+      BASE_TAG: "{{ .Version }}"
+      VERSION: "{{ .Version }}"
+      REVISION: "{{ .FullCommit }}"
+
+# The charts are pushed by helmctl from dist/artifacts.json, not from
+# here; see .github/workflows/release.yaml and the shared
+# release-public.yaml it calls.
+release:
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^docs"
+      - "^test"
