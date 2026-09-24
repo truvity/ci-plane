@@ -120,24 +120,29 @@ RUN ln -sf /bin/bash /bin/sh \
 # runners — bar via its proto pin (.prototools), release-private
 # callers via the install-goreleaser-pro input (ci-workflows v2.13.1).
 
-# The Go cache agent. A COPY from a published multi-arch image, not a
-# build: ko already built it for both architectures, so the arm64 half
-# costs a layer pull instead of the emulated `go install` that made the
-# stage above 841s of an 18.5-minute build. Docker resolves the right
-# architecture for TARGETPLATFORM by itself here, which is the whole
-# reason this is a plain COPY --from and not another cross-compile
-# stage.
+# The ci-cache agent used to be copied in here beside the plugin, and is
+# gone as of INF-964. The image carried two Go cache clients while the
+# estate decided between them; INF-958 decided, and it decided against
+# the agent: it costs about a second over Go's own GOCACHE, and what
+# actually caps a build's fetch rate is `-p` -- how many packages
+# compile at once, hence how many lookups are in flight -- at roughly
+# 16 MB/s per CPU. No cache client moves that number. The server it
+# talked to is retired too (gitops, INF-963).
 #
-# renovate: datasource=docker depName=ghcr.io/truvity/ci-cache/ci-cache
-COPY --from=ghcr.io/truvity/ci-cache/ci-cache:0.1.4 /ko-app/ci-cache /usr/local/bin/ci-cache
-
-# go-cache-plugin stays FOR ONE RELEASE, beside it and not instead of
-# it. GOCACHEPROG names a binary that must exist before the first `go`
-# invocation of a job, so a ci-workflows pin still asking for the old
-# one would fail every build the moment this image shipped without it
-# -- and pins move on their own schedule, not this repository's. It
-# goes in the next image release, once the shared workflows point at
-# `ci-cache agent`.
+# Dropping it is worth more than the ~39MB: every agent bump cost a
+# ci-plane release and an ARC rollout of the whole fleet (v2.3.0 and
+# v2.4.0 in one night) for a binary no job was using.
+#
+# Safe because the refusal that used to greet a missing binary is gone.
+# ci-actions' setup-devbox now WARNS on `go-cache-server` and falls
+# through to the bucket (INF-962, released before this) rather than
+# failing with "ci-cache not on PATH -- runner image too old". That
+# ordering is the whole risk here: pins move on their own schedule, not
+# this repository's, so a caller on an old pin has to degrade, not break.
+#
+# go-cache-plugin below is now the only Go cache client in the image,
+# and it stays until INF-957 moves the fetch into setup-devbox from the
+# bundle release -- after which the image carries no cache client at all.
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
 

@@ -90,6 +90,14 @@ jobs:
       - name: release images assemble only
         run: ./hack/final-images-are-assembly.sh
 
+      # The version pins in the Dockerfiles are found by PATH, and the
+      # split above is exactly what breaks a path. Renovate answers a
+      # config that matches nothing by opening no pull requests, which
+      # reads as "everything is current" — so this is the only place a
+      # stale managerFilePatterns can surface.
+      - name: renovate sees every Dockerfile pin
+        run: ./hack/renovate-covers-dockerfiles.sh
+
       # The stamper is load-bearing until the charts adopt helmctl's
       # `images:` convention: with two images a key-blind rewrite would
       # put the runner's digest into nixWorkerImage, and the worker would
