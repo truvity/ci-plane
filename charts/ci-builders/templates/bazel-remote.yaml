@@ -94,9 +94,6 @@ spec:
             {{- with $z.s3.prefix }}
             - --s3.prefix={{ . }}
             {{- end }}
-            {{- with $z.s3.endpoint }}
-            - --s3.endpoint={{ . }}
-            {{- end }}
             {{- end }}
           ports:
             - name: http

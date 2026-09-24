@@ -206,16 +206,26 @@ bazelRemote:
   # ServiceAccount -- unchanged behaviour until an estate sets this.
   serviceAccountName: ""
   s3:
-    # Off by default: this PR only adds the plumbing. Enabling needs the
-    # bucket, its region, and a matching Pod Identity association
-    # (namespace + `bazelRemote.serviceAccountName`) created in gitops
-    # first -- see the comment on `serviceAccountName` above for what a
-    # mismatch there looks like.
+    # Off by default. Enabling needs the bucket, its region, and a
+    # matching Pod Identity association (namespace +
+    # `bazelRemote.serviceAccountName`) to exist first -- see the
+    # comment on `serviceAccountName` above for what a mismatch there
+    # looks like.
+    #
+    # AWS ONLY, deliberately. There is no `endpoint` key here, so this
+    # cannot address R2, MinIO or any other S3-compatible store. Those
+    # authenticate with an access key, and the only way to give this
+    # container one is to put key material in a values file or mount it
+    # for a flag -- which is exactly what `auth_method=iam_role` exists
+    # to avoid. Offering an `endpoint` without an auth method that works
+    # there would be a trap: the pod would start, answer every request,
+    # find no AWS credentials, and cache nothing, with nothing looking
+    # broken. If a non-AWS store is ever needed here, it is a decision
+    # about credential handling, not a value someone can set.
     enabled: false
     bucket: ""
     region: ""
     prefix: ""        # key prefix within the bucket
-    endpoint: ""      # non-AWS S3 (R2/MinIO); empty keeps the AWS default
   resources:
     requests:
       cpu: 50m
