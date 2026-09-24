@@ -26,7 +26,9 @@ metadata:
 rules:
   - apiGroups: ["actions.github.com"]
     resources: ["ephemeralrunners"]
-    verbs: ["get", "list", "delete"]
+    # `patch` is for the second sweep only, which strips a finalizer that
+    # can never complete. It cannot create or edit a runner's spec.
+    verbs: ["get", "list", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list"]
@@ -47,7 +49,7 @@ subjects:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: arc-runner-janitor-v1
+  name: arc-runner-janitor-v2
 data:
   sweep.sh: |
     #!/bin/sh
@@ -60,10 +62,18 @@ data:
     # jq converts the timestamp, not `date`: the image is Alpine, so
     # `date` is BusyBox, and BusyBox cannot parse ISO-8601 with -d.
     # jq's fromdateiso8601 is exact and jq is already a dependency.
-    kubectl get ephemeralrunners -n {{ .Release.Namespace }} -o json \
+    # Collected first, then fed to the loop by HEREDOC rather than by a
+    # pipe. A piped `while` runs in a subshell, so `swept` would be
+    # incremented in a process that exits before anything reads it and the
+    # count at the end would always be 0 -- a number that is worse than no
+    # number, because it looks like an answer. POSIX sh has no process
+    # substitution, and the root filesystem is read-only, so a heredoc is
+    # the way to keep the loop in this shell.
+    idle=$(kubectl get ephemeralrunners -n {{ .Release.Namespace }} -o json \
       | jq -r '.items[] | select((.status.jobRepositoryName // "") == "")
-               | "\(.metadata.name)\t\(.metadata.creationTimestamp|fromdateiso8601)"' \
-    | while IFS="$(printf '\t')" read -r name created_epoch; do
+               | "\(.metadata.name)\t\(.metadata.creationTimestamp|fromdateiso8601)"')
+
+    while IFS="$(printf '\t')" read -r name created_epoch; do
         [ -z "$name" ] && continue
         age=$(( NOW - created_epoch ))
         if [ "$age" -lt "$GRACE_SECONDS" ]; then
@@ -79,8 +89,60 @@ data:
         else
           echo "ok $name (age ${age}s, idle, no signature)"
         fi
-      done
-    echo "sweep complete"
+      done <<SWEEP_IDLE
+    $idle
+    SWEEP_IDLE
+
+    # ── second signature: stuck in DELETION ──────────────────────────────
+    #
+    # The sweep above cannot see this class, and deliberately so: it skips
+    # any runner that holds a job, and these hold one. Observed on
+    # truvity 2026-09-24, where it stalled the whole org's CI until a
+    # person stripped the finalizers by hand.
+    #
+    # The shape: a runner's JIT registration is SINGLE-USE. If its first
+    # start fails for any reason -- on that day, the CNI could not assign
+    # the pod an IP -- every restart afterwards is refused with
+    # "Registration ... was not found", and the pod crash-loops. Deleting
+    # it does not help, because the runner-registration finalizer exists
+    # to deregister the runner from GitHub before the object may go, and
+    # that cleanup cannot complete against a registration that is already
+    # gone. So the object can neither run nor die, while still holding the
+    # job GitHub assigned it. Nothing times out. The queue simply stops.
+    #
+    # Stripping the finalizer is safe for exactly the reason it is stuck:
+    # the GitHub-side registration the finalizer wants to remove does not
+    # exist. Nothing is orphaned by letting the object go.
+    #
+    # Gated on the deletion being OLDER than the grace period, so an
+    # ordinary delete -- which completes in well under a second -- is
+    # never touched. Only a deletion that has plainly stopped making
+    # progress qualifies.
+    wedged=$(kubectl get ephemeralrunners -n {{ .Release.Namespace }} -o json \
+      | jq -r '.items[]
+               | select(.metadata.deletionTimestamp != null)
+               | select((.metadata.finalizers // []) | length > 0)
+               | "\(.metadata.name)\t\(.metadata.deletionTimestamp|fromdateiso8601)"')
+
+    while IFS="$(printf '\t')" read -r name deleted_epoch; do
+        [ -z "$name" ] && continue
+        age=$(( NOW - deleted_epoch ))
+        if [ "$age" -lt "$GRACE_SECONDS" ]; then
+          echo "skip $name: deleting for ${age}s < grace"
+          continue
+        fi
+        echo "WEDGED $name (deleting for ${age}s, finalizers still set) — releasing"
+        kubectl patch ephemeralrunner -n {{ .Release.Namespace }} "$name" \
+          --type=merge -p '{"metadata":{"finalizers":null}}' || true
+        swept=$((swept+1))
+      done <<SWEEP_WEDGED
+    $wedged
+    SWEEP_WEDGED
+
+    # Said out loud. A sweep that found nothing and a sweep that could not
+    # see anything print the same empty output otherwise, and the second
+    # is the one worth knowing about.
+    echo "sweep complete ($swept released)"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -124,6 +186,6 @@ spec:
           volumes:
             - name: script
               configMap:
-                name: arc-runner-janitor-v1
+                name: arc-runner-janitor-v2
                 defaultMode: 0555
 {{- end }}
