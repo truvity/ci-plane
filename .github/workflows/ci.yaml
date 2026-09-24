@@ -90,6 +90,26 @@ jobs:
       - name: release images assemble only
         run: ./hack/final-images-are-assembly.sh
 
+      # The stamper is load-bearing until the charts adopt helmctl's
+      # `images:` convention: with two images a key-blind rewrite would
+      # put the runner's digest into nixWorkerImage, and the worker would
+      # run the runner image again. A dry run on a scratch copy asserts
+      # it still finds every key it is asked for.
+      - name: digest stamper finds every key
+        run: |
+          set -euo pipefail
+          cp charts/ci-builders/values.yaml /tmp/ci-builders.bak
+          cp charts/arc-runners/values.yaml /tmp/arc-runners.bak
+          ./hack/stamp-digests.sh \
+            runnerImage=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
+            nixWorkerImage=sha256:2222222222222222222222222222222222222222222222222222222222222222
+          if ./hack/stamp-digests.sh noSuchImage=sha256:3333333333333333333333333333333333333333333333333333333333333333 2>/dev/null; then
+            echo "::error::the stamper accepted a key no chart declares"; exit 1
+          fi
+          cp /tmp/ci-builders.bak charts/ci-builders/values.yaml
+          cp /tmp/arc-runners.bak charts/arc-runners/values.yaml
+          git diff --exit-code -- charts/ || { echo "::error::the dry run left the charts modified"; exit 1; }
+
   # The OpenBao bootstrap's certificate policy (one principal, permit-pty
   # only, no critical options, <= 1h) and its fail-open setup path.
   go:
