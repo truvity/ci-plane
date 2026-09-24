@@ -33,6 +33,14 @@ jobs:
           # githubConfigUrl, so only ci-builders templates bare; both
           # get the estate-shaped overlay below.
           helm template test charts/ci-builders > /dev/null
+          # bazel-remote's S3 backend is plumbed but defaults off: the
+          # bare render must carry no trace of it, or "default off"
+          # is only true until someone forgets to gate a line.
+          if helm template test charts/ci-builders \
+               | grep -qE -- '--s3\.|serviceAccountName'; then
+            echo "bare render leaked an S3 flag or serviceAccountName" >&2
+            exit 1
+          fi
           # Estate-shaped overlay: the paths gitops actually exercises.
           helm template test charts/ci-builders \
             --set nixWorkers.enabled=true \
@@ -62,6 +70,37 @@ jobs:
           if helm template test charts/ci-builders \
                --set goModproxy.enabled=false > /dev/null 2>&1; then
             echo "removed-values guard did not fire on goModproxy" >&2
+            exit 1
+          fi
+          # bazel-remote S3: flipped on, the flags must actually carry
+          # the values given, not just appear as booleans.
+          bazel_s3_out=$(helm template test charts/ci-builders \
+            --set bazelRemote.s3.enabled=true \
+            --set bazelRemote.s3.bucket=example-bucket \
+            --set bazelRemote.s3.region=us-east-1 \
+            --set bazelRemote.serviceAccountName=bazel-remote)
+          for flag in \
+            '--s3.bucket=example-bucket' \
+            '--s3.region=us-east-1' \
+            '--s3.auth_method=iam_role' \
+            'serviceAccountName: bazel-remote'; do
+            if ! grep -qF -- "$flag" <<< "$bazel_s3_out"; then
+              echo "bazelRemote.s3.enabled render is missing: $flag" >&2
+              exit 1
+            fi
+          done
+          # And the render-time refusal: enabling S3 without a bucket
+          # (or a region) must fail, the same idiom as the goModproxy
+          # guard above.
+          if helm template test charts/ci-builders \
+               --set bazelRemote.s3.enabled=true > /dev/null 2>&1; then
+            echo "bazelRemote.s3 guard did not fire on a missing bucket/region" >&2
+            exit 1
+          fi
+          if helm template test charts/ci-builders \
+               --set bazelRemote.s3.enabled=true \
+               --set bazelRemote.s3.bucket=example-bucket > /dev/null 2>&1; then
+            echo "bazelRemote.s3 guard did not fire on a missing region" >&2
             exit 1
           fi
           echo "charts OK"

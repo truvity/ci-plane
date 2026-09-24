@@ -184,7 +184,13 @@ nixCache:
 
 bazelRemote:
   # moon's remote task cache speaks the Bazel Remote Execution v2 API.
-  # Disk-backed: zero IAM, cluster-local latency.
+  # Disk-backed by default: zero IAM, cluster-local latency. `s3.enabled`
+  # switches on bazel-remote's S3 PROXY backend (upstream v2.6.2), which
+  # sits in FRONT of the same local `--dir` disk rather than replacing
+  # it -- the PVC below stays the working set, and `size`/`maxSizeGb`
+  # keep governing it either way. It is a CACHE either way: losing the
+  # PVC costs one cold rebuild, and losing the bucket costs the same for
+  # whatever the disk hasn't re-warmed yet.
   enabled: true
   size: 10Gi
   # --max_size in GiB; keep under `size`.
@@ -194,6 +200,22 @@ bazelRemote:
     repository: buchgr/bazel-remote-cache
     # renovate: datasource=docker depName=buchgr/bazel-remote-cache
     tag: v2.6.2
+  # Bound to an EKS Pod Identity association (this namespace + this
+  # ServiceAccount name) when `s3.enabled`. Empty renders no
+  # serviceAccountName, so the pod keeps using the namespace's default
+  # ServiceAccount -- unchanged behaviour until an estate sets this.
+  serviceAccountName: ""
+  s3:
+    # Off by default: this PR only adds the plumbing. Enabling needs the
+    # bucket, its region, and a matching Pod Identity association
+    # (namespace + `bazelRemote.serviceAccountName`) created in gitops
+    # first -- see the comment on `serviceAccountName` above for what a
+    # mismatch there looks like.
+    enabled: false
+    bucket: ""
+    region: ""
+    prefix: ""        # key prefix within the bucket
+    endpoint: ""      # non-AWS S3 (R2/MinIO); empty keeps the AWS default
   resources:
     requests:
       cpu: 50m
