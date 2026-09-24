@@ -253,13 +253,29 @@ scaleSets:
         ephemeral-storage: 20Gi
 
 janitor:
-  # Sweeps ephemeral runners stranded by upstream ARC bug
-  # actions/actions-runner-controller#4307 ("Ephemeral Runners seem to
-  # get stuck when job is canceled or interrupted"). Cancellation is
-  # the trigger, and `concurrency: cancel-in-progress` means routine
-  # cancels, so the sweep is not optional. Deletes ONLY runners that
-  # hold no job, match a stuck signature in their own log, and are
-  # older than the grace period. Remove when #4307 ships a fix.
+  # Sweeps ephemeral runners that have stopped making progress. TWO
+  # signatures, because they strand a runner in opposite ways and one
+  # sweep cannot see the other.
+  #
+  # 1. STRANDED (upstream ARC #4307, "Ephemeral Runners seem to get stuck
+  #    when job is canceled or interrupted"). Cancellation is the trigger,
+  #    and `concurrency: cancel-in-progress` makes cancels routine, so the
+  #    sweep is not optional. Deletes ONLY runners that hold NO job, match
+  #    a stuck signature in their own log, and are past the grace period.
+  #
+  # 2. WEDGED IN DELETION. A runner whose JIT registration is spent
+  #    crash-loops on "Registration ... was not found", and its
+  #    runner-registration finalizer cannot complete because the
+  #    registration it wants to remove is already gone. It can neither run
+  #    nor die, while still HOLDING the job GitHub assigned it -- which is
+  #    precisely why signature 1 skips it. Strips the finalizer, which is
+  #    safe for the same reason it is stuck: there is nothing left on
+  #    GitHub's side to orphan. Gated on the deletion being older than the
+  #    grace period, so an ordinary delete is never touched.
+  #
+  # Signature 2 stalled the whole truvity org's CI on 2026-09-24 until a
+  # person cleared it by hand. Remove 1 when #4307 ships a fix; 2 stands
+  # until a JIT registration survives a container restart.
   enabled: true
   schedule: "*/3 * * * *"
   graceSeconds: 180

@@ -56,6 +56,13 @@ jobs:
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
           bash -n image/nix-worker-*.sh
+
+      # The janitor deletes and PATCHES live objects, so reading it is not
+      # enough. This extracts the sweep from the rendered chart and runs it
+      # against a stub kubectl: both what it must act on and, more
+      # importantly, the three shapes it must leave alone.
+      - name: janitor cases
+        run: ./hack/janitor-cases.sh
           # The removed-values guard has to FAIL, and a guard nobody
           # ever proves failing is a comment. An estate porting values
           # from the old chart name is exactly the caller it protects.
