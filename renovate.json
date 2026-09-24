@@ -11,9 +11,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Version ARGs in the Dockerfile, each annotated with a `# renovate:` line directly above it — a pin without one is invisible.",
+      "description": "Version ARGs in the image Dockerfiles, each annotated with a `# renovate:` line directly above it \u2014 a pin without one is invisible. The glob covers every image/<name>/Dockerfile: it was `image/Dockerfile` until the runner and nix-worker images split (INF-964 found it), and a literal path silently stops matching the day a file moves. hack/renovate-covers-dockerfiles.sh is the guard.",
       "managerFilePatterns": [
-        "/^image/Dockerfile$/"
+        "image/**/Dockerfile"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?: versioning=(?<versioning>[a-z-]+))?\\s+ARG [A-Z_]+_VERSION=(?<currentValue>[^\\s]+)"
@@ -21,9 +21,9 @@
     },
     {
       "customType": "regex",
-      "description": "go install pins inside RUN lines (go-cache-plugin).",
+      "description": "go install pins inside RUN lines (go-cache-plugin). Same glob, same reason.",
       "managerFilePatterns": [
-        "/^image/Dockerfile$/"
+        "image/**/Dockerfile"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+go install [^@\\s]+@(?<currentValue>v[^\\s\\\\]+)"
