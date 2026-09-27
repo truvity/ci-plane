@@ -125,6 +125,12 @@ jobs:
       - name: janitor cases
         run: ./hack/janitor-cases.sh
 
+      # Runner packing is a scheduling PREFERENCE: a lost label, a term
+      # that matches one namespace only, or a caller's affinity replaced
+      # all render and run fine, and the runners quietly spread again.
+      - name: packing cases
+        run: ./hack/packing-cases.sh
+
       # Two guards on the image split (2026-09-24), both asserting a
       # property that is invisible in a green run.
       #

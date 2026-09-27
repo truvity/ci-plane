@@ -148,3 +148,45 @@ runner-nix-config-{{ $payload | toJson | sha256sum | trunc 12 }}
 runner-nix-config-{{ .Values.nixConfig | sha256sum | trunc 12 }}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+Runner packing (see values.packing). The label is the chart's own, not
+one the ARC controller stamps: the controller's labels are internal to
+its version, and a renamed one would turn packing back into spreading
+without a single error. Every runner pod of every release of this chart
+carries it, whatever the scale set and whatever the organization.
+*/ -}}
+{{- define "arc-runners.packingLabels" -}}
+ci-plane.io/packing-group: runners
+{{- end -}}
+
+{{- /*
+The runner pod's affinity: the caller's `affinity`, with the packing
+term APPENDED to podAffinity's preferred list, so a caller's own node or
+pod affinity keeps working. Built on a deep copy: this runs once per
+scale set, and appending to .Values itself would give the second set
+two packing terms and the third set three.
+
+namespaceSelector {} is load-bearing: without it a pod affinity term
+matches pods in the pod's OWN namespace only, and each organization is
+its own namespace, so two organizations' runners would never share a
+node. Empty output means no affinity stanza at all.
+*/ -}}
+{{- define "arc-runners.affinity" -}}
+{{- $aff := deepCopy (.Values.affinity | default (dict)) -}}
+{{- if .Values.packing.enabled -}}
+{{- $weight := int .Values.packing.weight -}}
+{{- if or (lt $weight 1) (gt $weight 100) }}{{ fail (printf "packing.weight must be between 1 and 100, got %v" .Values.packing.weight) }}{{ end -}}
+{{- $podAffinity := get $aff "podAffinity" | default (dict) -}}
+{{- $preferred := get $podAffinity "preferredDuringSchedulingIgnoredDuringExecution" | default (list) -}}
+{{- $term := dict
+      "weight" $weight
+      "podAffinityTerm" (dict
+        "topologyKey" "kubernetes.io/hostname"
+        "namespaceSelector" (dict)
+        "labelSelector" (dict "matchLabels" (include "arc-runners.packingLabels" . | fromYaml))) -}}
+{{- $_ := set $podAffinity "preferredDuringSchedulingIgnoredDuringExecution" (append $preferred $term) -}}
+{{- $_ := set $aff "podAffinity" $podAffinity -}}
+{{- end -}}
+{{- if $aff }}{{ toYaml $aff }}{{ end -}}
+{{- end -}}

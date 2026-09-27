@@ -166,6 +166,59 @@ tolerations:
 podAnnotations:
   karpenter.sh/do-not-disrupt: "true"
 
+# Runner PACKING: put a new runner on a node that already runs runners,
+# rather than on the emptiest node that fits.
+#
+# Why it is needed. The kube-scheduler's default scoring
+# (NodeResourcesFit with LeastAllocated, plus balanced allocation) SPREADS:
+# of the nodes a pod fits, it picks the emptiest. Bigger nodes do not fix
+# that. On a pool of nodes sized for several runners, each warm runner
+# still lands on its own node. And the do-not-disrupt annotation above
+# means the autoscaler can never move them together later: a spread made
+# at scheduling time lasts until the runners exit. The scheduler profile
+# is not ours to change on a managed control plane, so the lever is the
+# pod spec.
+#
+# What it does. Every runner pod carries the label
+# `ci-plane.io/packing-group: runners` and a PREFERRED podAffinity toward
+# that label, keyed on kubernetes.io/hostname, across ALL namespaces.
+# Runners of every size, every scale set and every release of this chart
+# (one per organization, one namespace each) are one packing group,
+# because they share one node pool. In the default scheduler profile the
+# inter-pod affinity score carries as much weight as the two spreading
+# scores together, and a runner node also already holds the runner image,
+# so a node that already runs runners beats an empty one, and the fuller
+# of two such nodes wins. Karpenter reads the same preference when it
+# provisions, so a burst of pending runners lands on one new node where
+# they fit.
+#
+# What it never does. It is a preference, not a requirement: it never
+# blocks scheduling. When no runner node has room, the pod goes to an
+# empty node or a new one exactly as before. It does not move running
+# pods either; the effect shows as runners are replaced.
+#
+# No anti-affinity toward non-runner pods: a CI pool is expected to be
+# dedicated (the `ci` taint above keeps other workloads off it), so there
+# is nothing on it to steer away from.
+packing:
+  enabled: true
+  # 1..100, the weight of the preferred term. Only its size relative to
+  # other preferred terms in `affinity` matters.
+  weight: 100
+
+# The runner pod's affinity, rendered as given, with the packing term
+# above APPENDED to podAffinity.preferredDuringSchedulingIgnoredDuringExecution
+# when packing is enabled. Setting it does not switch packing off; set
+# packing.enabled: false for that.
+#
+#   affinity:
+#     nodeAffinity:
+#       requiredDuringSchedulingIgnoredDuringExecution:
+#         nodeSelectorTerms:
+#           - matchExpressions:
+#               - {key: kubernetes.io/arch, operator: In, values: [arm64]}
+affinity: {}
+
 # The listener long-polls GitHub for jobs; it schedules wherever the
 # controller namespace allows and needs the same arch tolerance.
 listenerTolerations:
