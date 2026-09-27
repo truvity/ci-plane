@@ -91,6 +91,24 @@ nixBuilders:
     # Bump whenever Secret contents change; participates in the immutable
     # ConfigMap and ARC values hashes, recycling warm runners deterministically.
     revision: ""
+    # INF host-certificates phase 1 (ci-plane). ADDED to the pinned
+    # known_hosts above, not a replacement: both stay valid during a
+    # migration from one static host key per worker Secret to one
+    # `@cert-authority` line trusting every host the CA signs for. Each
+    # entry renders one line:
+    #
+    #   @cert-authority <hosts, comma-joined> <key>
+    #
+    # `hosts` should name the worker Service DNS pattern(s) the CA signs
+    # principals for (ci-builders' nixWorkers.hostCertificate renders
+    # `nix-worker-<arch>.<namespace>.svc.cluster.local` per architecture);
+    # `key` is the CA's own SSH public key (ssh-ed25519 ...), NOT a host
+    # key. Default empty: the rendered ConfigMap key exists but is empty,
+    # so an install that has not migrated renders known_hosts unchanged.
+    certAuthorities: []
+    #   - hosts:
+    #       - "*.ci-cache.svc.cluster.local"
+    #     key: "ssh-ed25519 AAAA..."
   openbao:
     address: ""
     namespace: ""

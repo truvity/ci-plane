@@ -247,6 +247,8 @@ spec:
               - key: job-started.sh
                 path: job-started.sh
                 mode: 0555
+              - key: known-hosts-cert-authorities
+                path: known-hosts-cert-authorities
         # 0444: the runner container runs as `runner`, not root, and its
         # job-started hook must read the token. The boundary is which
         # containers mount it, not the mode: every process in the runner

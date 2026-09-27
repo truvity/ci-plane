@@ -35,6 +35,27 @@ ARG NIX_VERSION=2.35.2
 # cache is never chosen.
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
+# nix-worker-host-cert (INF host-certificates phase 1): signs the worker's
+# OWN SSH host key with an OpenBao SSH secrets engine, so a client's
+# known_hosts can trust one `@cert-authority` line instead of pinning one
+# host key per architecture. A SIBLING binary to image/nix-worker-client
+# (which signs an ephemeral USER key for runner pods), not a mode flag on
+# it -- see that binary's own top-of-file comment for why: the two have
+# unrelated validation policies (host vs. user certificates), unrelated
+# failure contracts (fail-closed on the first sign here, fail-open on
+# renewal; fail-open always there) and unrelated deployment targets. Built
+# the same way: static stdlib-plus-x/crypto/ssh, cross-compiled on the
+# build platform, no third-party HTTP/TLS/JSON.
+# renovate: datasource=docker depName=golang
+FROM --platform=$BUILDPLATFORM golang:1.27 AS hostcert
+ARG TARGETARCH
+COPY nix-worker-host-cert/ /src/nix-worker-host-cert/
+RUN cd /src/nix-worker-host-cert \
+ && go mod download \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags='-s -w' \
+      -o /out/nix-worker-host-cert .
+
 FROM ubuntu:24.04
 
 ARG NIX_VERSION
@@ -65,6 +86,17 @@ RUN apt-get update -qq \
 # 32 nixbld accounts are what a multi-user nix daemon builds as.
 # `nixremote` is the SSH login the runners present a CA-signed
 # certificate for; it has no password and sshd restricts what it may run.
+#
+# `nix` is a SECOND login (INF host-certificates phase 1): the modern
+# ssh-ng protocol via `nix-daemon --stdio`, alongside `nixremote`'s legacy
+# `nix-store --serve`. It needs a real shell, not nologin: sshd's
+# ForceCommand execs the forced command through the account's shell
+# (`$SHELL -c command`), and nologin ignores that argument and just
+# refuses the session -- the same reason nixremote is bash, not nologin.
+# Nobody can actually reach it yet: sshd_config's `Match User nix` block
+# gates on AuthorizedPrincipalsFile /etc/nix-worker/principals/%u, and the
+# chart renders that file EMPTY unless nixWorkers.accounts.nix.principals
+# is set (values.yaml).
 RUN groupadd --system nixbld \
  && for i in $(seq 1 32); do \
       useradd --system --gid nixbld --home-dir /var/empty \
@@ -75,8 +107,11 @@ RUN groupadd --system nixbld \
  && useradd --system --create-home --home-dir /home/nixremote \
       --shell /bin/bash nixremote \
  && passwd -d nixremote \
+ && useradd --system --create-home --home-dir /home/nix \
+      --shell /bin/bash nix \
+ && passwd -d nix \
  && useradd --create-home --home-dir /home/runner --shell /bin/bash runner \
- && mkdir -p /etc/nix-worker /run/sshd \
+ && mkdir -p /etc/nix-worker /etc/nix-worker/principals /run/sshd \
  && chmod 0755 /run/sshd \
  && mkdir -m 0755 /nix \
  && chown runner:runner /nix
@@ -86,6 +121,7 @@ COPY --chmod=0755 nix-worker-entrypoint.sh /usr/local/bin/nix-worker-entrypoint
 COPY --chmod=0755 nix-worker-ssh-command.sh /usr/local/bin/nix-worker-ssh-command
 COPY --chmod=0755 nix-worker-healthcheck.sh /usr/local/bin/nix-worker-healthcheck
 COPY --chmod=0644 sshd_config /etc/nix-worker/sshd_config
+COPY --from=hostcert --chmod=0755 /out/nix-worker-host-cert /usr/local/bin/nix-worker-host-cert
 
 USER runner
 # Docker's USER sets the uid, not the environment -- nix's profile

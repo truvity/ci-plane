@@ -51,6 +51,16 @@ Order matters: caches before runners, controller before both charts.
    Secret exists. Do not add engineer keys or expose worker Services
    outside the cluster.
 
+   **Host certificates (`nixWorkers.hostCertificate`) are an additive
+   alternative to the pinned `ssh.existingSecret` host key above, off by
+   default.** Enabling them signs each worker's own host key against a
+   SECOND OpenBao SSH role (`nixWorkers.openbao.hostSshMount`/
+   `hostSshRole`, `cert_type=host`), and a caller trusts the CA instead of
+   pinning one host key Secret per architecture by adding it to
+   `nixBuilders.knownHosts.certAuthorities` on the runner side — both stay
+   valid at once during a migration. See
+   [architecture.md](architecture.md#worker-host-certificates-phase-1).
+
 ## Install the cache plane
 
 ```bash

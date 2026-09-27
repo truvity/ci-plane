@@ -130,6 +130,70 @@ nixWorkers:
     existingSecret: nix-builder-server
     hostPrivateKeyKey: ssh_host_ed25519_key
     trustedUserCAKeys: []
+
+  # ServiceAccount + projected OpenBao token (INF host-certificates phase
+  # 1). Created and bound to the pod ONLY when hostCertificate.enabled
+  # below: an install that leaves it off keeps the worker's current
+  # identity posture exactly (automountServiceAccountToken: false, no
+  # serviceAccountName at all) -- this section changes nothing for it.
+  serviceAccount:
+    create: true
+    name: nix-worker
+    # ~1h: long enough that a renewal a few minutes late (backoff, a
+    # slow OpenBao) does not lose the token mid-retry; short enough that
+    # kubelet keeps rotating it for the life of the pod.
+    tokenExpirationSeconds: 3600
+
+  # Sign the worker's OWN SSH host key with an OpenBao SSH secrets engine,
+  # so a client's known_hosts can trust one `@cert-authority` line
+  # instead of pinning one host key Secret per architecture (see
+  # charts/arc-runners' nixBuilders.knownHosts.certAuthorities, which is
+  # what actually consumes this). ADDITIVE and OFF by default: `ssh.*`
+  # above is unaffected either way -- HostKey keeps reading the pinned
+  # Secret; this only adds a HostCertificate beside it.
+  hostCertificate:
+    enabled: false
+    # Re-signed this often by a background loop in the SAME container
+    # (nix-worker-entrypoint.sh) that then SIGHUPs sshd -- OpenSSH
+    # re-executes on SIGHUP and reloads a replaced HostCertificate
+    # without dropping an established session. Must stay well under
+    # certificateTTL: a renewal landing after the current certificate
+    # has already expired is a worker no client can still reach. The
+    # chart refuses to render otherwise (templates/nix-workers.yaml).
+    renewEvery: 12h
+    certificateTTL: 24h
+
+  # No estate defaults: a wrong auth mount or role fails every sign
+  # attempt with nothing safe to guess, so each is required render-time
+  # when hostCertificate.enabled (templates/nix-workers.yaml).
+  openbao:
+    address: ""
+    caBundle: "" # base64-encoded PEM of OpenBao's HTTPS issuer CA
+    namespace: ""
+    authMount: ""
+    authRole: ""
+    audience: openbao
+    hostSshMount: ssh   # the SSH secrets engine mount
+    hostSshRole: host   # its host-signing role; must allow cert_type=host
+    requestTimeout: 15s
+
+  # A second SSH login (INF host-certificates phase 1), alongside
+  # `nixremote`'s legacy `nix-store --serve`: the modern ssh-ng protocol
+  # via `nix-daemon --stdio`. The account always exists in the image;
+  # whether it can ever be reached is decided entirely by `principals`.
+  accounts:
+    nix:
+      # AuthorizedPrincipalsFile content for the `nix` account. Empty (the
+      # default) means nobody: sshd's AllowUsers omits `nix` entirely, so
+      # the account cannot log in even holding a certificate signed by
+      # the trusted CA above.
+      principals: []
+      # trusted-users lets an account import store paths WITHOUT
+      # signature verification -- the whole point of Nix's sandboxing
+      # model. Off by default; opt in only for a principal this worker's
+      # operator fully controls end to end.
+      trusted: false
+
   # Each architecture owns its store. The stores are deliberately not
   # shared with BuildKit: independent capacity, GC and failure domains.
   storeSize: 100Gi

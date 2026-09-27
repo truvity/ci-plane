@@ -165,6 +165,58 @@ stores are caches, not artifact authorities or backups. Access by two
 organizations is an explicit shared-cache trust decision: either CI
 identity can submit writes to the same architecture store.
 
+### Worker host certificates (phase 1)
+
+The pinned-host-key path above (`ssh.existingSecret`) does not go away;
+`nixWorkers.hostCertificate` is an ADDITIVE alternative, off by default.
+Enabling it signs the worker's own `ssh_host_ed25519_key` with an OpenBao
+SSH secrets engine — `cert_type=host`, `valid_principals` set to the
+worker's own DNS name, COMPUTED by the chart from the release namespace
+(`nix-worker-<arch>.<namespace>.svc.cluster.local`) rather than taken as
+a raw value, so a public repository never invites an estate-specific
+hostname into a values file. A client that trusts the signing CA's public
+key as an `@cert-authority` line (`arc-runners`'
+`nixBuilders.knownHosts.certAuthorities`) then trusts every worker that
+CA signs for, instead of pinning one host key Secret per architecture —
+both mechanisms stay valid at once during a migration.
+
+Signing and renewal happen in the SAME container as sshd, not a separate
+init container: `nix-worker-entrypoint.sh` signs once before starting
+sshd (**fail-closed** — a failure here exits the container, because a
+worker's host identity has no degraded mode a client can fall back to
+mid-connection, unlike the runner-side user certificates below, which
+fail open) and then runs a background loop that re-signs every
+`renewEvery` (must stay under `certificateTTL`, checked at render time)
+and sends sshd SIGHUP. OpenSSH re-execs itself on SIGHUP, re-reading
+`sshd_config` and reloading a replaced `HostCertificate` from disk
+without dropping an already-established session — verified directly
+against this image's `sshd_config` (same PID throughout; the presented
+certificate's Key ID changed after the signal). A renewal failure logs
+and retries with backoff; it never tears down a running sshd whose
+current certificate is still valid.
+
+Signing is a SIBLING binary to the runner-side `nix-worker-client`
+(`image/nix-worker-host-cert`), not a mode flag on it: the two have
+unrelated validation policies (host vs. user certificates, exact
+principals vs. one fixed principal, no extensions at all vs.
+permit-pty-only), unrelated failure contracts (fail-closed here,
+fail-open there) and unrelated deployment targets (a persistent worker
+pod vs. an ephemeral runner pod). See that binary's own top-of-file
+comment for the full reasoning.
+
+A second SSH login, `nix`, exists in the image alongside `nixremote`'s
+legacy `nix-store --serve`: the modern ssh-ng protocol via `nix-daemon
+--stdio`, gated by `AuthorizedPrincipalsFile` content the chart renders
+from `nixWorkers.accounts.nix.principals` (empty by default — nobody).
+`sshd_config`'s `Match User nix` block is baked into every image
+unconditionally; whether the account is ever reachable is decided by
+whether `AllowUsers` gains `nix`, which `nix-worker-entrypoint.sh`
+computes at container start from that principals file. `trusted-users`
+in the Nix daemon config gains `nix` only when
+`nixWorkers.accounts.nix.trusted` is set — trusted users can import
+store paths WITHOUT signature verification, which is what Nix's
+sandboxing model exists to prevent, so it is off by default.
+
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
