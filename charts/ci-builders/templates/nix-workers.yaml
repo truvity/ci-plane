@@ -7,8 +7,35 @@
 {{- if not $n.archs }}{{ fail "nixWorkers.archs is required when nixWorkers is enabled" }}{{ end }}
 {{- if le (int $n.maxJobs) 0 }}{{ fail "nixWorkers.maxJobs must be positive" }}{{ end }}
 {{- if le (int $n.cores) 0 }}{{ fail "nixWorkers.cores must be positive" }}{{ end }}
+{{- /* INF host-certificates phase 1. Validated the same way as
+     arc-runners' nixBuilders.openbao.certificateTTL: a whole number of
+     s/m/h, converted to seconds so renewEvery can be compared against it
+     -- a renewal at or after the certificate's own TTL is a worker that
+     goes unreachable between the moment the old certificate expires and
+     the moment the (never-run) renewal would have replaced it. */}}
+{{- if $n.hostCertificate.enabled }}
+{{- if not $n.openbao.address }}{{ fail "nixWorkers.openbao.address is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.caBundle }}{{ fail "nixWorkers.openbao.caBundle is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.namespace }}{{ fail "nixWorkers.openbao.namespace is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.authMount }}{{ fail "nixWorkers.openbao.authMount is required when nixWorkers.hostCertificate is enabled: the OpenBao JWT/Kubernetes auth mount the workers log in on (one per environment); there is no default because a wrong mount fails every login into a worker with no host certificate at all" }}{{ end }}
+{{- if not $n.openbao.authRole }}{{ fail "nixWorkers.openbao.authRole is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.audience }}{{ fail "nixWorkers.openbao.audience is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.hostSshMount }}{{ fail "nixWorkers.openbao.hostSshMount is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.hostSshRole }}{{ fail "nixWorkers.openbao.hostSshRole is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.openbao.requestTimeout }}{{ fail "nixWorkers.openbao.requestTimeout is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- if not $n.serviceAccount.name }}{{ fail "nixWorkers.serviceAccount.name is required when nixWorkers.hostCertificate is enabled" }}{{ end }}
+{{- $ttl := toString $n.hostCertificate.certificateTTL }}
+{{- if not (regexMatch "^[0-9]+[smh]$" $ttl) }}{{ fail (printf "nixWorkers.hostCertificate.certificateTTL %q must be a whole number of s, m or h (e.g. 24h)" $ttl) }}{{ end }}
+{{- $renew := toString $n.hostCertificate.renewEvery }}
+{{- if not (regexMatch "^[0-9]+[smh]$" $renew) }}{{ fail (printf "nixWorkers.hostCertificate.renewEvery %q must be a whole number of s, m or h (e.g. 12h)" $renew) }}{{ end }}
+{{- $unitSeconds := dict "s" 1 "m" 60 "h" 3600 }}
+{{- $ttlSeconds := mul (int (regexFind "^[0-9]+" $ttl)) (get $unitSeconds (regexFind "[smh]$" $ttl)) }}
+{{- $renewSeconds := mul (int (regexFind "^[0-9]+" $renew)) (get $unitSeconds (regexFind "[smh]$" $renew)) }}
+{{- if ge (int $renewSeconds) (int $ttlSeconds) }}{{ fail (printf "nixWorkers.hostCertificate.renewEvery %q must be less than certificateTTL %q: a renewal at or after the certificate's own lifetime leaves the worker unreachable between expiry and the (too-late) renewal" $renew $ttl) }}{{ end }}
+{{- end }}
 {{- $trustedCAs := join "\n" $n.ssh.trustedUserCAKeys }}
 {{- $caName := printf "nix-worker-trusted-user-ca-%s" ($trustedCAs | sha256sum | trunc 12) }}
+{{- $principalsName := printf "nix-worker-principals-%s" (join "," $n.accounts.nix.principals | sha256sum | trunc 12) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -21,6 +48,57 @@ data:
   trusted_user_ca_keys: |-
     {{- $trustedCAs | nindent 4 }}
 immutable: true
+---
+# AuthorizedPrincipalsFile content for the `nix` SSH login
+# (nixWorkers.accounts.nix.principals). Content-addressed like the CA
+# ConfigMap above, so changing the list rotates the object rather than
+# mutating an immutable one in place. Rendered even with an EMPTY list:
+# the file then exists and is empty, which is what
+# nix-worker-entrypoint.sh reads as "nobody" -- an absent mount would read
+# the same way, but an always-present file keeps the container's
+# behaviour independent of whether this ConfigMap happens to exist.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $principalsName }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+data:
+  # A quoted FLOW scalar, deliberately not a `|-` block: a block scalar
+  # still emits an indent-only line for an EMPTY list, and
+  # nix-worker-entrypoint.sh's `[[ -s file ]]` would then see that
+  # whitespace as "non-empty" and read it as "principals configured" --
+  # exactly backwards from the default this key exists to protect
+  # (default empty -> nobody). `quote` on an empty join renders "", which
+  # mounts as a genuinely zero-byte file.
+  nix: {{ join "\n" $n.accounts.nix.principals | quote }}
+immutable: true
+{{- if $n.hostCertificate.enabled }}
+{{- if $n.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $n.serviceAccount.name }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+{{- end }}
+---
+# OpenBao's HTTPS issuer CA, decoded once and shared by every
+# architecture's worker (they all sign against the same OpenBao route).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nix-worker-openbao-ca
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+data:
+  ca.crt: |-
+    {{- $n.openbao.caBundle | b64dec | nindent 4 }}
+{{- end }}
 {{- range $arch := $n.archs }}
 ---
 apiVersion: v1
@@ -66,6 +144,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- if $n.hostCertificate.enabled }}
+      serviceAccountName: {{ $n.serviceAccount.name }}
+      {{- end }}
       automountServiceAccountToken: false
       enableServiceLinks: false
       {{- $sched := (index $n.scheduling $arch) | default dict }}
@@ -114,6 +195,32 @@ spec:
               value: {{ $n.minFreeBytes | quote }}
             - name: NIX_WORKER_MAX_FREE_BYTES
               value: {{ $n.maxFreeBytes | quote }}
+            - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
+              value: {{ $n.accounts.nix.trusted | quote }}
+            {{- if $n.hostCertificate.enabled }}
+            - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
+              value: "true"
+            - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
+              value: {{ $n.hostCertificate.renewEvery | quote }}
+            - name: NIX_WORKER_CERTIFICATE_TTL
+              value: {{ $n.hostCertificate.certificateTTL | quote }}
+            - name: NIX_WORKER_OPENBAO_ADDRESS
+              value: {{ $n.openbao.address | quote }}
+            - name: NIX_WORKER_OPENBAO_NAMESPACE
+              value: {{ $n.openbao.namespace | quote }}
+            - name: NIX_WORKER_OPENBAO_AUTH_MOUNT
+              value: {{ $n.openbao.authMount | quote }}
+            - name: NIX_WORKER_OPENBAO_AUTH_ROLE
+              value: {{ $n.openbao.authRole | quote }}
+            - name: NIX_WORKER_OPENBAO_SSH_MOUNT
+              value: {{ $n.openbao.hostSshMount | quote }}
+            - name: NIX_WORKER_OPENBAO_SSH_ROLE
+              value: {{ $n.openbao.hostSshRole | quote }}
+            - name: NIX_WORKER_REQUEST_TIMEOUT
+              value: {{ $n.openbao.requestTimeout | quote }}
+            - name: NIX_WORKER_HOST_PRINCIPALS
+              value: {{ include "ci-builders.nixWorkerHostPrincipal" (dict "arch" $arch "namespace" $.Release.Namespace) | quote }}
+            {{- end }}
           ports:
             - name: ssh
               containerPort: 2222
@@ -153,6 +260,17 @@ spec:
             - name: trusted-user-ca
               mountPath: /etc/nix-worker/ca
               readOnly: true
+            - name: principals
+              mountPath: /etc/nix-worker/principals
+              readOnly: true
+            {{- if $n.hostCertificate.enabled }}
+            - name: openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: openbao-ca
+              mountPath: /var/run/nix-worker-openbao
+              readOnly: true
+            {{- end }}
       volumes:
         - name: runtime
           emptyDir: {}
@@ -173,6 +291,24 @@ spec:
           configMap:
             name: {{ $caName }}
             defaultMode: 0444
+        - name: principals
+          configMap:
+            name: {{ $principalsName }}
+            defaultMode: 0444
+        {{- if $n.hostCertificate.enabled }}
+        - name: openbao-token
+          projected:
+            defaultMode: 0400
+            sources:
+              - serviceAccountToken:
+                  audience: {{ $n.openbao.audience | quote }}
+                  expirationSeconds: {{ $n.serviceAccount.tokenExpirationSeconds }}
+                  path: token
+        - name: openbao-ca
+          configMap:
+            name: nix-worker-openbao-ca
+            defaultMode: 0444
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: store

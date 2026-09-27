@@ -49,6 +49,48 @@ jobs:
             --set runnerImage.registry=example.ecr/github \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
+          # INF host-certificates phase 1: the estate-shaped overlay for
+          # signing the worker's OWN host key, plus the second SSH login
+          # (nixWorkers.accounts.nix).
+          helm template test charts/ci-builders \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a}' \
+            --set nixWorkers.hostCertificate.enabled=true \
+            --set nixWorkers.openbao.address=https://openbao.example \
+            --set nixWorkers.openbao.namespace=devel \
+            --set nixWorkers.openbao.caBundle=dGVzdA== \
+            --set nixWorkers.openbao.authMount=jwt-devel \
+            --set nixWorkers.openbao.authRole=nix-worker \
+            --set-string 'nixWorkers.accounts.nix.principals[0]=ci@example' \
+            --set nixWorkers.accounts.nix.trusted=true \
+            > /dev/null
+          # Two render-time refusals, the same idiom as the goModproxy
+          # guard below: enabling hostCertificate without its required
+          # OpenBao route, and a renewEvery at or past certificateTTL --
+          # a renewal that can never land before the current certificate
+          # expires is a worker no client can still reach.
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixWorkers.hostCertificate.enabled=true > /dev/null 2>&1; then
+            echo "hostCertificate guard did not fire on a missing OpenBao route" >&2
+            exit 1
+          fi
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixWorkers.hostCertificate.enabled=true \
+               --set nixWorkers.openbao.address=https://openbao.example \
+               --set nixWorkers.openbao.namespace=devel \
+               --set nixWorkers.openbao.caBundle=dGVzdA== \
+               --set nixWorkers.openbao.authMount=jwt-devel \
+               --set nixWorkers.openbao.authRole=nix-worker \
+               --set nixWorkers.hostCertificate.renewEvery=24h \
+               --set nixWorkers.hostCertificate.certificateTTL=24h > /dev/null 2>&1; then
+            echo "hostCertificate guard did not fire on renewEvery >= certificateTTL" >&2
+            exit 1
+          fi
           helm template test charts/arc-runners \
             --set githubConfigUrl=https://github.com/example \
             --set runnerServiceAccountName=preview-runner \
@@ -63,6 +105,45 @@ jobs:
             --set nixBuilders.openbao.authRole=runner-example \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
+          # INF host-certificates phase 1: certAuthorities is ADDED to the
+          # pinned known_hosts Secret content, not a replacement for it --
+          # both stay valid during a migration, so the rendered
+          # known-hosts-cert-authorities key must actually carry the
+          # `@cert-authority` line the value asked for.
+          ca_out=$(helm template test charts/arc-runners \
+            --set githubConfigUrl=https://github.com/example \
+            --set runnerServiceAccountName=preview-runner \
+            --set nixBuilders.enabled=true \
+            --set nixBuilders.openbao.address=https://openbao.example \
+            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.caBundle=dGVzdA== \
+            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
+            --set nixBuilders.knownHosts.revision=test-v1 \
+            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authRole=runner-example \
+            --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.ci-cache.svc.cluster.local' \
+            --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA')
+          if ! grep -qF -- '@cert-authority *.ci-cache.svc.cluster.local ssh-ed25519 AAAACA' <<< "$ca_out"; then
+            echo "nixBuilders.knownHosts.certAuthorities render is missing its @cert-authority line" >&2
+            exit 1
+          fi
+          # And the refusal: an entry with no hosts is not a CA anyone
+          # could ever match.
+          if helm template test charts/arc-runners \
+               --set githubConfigUrl=https://github.com/example \
+               --set runnerServiceAccountName=preview-runner \
+               --set nixBuilders.enabled=true \
+               --set nixBuilders.openbao.address=https://openbao.example \
+               --set nixBuilders.openbao.namespace=devel \
+               --set nixBuilders.openbao.caBundle=dGVzdA== \
+               --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixBuilders.knownHosts.revision=test-v1 \
+               --set nixBuilders.openbao.authMount=jwt-devel \
+               --set nixBuilders.openbao.authRole=runner-example \
+               --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA' > /dev/null 2>&1; then
+            echo "certAuthorities guard did not fire on a missing hosts list" >&2
+            exit 1
+          fi
           bash -n image/nix-worker-*.sh
           # The removed-values guard has to FAIL, and a guard nobody
           # ever proves failing is a comment. An estate porting values
@@ -176,19 +257,29 @@ jobs:
           cp /tmp/arc-runners.bak charts/arc-runners/values.yaml
           git diff --exit-code -- charts/ || { echo "::error::the dry run left the charts modified"; exit 1; }
 
-  # The OpenBao bootstrap's certificate policy (one principal, permit-pty
-  # only, no critical options, <= 1h) and its fail-open setup path.
+  # Two independent binaries, each with its own certificate policy:
+  # nix-worker-client (one principal, permit-pty only, no critical
+  # options, <= 1h, fail-OPEN) signs an ephemeral USER key for a runner
+  # pod; nix-worker-host-cert (exact principals, no extensions or
+  # critical options at all, fail-CLOSED on the first sign) signs a
+  # worker's own HOST key. A matrix, not one job for both: see
+  # nix-worker-host-cert's top-of-file comment for why they are siblings
+  # rather than one binary.
   go:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [nix-worker-client, nix-worker-host-cert]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: image/nix-worker-client/go.mod
-          cache-dependency-path: image/nix-worker-client/go.sum
+          go-version-file: image/${{ matrix.module }}/go.mod
+          cache-dependency-path: image/${{ matrix.module }}/go.sum
       - name: Vet and test
-        working-directory: image/nix-worker-client
+        working-directory: image/${{ matrix.module }}
         run: |
           set -euo pipefail
           test -z "$(gofmt -l .)"

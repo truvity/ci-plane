@@ -45,28 +45,29 @@ const (
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 type config struct {
-	address             *url.URL
-	namespace           string
-	authMount           string
-	authRole            string
-	sshMount            string
-	sshRole             string
-	certificateTTL      string
-	certificateDuration time.Duration
-	timeout             time.Duration
-	tokenFile           string
-	caFile              string
-	sshCAFile           string
-	knownHostsSource    string
-	sshConfigSource     string
-	machinesSource      string
-	sshDir              string
-	machinesDir         string
-	podName             string
-	podNamespace        string
-	podUID              string
-	runnerUID           int
-	runnerGID           int
+	address               *url.URL
+	namespace             string
+	authMount             string
+	authRole              string
+	sshMount              string
+	sshRole               string
+	certificateTTL        string
+	certificateDuration   time.Duration
+	timeout               time.Duration
+	tokenFile             string
+	caFile                string
+	sshCAFile             string
+	knownHostsSource      string
+	certAuthoritiesSource string
+	sshConfigSource       string
+	machinesSource        string
+	sshDir                string
+	machinesDir           string
+	podName               string
+	podNamespace          string
+	podUID                string
+	runnerUID             int
+	runnerGID             int
 }
 
 type loginResponse struct {
@@ -148,6 +149,7 @@ func loadConfig() (config, error) {
 	cfg.caFile = envOr("NIX_BUILDER_OPENBAO_CA_FILE", "/var/run/nix-builder-config/openbao-ca.crt")
 	cfg.sshCAFile = envOr("NIX_BUILDER_SSH_CA_FILE", "/var/run/nix-builder-config/ssh-user-ca.pub")
 	cfg.knownHostsSource = envOr("NIX_BUILDER_KNOWN_HOSTS_FILE", "/var/run/nix-builder-known-hosts/known_hosts")
+	cfg.certAuthoritiesSource = envOr("NIX_BUILDER_KNOWN_HOSTS_CERT_AUTHORITIES_FILE", "/var/run/nix-builder-config/known-hosts-cert-authorities")
 	cfg.sshConfigSource = envOr("NIX_BUILDER_SSH_CONFIG_FILE", "/var/run/nix-builder-config/ssh_config")
 	cfg.machinesSource = envOr("NIX_BUILDER_MACHINES_TEMPLATE", "/var/run/nix-builder-config/machines.template")
 	cfg.sshDir = envOr("NIX_BUILDER_SSH_DIR", "/var/run/nix-builder-ssh")
@@ -189,6 +191,15 @@ func prepareOutputs(cfg config) error {
 	knownHosts, err := readBounded(cfg.knownHostsSource, 64<<10)
 	if err != nil || len(bytes.TrimSpace(knownHosts)) == 0 {
 		return errors.New("known_hosts is missing or empty")
+	}
+	// INF host-certificates phase 1: ADDED to the pinned Secret content,
+	// never a replacement -- both a static per-worker host key and a CA
+	// trusted for a whole DNS pattern stay valid at once during a
+	// migration. Absent or empty (an unmigrated install, or one that
+	// simply has not set nixBuilders.knownHosts.certAuthorities) appends
+	// nothing, so this is a no-op for every caller until they opt in.
+	if certAuthorities, err := readBounded(cfg.certAuthoritiesSource, 64<<10); err == nil && len(bytes.TrimSpace(certAuthorities)) > 0 {
+		knownHosts = append(append(bytes.TrimRight(knownHosts, "\n"), '\n'), certAuthorities...)
 	}
 	if err := atomicWrite(filepath.Join(cfg.sshDir, "known_hosts"), knownHosts, 0o644, cfg.runnerUID, cfg.runnerGID); err != nil {
 		return fmt.Errorf("publish known_hosts: %w", err)

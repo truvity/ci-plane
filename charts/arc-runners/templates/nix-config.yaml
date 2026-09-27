@@ -22,6 +22,13 @@ data:
     {{- join "\n" .Values.nixBuilders.openbao.sshCAPublicKeys | nindent 4 }}
   job-started.sh: |-
     {{- include "arc-runners.nixJobStartedHook" . | nindent 4 }}
+  # A quoted FLOW scalar, not a `|-` block: a block scalar still emits an
+  # indent-only line when certAuthorities is empty, and the setup
+  # binary's "is this file non-empty" check would then see whitespace
+  # instead of "nothing to append" -- the same trap ci-builders' worker
+  # principals ConfigMap documents. Default empty renders "", a
+  # genuinely zero-byte file, so an unmigrated install appends nothing.
+  known-hosts-cert-authorities: {{ include "arc-runners.nixKnownHostsCertAuthorities" . | quote }}
   {{- end }}
 immutable: true
 {{- end }}

@@ -50,6 +50,24 @@ ssh://{{ $.Values.nixBuilders.sshUser }}@{{ $builder.host }} {{ $builder.system 
 {{- end }}
 {{- end -}}
 
+{{- /*
+INF host-certificates phase 1. Renders one `@cert-authority` line per
+nixBuilders.knownHosts.certAuthorities entry, joined with newlines; an
+empty list renders "". Appended by nix-worker-client's setup binary to
+the pinned known_hosts Secret content -- both stay valid at once during
+a migration from one static host key per worker to one CA line trusting
+every host it signs for.
+*/ -}}
+{{- define "arc-runners.nixKnownHostsCertAuthorities" -}}
+{{- $lines := list -}}
+{{- range $i, $ca := .Values.nixBuilders.knownHosts.certAuthorities -}}
+{{- if not $ca.hosts }}{{ fail (printf "nixBuilders.knownHosts.certAuthorities[%d].hosts is required" $i) }}{{ end -}}
+{{- if not ($ca.key | trim) }}{{ fail (printf "nixBuilders.knownHosts.certAuthorities[%d].key is required" $i) }}{{ end -}}
+{{- $lines = append $lines (printf "@cert-authority %s %s" (join "," $ca.hosts) $ca.key) -}}
+{{- end -}}
+{{- join "\n" $lines -}}
+{{- end -}}
+
 {{- define "arc-runners.nixSSHConfig" -}}
 Host{{ range $builder := .Values.nixBuilders.builders }} {{ $builder.host }}{{ end }}
   BatchMode yes

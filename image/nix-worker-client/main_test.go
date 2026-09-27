@@ -271,15 +271,21 @@ func setupConfig(t *testing.T, server *httptest.Server, ca testCA) config {
 		caFile:              write("ca.crt", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})),
 		sshCAFile:           write("ssh-user-ca.pub", ssh.MarshalAuthorizedKey(ca.public)),
 		knownHostsSource:    write("known_hosts", []byte("worker ssh-ed25519 AAAATEST\n")),
-		sshConfigSource:     write("ssh_config", []byte("Host worker\n  BatchMode yes\n")),
-		machinesSource:      write("machines.template", []byte("ssh://nixremote@worker x86_64-linux /home/runner/.ssh/nix-builder 2 1 - -\n")),
-		sshDir:              filepath.Join(dir, "ssh"),
-		machinesDir:         filepath.Join(dir, "machines"),
-		podName:             "runner-0",
-		podNamespace:        "runners",
-		podUID:              "uid",
-		runnerUID:           os.Getuid(),
-		runnerGID:           os.Getgid(),
+		// Deliberately pointed at a file that does not exist: an
+		// unmigrated caller (no certAuthorities set) never has this
+		// ConfigMap key mounted at all in an old chart render, and
+		// prepareOutputs/configureRemote must treat that the same as an
+		// empty one -- nothing appended, known_hosts unchanged.
+		certAuthoritiesSource: filepath.Join(dir, "known-hosts-cert-authorities"),
+		sshConfigSource:       write("ssh_config", []byte("Host worker\n  BatchMode yes\n")),
+		machinesSource:        write("machines.template", []byte("ssh://nixremote@worker x86_64-linux /home/runner/.ssh/nix-builder 2 1 - -\n")),
+		sshDir:                filepath.Join(dir, "ssh"),
+		machinesDir:           filepath.Join(dir, "machines"),
+		podName:               "runner-0",
+		podNamespace:          "runners",
+		podUID:                "uid",
+		runnerUID:             os.Getuid(),
+		runnerGID:             os.Getgid(),
 	}
 	return cfg
 }
@@ -308,6 +314,51 @@ func TestSetupEnablesRemoteWithPermitPTYCertificate(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(cfg.sshDir, name)); err != nil {
 			t.Errorf("%s not published: %v", name, err)
 		}
+	}
+	published, err := os.ReadFile(filepath.Join(cfg.sshDir, "known_hosts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No certAuthorities file present (setupConfig points at one that
+	// does not exist): the pinned Secret content is published unchanged,
+	// nothing appended.
+	pinned, err := os.ReadFile(cfg.knownHostsSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(published) != string(pinned) {
+		t.Errorf("known_hosts with no certAuthorities file: got %q, want the pinned content %q unchanged", published, pinned)
+	}
+}
+
+// INF host-certificates phase 1: a caller who has set
+// nixBuilders.knownHosts.certAuthorities gets those `@cert-authority`
+// lines APPENDED to the pinned known_hosts Secret, not in place of it.
+func TestPrepareOutputsAppendsCertAuthorities(t *testing.T) {
+	ca := newTestCA(t)
+	var gotTTL string
+	server := fakeOpenBao(t, ca, map[string]string{permitPTY: ""}, &gotTTL)
+	defer server.Close()
+	cfg := setupConfig(t, server, ca)
+	caLine := "@cert-authority *.ci-cache.svc.cluster.local ssh-ed25519 AAAACA\n"
+	if err := os.WriteFile(cfg.certAuthoritiesSource, []byte(caLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := prepareOutputs(cfg); err != nil {
+		t.Fatal(err)
+	}
+	published, err := os.ReadFile(filepath.Join(cfg.sshDir, "known_hosts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := os.ReadFile(cfg.knownHostsSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimRight(string(pinned), "\n") + "\n" + caLine
+	if string(published) != want {
+		t.Errorf("known_hosts with certAuthorities: got %q, want %q", published, want)
 	}
 }
 

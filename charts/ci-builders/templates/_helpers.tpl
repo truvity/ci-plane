@@ -49,3 +49,16 @@ they are referenced, only in what they point at.
 {{ .registry }}/{{ .repository }}:{{ .tag }}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+The one architecture's worker's own SSH host-certificate principal name.
+COMPUTED from the release namespace, never a raw value -- an estate names
+its own hosts everywhere else, but a public repository must not invite
+one into pasting a cluster- or estate-specific hostname into a values
+file for the one thing that has to match the worker's actual DNS name
+exactly. Matches the Service this chart already renders
+(templates/nix-workers.yaml: `nix-worker-<arch>`).
+*/ -}}
+{{- define "ci-builders.nixWorkerHostPrincipal" -}}
+{{- printf "nix-worker-%s.%s.svc.cluster.local" .arch .namespace -}}
+{{- end -}}
