@@ -443,6 +443,19 @@ jobs:
               --build-arg BASE_IMAGE=alpine --build-arg BASE_TAG=3.21 image/ || true
           done
 
+      # The `nix` login only fails once something mounts a ConfigMap the
+      # way kubelet does -- a unit test of the entrypoint script cannot
+      # see it, which is exactly how the bug this guards against shipped.
+      # Builds and --load's its own copy of the image (the "no push"
+      # build above only proves it assembles), so this runs on the amd64
+      # image alone, same as the build step. See the script's own
+      # top-of-file comment for the two containers / one docker network
+      # design and for PROVE_CATCHES_BUG, which is deliberately NOT set
+      # here: it builds a second image from origin/master to prove a
+      # property of the test itself, not of this change.
+      - name: nix-worker principals e2e
+        run: ./hack/nix-worker-principals-e2e.sh
+
   # A stable name for branch protection to require.
   check:
     needs: [charts, go, image]

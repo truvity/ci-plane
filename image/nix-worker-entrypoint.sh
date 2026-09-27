@@ -4,6 +4,7 @@ set -euo pipefail
 runtime_dir=${NIX_WORKER_RUNTIME_DIR:-/run/nix-worker}
 ssh_dir=${NIX_WORKER_SSH_DIR:-/etc/nix-worker/ssh}
 trusted_user_ca=${NIX_WORKER_TRUSTED_USER_CA_FILE:-/etc/nix-worker/ca/trusted_user_ca_keys}
+principals_src_dir=${NIX_WORKER_PRINCIPALS_SRC_DIR:-/etc/nix-worker/principals-src}
 max_jobs=${NIX_WORKER_MAX_JOBS:-2}
 cores=${NIX_WORKER_CORES:-4}
 min_free=${NIX_WORKER_MIN_FREE_BYTES:-10737418240}
@@ -19,7 +20,27 @@ max_free=${NIX_WORKER_MAX_FREE_BYTES:-21474836480}
 # file means nobody. AllowUsers only needs to gain `nix` when that file
 # is non-empty; sshd_config bakes the Match block unconditionally, so
 # whether the account can ever be reached is decided entirely here.
-nix_principals_file=/etc/nix-worker/principals/nix
+#
+# The ConfigMap itself is mounted read-only at $principals_src_dir, NOT
+# at the path sshd is told to trust. Kubernetes' ConfigMap volume plugin
+# (the "atomic writer") makes the mount directory itself 0777 and every
+# file in it a symlink through a timestamped `..data` directory -- both
+# of which OpenSSH's `StrictModes yes` refuses for an
+# AuthorizedPrincipalsFile path, which it checks component by component
+# ("bad ownership or modes for directory ...", then "Certificate does
+# not contain an authorized principal" once sshd gives up and treats the
+# file as unreadable). So sshd is never pointed at the ConfigMap mount:
+# the real content is copied, once, into a root-owned directory with
+# strict modes underneath $runtime_dir (an emptyDir sshd already trusts
+# for its own PidFile), and AuthorizedPrincipalsFile in image/sshd_config
+# names that copy instead. `install` resolves the `..data` symlink chain
+# itself (it copies the target's bytes, never a link), which is exactly
+# the "content, not the link" ownership/mode reset this needs.
+install -d -o root -g root -m 0755 "$runtime_dir"
+install -d -o root -g root -m 0755 "$runtime_dir/principals"
+[[ -e "$principals_src_dir/nix" ]]
+install -o root -g root -m 0644 "$principals_src_dir/nix" "$runtime_dir/principals/nix"
+nix_principals_file="$runtime_dir/principals/nix"
 allow_nix_login=false
 [[ -s "$nix_principals_file" ]] && allow_nix_login=true
 nix_trusted=${NIX_WORKER_ACCOUNTS_NIX_TRUSTED:-false}

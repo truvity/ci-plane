@@ -31,14 +31,22 @@ LogLevel VERBOSE
 # A SECOND login (INF host-certificates phase 1): the modern ssh-ng
 # protocol via `nix-daemon --stdio`, gated independently of `nixremote`
 # above. AuthorizedPrincipalsFile, not a fixed principal: the chart
-# renders /etc/nix-worker/principals/nix from
-# nixWorkers.accounts.nix.principals, and an EMPTY file (the default)
-# means no principal matches, so a certificate signed by the trusted CA
-# above still cannot log in as `nix` -- AllowUsers above gains `nix` only
-# when that list is non-empty (nix-worker-entrypoint.sh), which is what
-# actually determines whether this Match block is ever reached.
+# renders the content of nixWorkers.accounts.nix.principals into a
+# ConfigMap, and an EMPTY file (the default) means no principal matches,
+# so a certificate signed by the trusted CA above still cannot log in as
+# `nix` -- AllowUsers above gains `nix` only when that list is non-empty
+# (nix-worker-entrypoint.sh), which is what actually determines whether
+# this Match block is ever reached.
+#
+# This path is under /run/nix-worker (an emptyDir sshd already trusts
+# for PidFile above), NOT the ConfigMap's own mount point
+# (/etc/nix-worker/principals-src) -- StrictModes refuses that mount
+# outright (Kubernetes' ConfigMap volume plugin makes the mount
+# directory 0777 and every file in it a symlink). The entrypoint copies
+# the ConfigMap's content here, once at startup, into a directory it
+# creates with root ownership and strict modes.
 Match User nix
-    AuthorizedPrincipalsFile /etc/nix-worker/principals/%u
+    AuthorizedPrincipalsFile /run/nix-worker/principals/%u
     ForceCommand /usr/local/libexec/nix-worker/nix-daemon --stdio
     PermitTTY no
     DisableForwarding yes
