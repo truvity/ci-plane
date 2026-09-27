@@ -28,7 +28,16 @@ import (
 
 const (
 	maxResponseBytes = 1 << 20
-	workerPrincipal  = "nixremote"
+
+	// Today's shape, unchanged: the legacy account and principal, the
+	// classic ssh:// store protocol. A cut-over to ssh-ng picks a
+	// different principal (bound to the worker's second login,
+	// ci-builders' nixWorkers.accounts.nix) and protocol; both come in
+	// as NIX_BUILDER_PRINCIPAL / NIX_BUILDER_PROTOCOL and default to
+	// these.
+	defaultPrincipal = "nixremote"
+	protocolSSH      = "ssh"
+	protocolSSHNG    = "ssh-ng"
 
 	// The signing role caps certificates at one hour, so asking for more
 	// is a configuration error, never a silently truncated certificate.
@@ -38,8 +47,21 @@ const (
 
 	// permitPTY is the one extension a certificate may carry: the signing
 	// role always adds it. It is inert on the workers (sshd PermitTTY no);
-	// any other extension or any critical option is refused.
+	// any other extension is refused regardless of protocol.
 	permitPTY = "permit-pty"
+
+	// forceCommand is a critical option, never an extension (OpenSSH
+	// certificate semantics). Under protocol ssh-ng it is the ONE
+	// critical option a signing role may add -- Vault/OpenBao applies a
+	// role's default_critical_options even though the client never asks
+	// for critical_options itself (the role's grant refuses any request
+	// that names critical_options at all) -- and it must equal exactly
+	// what the worker's `Match User nix` block forces server-side
+	// (image/sshd_config), or the certificate cannot work against that
+	// account. Under the legacy ssh protocol no critical option is ever
+	// accepted, same as before this existed.
+	forceCommand          = "force-command"
+	nixDaemonStdioCommand = "nix-daemon --stdio"
 )
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -51,6 +73,9 @@ type config struct {
 	authRole              string
 	sshMount              string
 	sshRole               string
+	principal             string
+	protocol              string
+	knownHostsPinned      bool
 	certificateTTL        string
 	certificateDuration   time.Duration
 	timeout               time.Duration
@@ -122,15 +147,32 @@ func loadConfig() (config, error) {
 	cfg.authRole = requiredEnv("NIX_BUILDER_OPENBAO_AUTH_ROLE")
 	cfg.sshMount = requiredEnv("NIX_BUILDER_OPENBAO_SSH_MOUNT")
 	cfg.sshRole = requiredEnv("NIX_BUILDER_OPENBAO_SSH_ROLE")
+	cfg.principal = envOr("NIX_BUILDER_PRINCIPAL", defaultPrincipal)
 	for label, value := range map[string]string{
 		"auth mount": cfg.authMount,
 		"auth role":  cfg.authRole,
 		"SSH mount":  cfg.sshMount,
 		"SSH role":   cfg.sshRole,
+		"principal":  cfg.principal,
 	} {
 		if !safeName.MatchString(value) {
 			return cfg, fmt.Errorf("%s contains unsupported characters", label)
 		}
+	}
+
+	cfg.protocol = envOr("NIX_BUILDER_PROTOCOL", protocolSSH)
+	if cfg.protocol != protocolSSH && cfg.protocol != protocolSSHNG {
+		return cfg, fmt.Errorf("NIX_BUILDER_PROTOCOL %q must be %q or %q", cfg.protocol, protocolSSH, protocolSSHNG)
+	}
+
+	knownHostsPinned := envOr("NIX_BUILDER_KNOWN_HOSTS_PINNED", "true")
+	switch knownHostsPinned {
+	case "true":
+		cfg.knownHostsPinned = true
+	case "false":
+		cfg.knownHostsPinned = false
+	default:
+		return cfg, fmt.Errorf("NIX_BUILDER_KNOWN_HOSTS_PINNED %q must be \"true\" or \"false\"", knownHostsPinned)
 	}
 
 	ttl, err := parseCertificateTTL(os.Getenv("NIX_BUILDER_CERTIFICATE_TTL"))
@@ -188,18 +230,37 @@ func prepareOutputs(cfg config) error {
 		return fmt.Errorf("publish empty machines file: %w", err)
 	}
 
-	knownHosts, err := readBounded(cfg.knownHostsSource, 64<<10)
-	if err != nil || len(bytes.TrimSpace(knownHosts)) == 0 {
-		return errors.New("known_hosts is missing or empty")
-	}
-	// INF host-certificates phase 1: ADDED to the pinned Secret content,
-	// never a replacement -- both a static per-worker host key and a CA
-	// trusted for a whole DNS pattern stay valid at once during a
-	// migration. Absent or empty (an unmigrated install, or one that
-	// simply has not set nixBuilders.knownHosts.certAuthorities) appends
-	// nothing, so this is a no-op for every caller until they opt in.
-	if certAuthorities, err := readBounded(cfg.certAuthoritiesSource, 64<<10); err == nil && len(bytes.TrimSpace(certAuthorities)) > 0 {
-		knownHosts = append(append(bytes.TrimRight(knownHosts, "\n"), '\n'), certAuthorities...)
+	certAuthorities, caErr := readBounded(cfg.certAuthoritiesSource, 64<<10)
+	haveCertAuthorities := caErr == nil && len(bytes.TrimSpace(certAuthorities)) > 0
+
+	var knownHosts []byte
+	if cfg.knownHostsPinned {
+		var err error
+		knownHosts, err = readBounded(cfg.knownHostsSource, 64<<10)
+		if err != nil || len(bytes.TrimSpace(knownHosts)) == 0 {
+			return errors.New("known_hosts is missing or empty")
+		}
+		// Host-certificates phase 1: certAuthorities is ADDED to the
+		// pinned Secret content, never a replacement -- both a static
+		// per-worker host key and a CA trusted for a whole DNS pattern
+		// stay valid at once during a migration. Absent or empty (an
+		// unmigrated install, or one that simply has not set
+		// nixBuilders.knownHosts.certAuthorities) appends nothing, so
+		// this is a no-op for every caller until they opt in.
+		if haveCertAuthorities {
+			knownHosts = append(append(bytes.TrimRight(knownHosts, "\n"), '\n'), certAuthorities...)
+		}
+	} else {
+		// pinned: false -- the pinned Secret is neither required nor
+		// even mounted (the chart omits that volume entirely); the
+		// render-time guard already refused an empty certAuthorities
+		// list (that combination would trust nothing), but a stale or
+		// hand-built config could still reach this binary, so it is
+		// checked again here rather than trusted blind.
+		if !haveCertAuthorities {
+			return errors.New("known_hosts is unpinned (knownHosts.pinned=false) and certAuthorities is empty: nothing to trust")
+		}
+		knownHosts = certAuthorities
 	}
 	if err := atomicWrite(filepath.Join(cfg.sshDir, "known_hosts"), knownHosts, 0o644, cfg.runnerUID, cfg.runnerGID); err != nil {
 		return fmt.Errorf("publish known_hosts: %w", err)
@@ -309,7 +370,7 @@ func configureRemote(cfg config) error {
 	if err := postJSON(ctx, client, cfg, cfg.sshMount+"/sign/"+cfg.sshRole, login.Auth.ClientToken, map[string]string{
 		"public_key":       string(publicKey),
 		"cert_type":        "user",
-		"valid_principals": workerPrincipal,
+		"valid_principals": cfg.principal,
 		"ttl":              cfg.certificateTTL,
 	}, &signed); err != nil {
 		return fmt.Errorf("OpenBao SSH signing: %w", err)
@@ -323,7 +384,7 @@ func configureRemote(cfg config) error {
 	if err := os.WriteFile(certPath, certData, 0o600); err != nil {
 		return fmt.Errorf("write staged certificate: %w", err)
 	}
-	if err := validateCertificate(certData, publicKey, authorities, workerPrincipal, cfg.certificateDuration); err != nil {
+	if err := validateCertificate(certData, publicKey, authorities, cfg.principal, cfg.certificateDuration, cfg.protocol); err != nil {
 		return fmt.Errorf("validate signed certificate: %w", err)
 	}
 
@@ -400,7 +461,7 @@ func parseCertificateTTL(value string) (time.Duration, error) {
 	return ttl, nil
 }
 
-func validateCertificate(certData, publicKeyData []byte, authorities []ssh.PublicKey, principal string, requestedTTL time.Duration) error {
+func validateCertificate(certData, publicKeyData []byte, authorities []ssh.PublicKey, principal string, requestedTTL time.Duration, protocol string) error {
 	parsed, _, options, rest, err := ssh.ParseAuthorizedKey(certData)
 	if err != nil || len(options) != 0 || len(bytes.TrimSpace(rest)) != 0 {
 		return errors.New("signer returned an invalid OpenSSH certificate")
@@ -420,8 +481,27 @@ func validateCertificate(certData, publicKeyData []byte, authorities []ssh.Publi
 	if len(cert.ValidPrincipals) != 1 || cert.ValidPrincipals[0] != principal {
 		return fmt.Errorf("certificate principals are %v, want only %s", cert.ValidPrincipals, principal)
 	}
-	if len(cert.CriticalOptions) != 0 {
-		return fmt.Errorf("certificate carries critical options %v; want none", sortedKeys(cert.CriticalOptions))
+	// Under ssh-ng a signing role may add force-command as a
+	// default_critical_option without the request ever naming
+	// critical_options (the role's grant refuses a request that does) --
+	// so its PRESENCE is not itself a refusal, but its value must be
+	// exactly the command the worker's `Match User nix` block forces
+	// server-side. Any other critical option, or force-command at all
+	// under the legacy ssh protocol, is refused exactly as before.
+	if protocol == protocolSSHNG {
+		if value, ok := cert.CriticalOptions[forceCommand]; ok && value != nixDaemonStdioCommand {
+			return fmt.Errorf("certificate force-command is %q, want %q", value, nixDaemonStdioCommand)
+		}
+	}
+	unexpected := make(map[string]string, len(cert.CriticalOptions))
+	for name, value := range cert.CriticalOptions {
+		if protocol == protocolSSHNG && name == forceCommand {
+			continue
+		}
+		unexpected[name] = value
+	}
+	if len(unexpected) != 0 {
+		return fmt.Errorf("certificate carries critical options %v; want none", sortedKeys(unexpected))
 	}
 	for name, value := range cert.Extensions {
 		if name != permitPTY || value != "" {
@@ -440,14 +520,22 @@ func validateCertificate(certData, publicKeyData []byte, authorities []ssh.Publi
 		return errors.New("certificate was signed by an unexpected SSH CA")
 	}
 
-	checker := ssh.CertChecker{IsUserAuthority: func(candidate ssh.PublicKey) bool {
-		for _, authority := range authorities {
-			if bytes.Equal(candidate.Marshal(), authority.Marshal()) {
-				return true
+	// SupportedCriticalOptions is the library's own allowlist, separate
+	// from (and checked after) the loop above: force-command is the only
+	// critical option this binary ever lets through that loop, and only
+	// for protocol ssh-ng, so naming it here never widens what a
+	// certificate may carry.
+	checker := ssh.CertChecker{
+		SupportedCriticalOptions: []string{forceCommand},
+		IsUserAuthority: func(candidate ssh.PublicKey) bool {
+			for _, authority := range authorities {
+				if bytes.Equal(candidate.Marshal(), authority.Marshal()) {
+					return true
+				}
 			}
-		}
-		return false
-	}}
+			return false
+		},
+	}
 	if err := checker.CheckCert(principal, cert); err != nil {
 		return fmt.Errorf("certificate signature or validity: %w", err)
 	}

@@ -40,13 +40,50 @@ leaves Nix's ordinary local builder in charge.
 {{- $conf -}}
 {{- end -}}
 
+{{- /*
+The effective machine-login user: `login.user`, absorbing the DEPRECATED
+top-level `sshUser` (kept for the one existing consumer that already
+sets it; see values.yaml). "nixremote" is the shared default for BOTH
+fields, so it is the sentinel for "not customized" -- there is no other
+way to tell "left at default" from "set back to the same string" in
+Helm. Only when `sshUser` is customized does it matter at all:
+
+  sshUser default, login.user anything  -> login.user (the normal path)
+  sshUser custom,  login.user default   -> sshUser (the alias)
+  sshUser custom,  login.user == sshUser -> either, they agree
+  sshUser custom,  login.user custom, different -> fail: an upgrade must
+    not silently pick one of two conflicting logins.
+*/ -}}
+{{- define "arc-runners.nixBuilderUser" -}}
+{{- $b := .Values.nixBuilders -}}
+{{- $sshUser := $b.sshUser -}}
+{{- $loginUser := $b.login.user -}}
+{{- if ne $sshUser "nixremote" -}}
+{{- if and (ne $loginUser "nixremote") (ne $loginUser $sshUser) -}}
+{{- fail (printf "nixBuilders.sshUser (%q) and nixBuilders.login.user (%q) disagree. nixBuilders.sshUser is DEPRECATED (removal in a later release) and only an alias for nixBuilders.login.user -- set login.user alone." $sshUser $loginUser) -}}
+{{- end -}}
+{{- $sshUser -}}
+{{- else -}}
+{{- $loginUser -}}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+The store URI scheme is login.protocol -- "ssh" (default) or "ssh-ng" --
+so a cut-over to the modern protocol changes only this one token per
+line; the field layout (system, ssh-key path, maxjobs, speed-factor,
+supported/mandatory features) is Nix's machine-file format and is the
+same for both schemes.
+*/ -}}
 {{- define "arc-runners.nixMachines" -}}
+{{- $login := .Values.nixBuilders.login }}
+{{- $user := include "arc-runners.nixBuilderUser" . }}
 {{- range $builder := .Values.nixBuilders.builders }}
 {{- $supported := "-" }}
 {{- if $builder.supportedFeatures }}{{ $supported = join "," $builder.supportedFeatures }}{{ end }}
 {{- $mandatory := "-" }}
 {{- if $builder.mandatoryFeatures }}{{ $mandatory = join "," $builder.mandatoryFeatures }}{{ end }}
-ssh://{{ $.Values.nixBuilders.sshUser }}@{{ $builder.host }} {{ $builder.system }} /home/runner/.ssh/nix-builder {{ $builder.maxJobs }} {{ $builder.speedFactor }} {{ $supported }} {{ $mandatory }}
+{{ $login.protocol }}://{{ $user }}@{{ $builder.host }} {{ $builder.system }} /home/runner/.ssh/nix-builder {{ $builder.maxJobs }} {{ $builder.speedFactor }} {{ $supported }} {{ $mandatory }}
 {{- end }}
 {{- end -}}
 
@@ -149,6 +186,12 @@ secret: the credential is the projected token, mounted separately.
   value: {{ .Values.nixBuilders.openbao.certificateTTL | quote }}
 - name: NIX_BUILDER_REQUEST_TIMEOUT
   value: {{ .Values.nixBuilders.openbao.requestTimeout | quote }}
+- name: NIX_BUILDER_PRINCIPAL
+  value: {{ .Values.nixBuilders.login.principal | quote }}
+- name: NIX_BUILDER_PROTOCOL
+  value: {{ .Values.nixBuilders.login.protocol | quote }}
+- name: NIX_BUILDER_KNOWN_HOSTS_PINNED
+  value: {{ .Values.nixBuilders.knownHosts.pinned | quote }}
 {{- end -}}
 
 {{- /*
