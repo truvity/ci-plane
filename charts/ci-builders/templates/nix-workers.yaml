@@ -57,6 +57,15 @@ immutable: true
 # nix-worker-entrypoint.sh reads as "nobody" -- an absent mount would read
 # the same way, but an always-present file keeps the container's
 # behaviour independent of whether this ConfigMap happens to exist.
+#
+# Mounted at /etc/nix-worker/principals-src (below), NOT at the path
+# sshd is told to trust: Kubernetes' ConfigMap volume plugin makes the
+# mount directory 0777 and every file in it a symlink through a
+# timestamped `..data` directory, which OpenSSH's StrictModes refuses
+# for an AuthorizedPrincipalsFile path. nix-worker-entrypoint.sh copies
+# this content into a root-owned directory with strict modes at
+# container startup; image/sshd_config's `Match User nix` block names
+# that copy, not this mount.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -139,10 +148,20 @@ spec:
         app.kubernetes.io/name: nix-worker
         app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: {{ $arch }}
-      {{- with $n.podAnnotations }}
       annotations:
+        # The principals ConfigMap is content-addressed ($principalsName
+        # above), so its own name already changes the pod template on a
+        # values change -- but the checksum is kept explicit anyway: it
+        # is the thing that actually documents, and guards, the intent
+        # that a nixWorkers.accounts.nix.principals edit must roll the
+        # StatefulSet. AllowUsers and the copied principals file
+        # (nix-worker-entrypoint.sh) are both decided once at container
+        # startup, never re-read live, so a running pod's ability to
+        # reach `nix` at all is fixed until it restarts.
+        checksum/nix-worker-principals: {{ join "," $n.accounts.nix.principals | sha256sum }}
+        {{- with $n.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- if $n.hostCertificate.enabled }}
       serviceAccountName: {{ $n.serviceAccount.name }}
@@ -261,7 +280,7 @@ spec:
               mountPath: /etc/nix-worker/ca
               readOnly: true
             - name: principals
-              mountPath: /etc/nix-worker/principals
+              mountPath: /etc/nix-worker/principals-src
               readOnly: true
             {{- if $n.hostCertificate.enabled }}
             - name: openbao-token

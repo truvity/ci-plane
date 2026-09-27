@@ -94,8 +94,11 @@ RUN apt-get update -qq \
 # (`$SHELL -c command`), and nologin ignores that argument and just
 # refuses the session -- the same reason nixremote is bash, not nologin.
 # Nobody can actually reach it yet: sshd_config's `Match User nix` block
-# gates on AuthorizedPrincipalsFile /etc/nix-worker/principals/%u, and the
-# chart renders that file EMPTY unless nixWorkers.accounts.nix.principals
+# gates on AuthorizedPrincipalsFile /run/nix-worker/principals/%u (a copy
+# the entrypoint makes at startup out of the ConfigMap mounted at
+# /etc/nix-worker/principals-src -- StrictModes refuses that mount
+# directly), and the chart renders that content EMPTY unless
+# nixWorkers.accounts.nix.principals
 # is set (values.yaml).
 RUN groupadd --system nixbld \
  && for i in $(seq 1 32); do \
@@ -111,7 +114,7 @@ RUN groupadd --system nixbld \
       --shell /bin/bash nix \
  && passwd -d nix \
  && useradd --create-home --home-dir /home/runner --shell /bin/bash runner \
- && mkdir -p /etc/nix-worker /etc/nix-worker/principals /run/sshd \
+ && mkdir -p /etc/nix-worker /etc/nix-worker/principals-src /run/sshd \
  && chmod 0755 /run/sshd \
  && mkdir -m 0755 /nix \
  && chown runner:runner /nix
