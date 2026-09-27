@@ -2,10 +2,20 @@
 {{- if .Values.nixBuilders.enabled }}
 {{- if not .Values.runnerServiceAccountName }}{{ fail "runnerServiceAccountName is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.builders }}{{ fail "nixBuilders.builders is required when nixBuilders is enabled" }}{{ end }}
+{{- /* knownHosts.pinned (default true): today's Secret-pinned host key
+     stays required. false switches known_hosts over to certAuthorities
+     alone -- the Secret is neither required nor mounted -- but an empty
+     certAuthorities list would then trust nothing and break every
+     build, so THAT combination is refused instead. */}}
+{{- if .Values.nixBuilders.knownHosts.pinned }}
 {{- if not .Values.nixBuilders.knownHosts.existingSecret }}{{ fail "nixBuilders.knownHosts.existingSecret is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.knownHosts.key }}{{ fail "nixBuilders.knownHosts.key is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.knownHosts.revision }}{{ fail "nixBuilders.knownHosts.revision is required when nixBuilders is enabled" }}{{ end }}
-{{- if not .Values.nixBuilders.sshUser }}{{ fail "nixBuilders.sshUser is required when nixBuilders is enabled" }}{{ end }}
+{{- else if not .Values.nixBuilders.knownHosts.certAuthorities }}{{ fail "nixBuilders.knownHosts.pinned is false with no certAuthorities: this would trust nothing and break every build" }}{{ end }}
+{{- /* Also raises the sshUser/login.user conflict fail, if any. */}}
+{{- if not (include "arc-runners.nixBuilderUser" .) }}{{ fail "nixBuilders.login.user is required when nixBuilders is enabled" }}{{ end }}
+{{- if not .Values.nixBuilders.login.principal }}{{ fail "nixBuilders.login.principal is required when nixBuilders is enabled" }}{{ end }}
+{{- if not (has .Values.nixBuilders.login.protocol (list "ssh" "ssh-ng")) }}{{ fail (printf "nixBuilders.login.protocol %q must be \"ssh\" or \"ssh-ng\"" .Values.nixBuilders.login.protocol) }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.address }}{{ fail "nixBuilders.openbao.address is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.namespace }}{{ fail "nixBuilders.openbao.namespace is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.openbao.caBundle }}{{ fail "nixBuilders.openbao.caBundle is required when nixBuilders is enabled" }}{{ end }}
@@ -147,9 +157,11 @@ spec:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE"]
           volumeMounts:
+            {{- if $root.Values.nixBuilders.knownHosts.pinned }}
             - name: nix-builder-known-hosts
               mountPath: /var/run/nix-builder-known-hosts
               readOnly: true
+            {{- end }}
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -209,9 +221,11 @@ spec:
           # machines file. The projected token is here for the same hook, so
           # workflow code can read it too — see docs/architecture.md.
           volumeMounts:
+            {{- if $root.Values.nixBuilders.knownHosts.pinned }}
             - name: nix-builder-known-hosts
               mountPath: /var/run/nix-builder-known-hosts
               readOnly: true
+            {{- end }}
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -225,6 +239,7 @@ spec:
           {{- end }}
       {{- if $root.Values.nixBuilders.enabled }}
       volumes:
+        {{- if $root.Values.nixBuilders.knownHosts.pinned }}
         - name: nix-builder-known-hosts
           secret:
             secretName: {{ $root.Values.nixBuilders.knownHosts.existingSecret }}
@@ -232,6 +247,7 @@ spec:
             items:
               - key: {{ $root.Values.nixBuilders.knownHosts.key }}
                 path: known_hosts
+        {{- end }}
         - name: nix-builder-config
           configMap:
             name: {{ $nixConfigName }}

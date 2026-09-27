@@ -217,6 +217,78 @@ in the Nix daemon config gains `nix` only when
 store paths WITHOUT signature verification, which is what Nix's
 sandboxing model exists to prevent, so it is off by default.
 
+### Runners over ssh-ng (phase 2)
+
+Phase 1 above built the worker's side of a second login; this phase is
+the runner's side of actually using it, and both are configurable, not
+mutually exclusive. `arc-runners`' `nixBuilders.login.{user, principal,
+protocol}` chooses the machine: today's unchanged default is the legacy
+`nixremote` account and `ssh://` (`nix-store --serve`); a cut-over sets
+`user: nix`, a `principal` that is in the worker's
+`nixWorkers.accounts.nix.principals` list (not necessarily `nix` itself
+— `AuthorizedPrincipalsFile` can require a narrower name than the
+account), and `protocol: ssh-ng`. `nixBuilders.openbao.sshRole` then
+names whichever signing role issues for that principal — there is no
+second role value, because the cut-over is which role `sshRole` points
+at, not a parallel setting.
+
+`login.user` absorbed the chart's former top-level `sshUser`, kept as a
+DEPRECATED, non-breaking alias (removal in a later release) rather than
+a hard rename: an existing installation that already sets `sshUser` — and
+is auto-promoted onto new chart releases without a values change of its
+own — must keep rendering exactly what it rendered before. Setting only
+`sshUser` (its default value or a custom one) is honoured as `login.user`;
+setting both to the SAME value is fine either way; setting both to
+DIFFERENT non-default values is a render-time failure rather than a
+silent pick of one (`arc-runners.nixBuilderUser` in `_helpers.tpl`). New
+installs should set `login.user` alone.
+
+`nix-worker-client` validates a returned certificate against the
+configured principal and protocol exactly as it always validated against
+the fixed `nixremote` principal: one principal, no extension but
+`permit-pty`. Under `ssh-ng` it additionally allows ONE critical option,
+`force-command`, and only when its value is exactly `nix-daemon --stdio`
+— what the worker's `Match User nix` block already forces server-side
+(`image/sshd_config`). This exists because OpenBao/Vault SSH roles apply
+their own `default_critical_options` regardless of what the request
+names, and this role's grant refuses a request that names
+`critical_options` at all, so the client can neither ask for
+`force-command` nor suppress it — it can only check what came back. A
+certificate forcing anything else is refused before any credential is
+published, the same fail-open contract as every other rejection here:
+local Nix builds remain available.
+
+`nixBuilders.knownHosts.pinned` (default `true`) is independent of the
+login: it decides whether the runner's `known_hosts` still pins each
+worker's static key (today's Secret) or is built ENTIRELY from
+`certAuthorities` (the phase 1 host-certificate CA line) when set to
+`false`. Setting it `false` with an empty `certAuthorities` list is
+refused at render time — that combination would trust nothing.
+
+**Verified directly**, no OpenBao involved: the real `nix-worker`
+image, a locally generated host key, a local CA standing in for the
+signing role (`ssh-keygen -s ‹ca› -n ci-nix -O force-command="nix-daemon
+--stdio" -O clear -O extension:permit-pty`), and the worker started with
+`nixWorkers.accounts.nix.{principals: [ci-nix], trusted: true}`'s
+container-level equivalent. `nix store ping --store 'ssh-ng://nix@…'`
+reports `Trusted: 1`; `nix build --store 'ssh-ng://nix@…' -f …` executes
+the derivation ON the worker and returns its real output; the worker's
+own daemon log reads `accepted connection from pid …, user nix
+(trusted)`. Rebuilt with `trusted: false`, the same store reports
+`Trusted: 0` and `nix copy --to` an unsigned path is refused
+(`lacks a signature by a trusted key`) — the exact restriction the
+values comment for `nixWorkers.accounts.nix.trusted` describes. An
+explicit command and a `-t` PTY request are both silently replaced by
+the forced command (`ForceCommand` overrides whatever the client asked
+for), and `PermitTTY no` refuses the pseudo-terminal. **No worker-side
+change was needed for any of this**: `Match User nix`'s `ForceCommand
+nix-daemon --stdio`, unqualified by `NIX_REMOTE`, reads the entrypoint's
+own exported `NIX_CONFIG` (including `trusted-users`) because OpenSSH
+session children inherit the environment `sshd` itself was started
+with — a real, load-bearing side effect of *when* the entrypoint script
+exports it, not a documented daemon feature, which is why it is written
+down here rather than left to be rediscovered.
+
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
