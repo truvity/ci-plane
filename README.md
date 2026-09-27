@@ -99,6 +99,10 @@ pull-through cache overrides `registry` only (e.g.
   overcommit — ceilings cannot sum past a node's allocatable),
   GOMAXPROCS pinned to the cgroup, no ephemeral-storage request but a
   hard limit, disruption protection on mid-job runners.
+- Runners PACK: a preferred pod affinity puts a new runner beside the
+  existing ones instead of on the emptiest node, because disruption
+  protection means a spread, once made, can never be repacked
+  (`packing.enabled`, default on; a preference, never a block).
 - Restrictive network defaults: only listed namespaces reach the
   builders.
 

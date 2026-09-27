@@ -97,6 +97,12 @@ spec:
         - name: listener
   template:
     metadata:
+      {{- if $root.Values.packing.enabled }}
+      # Pod-template labels reach the runner pod verbatim; this one is
+      # what every runner's packing affinity looks for (values.packing).
+      labels:
+        {{- include "arc-runners.packingLabels" $root | nindent 8 }}
+      {{- end }}
       {{- with $root.Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -115,6 +121,10 @@ spec:
       {{- with $root.Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with include "arc-runners.affinity" $root }}
+      affinity:
+        {{- . | nindent 8 }}
       {{- end }}
       {{- if $root.Values.nixBuilders.enabled }}
       initContainers:

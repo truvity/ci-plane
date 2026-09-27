@@ -106,6 +106,13 @@ migrating callers, never in place: a rename strands queued jobs.
   permanent stall.
 - Run CI pools on-demand, not spot: the `karpenter.sh/do-not-disrupt`
   annotation stops consolidation, not reclaims.
+- Runners prefer nodes that already run runners, across every scale
+  set and organization (`packing`, on by default). The same annotation
+  is why: nothing can repack runners after they are scheduled, so they
+  have to be placed together in the first place. It is a preference
+  only, so a full pool still scales out as before. Set
+  `packing.enabled: false` to get the scheduler's default spreading
+  back; a custom `affinity` is merged with it, not replaced.
 - The `#4307` janitor CronJob ships enabled — it deletes only runners
   that hold no job, match a stuck-log signature, and outlived a grace
   period.

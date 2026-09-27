@@ -41,6 +41,36 @@ Two of those labels are load-bearing, learned the hard way:
   set's rendered inputs change, which is what prompts the controller to
   recycle the listener — same mechanism as upstream.
 
+## Runners pack; they do not spread
+
+Left to the default scheduler, runners SPREAD. `NodeResourcesFit`
+scores with `LeastAllocated`, and balanced allocation agrees with it, so
+of all the nodes a runner fits, it lands on the emptiest. Bigger nodes
+do not change this: a pool of nodes that each hold several runners still
+ends up with one idle warm runner per node. And the spread cannot be
+undone afterwards, because runners carry `karpenter.sh/do-not-disrupt`
+and the autoscaler may not move them to empty a node. On a managed
+control plane the scheduler profile is out of reach, so the fix is in
+the pod spec.
+
+`packing.enabled` (the default) gives every runner pod the chart-owned
+label `ci-plane.io/packing-group: runners` and a **preferred** podAffinity
+toward it, keyed on `kubernetes.io/hostname`, with `namespaceSelector: {}`.
+The label is the chart's own rather than one the controller stamps,
+because a controller label that changes between ARC versions would turn
+packing back into spreading with no error anywhere. The empty namespace
+selector matters just as much: a pod affinity term without one only
+looks at the pod's own namespace, and each organization's release is its
+own namespace. With it, every size, scale set and organization is one
+packing group on the shared pool.
+
+It is a preference, never a requirement: a runner that fits no runner
+node goes to an empty node or a new one, exactly as before. A caller's
+own `affinity` is kept, and the packing term is appended to it.
+`hack/packing-cases.sh` asserts all of this on the rendered chart, since
+a broken preference fails nothing: the runners would simply spread
+again.
+
 ## The release trigger is the last deliberate control point
 
 With pull-based promotion automated downstream, tag creation is the one
