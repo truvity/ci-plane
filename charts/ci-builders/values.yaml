@@ -162,6 +162,14 @@ nixWorkers:
     # chart refuses to render otherwise (templates/nix-workers.yaml).
     renewEvery: 12h
     certificateTTL: 24h
+    # Below this much validity left on the CURRENT host certificate,
+    # the readiness probe (never startup or liveness -- see
+    # image/nix-worker-healthcheck.sh: killing a pod that still serves
+    # under a still-valid certificate would drop sessions for no
+    # reason) reports not-ready. With the defaults above, hitting this
+    # floor means the renewal loop has already been silently failing
+    # for about 10h (24h TTL, 12h renewEvery, 2h floor).
+    minRemaining: 2h
 
   # No estate defaults: a wrong auth mount or role fails every sign
   # attempt with nothing safe to guess, so each is required render-time
@@ -182,6 +190,18 @@ nixWorkers:
   # via `nix-daemon --stdio`. The account always exists in the image;
   # whether it can ever be reached is decided entirely by `principals`.
   accounts:
+    nixremote:
+      # The legacy login every worker has answered on until now. false
+      # makes it unreachable at once: AllowUsers omits `nixremote` in
+      # the runtime sshd_config (image/nix-worker-entrypoint.sh), and
+      # nix.conf's `allowed-users`/`trusted-users` omit it too --
+      # nothing else changes. The image keeps the `nixremote` user and
+      # its nix-worker-ssh-command shim either way; removing either is
+      # a later, separate step. The chart refuses to render this false
+      # together with an empty accounts.nix.principals below: that
+      # combination would leave the worker with no machine login at
+      # all (templates/nix-workers.yaml).
+      enabled: true
     nix:
       # AuthorizedPrincipalsFile content for the `nix` account. Empty (the
       # default) means nobody: sshd's AllowUsers omits `nix` entirely, so

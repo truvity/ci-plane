@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regression test for the nix-worker `nix` login and StrictModes.
+# Regression test for the nix-worker `nix` login and StrictModes, plus
+# (below) the nixWorkers.accounts.nixremote.enabled login toggle.
 #
 # The bug (seen live): with nixWorkers.accounts.nix.principals set, every
 # login as `nix` failed --
@@ -27,7 +28,13 @@
 # required on the host running this script, hosted GitHub runners
 # included.
 #
-# Two scenarios, every run:
+# Three scenarios, every run:
+#   nixremote disabled -- NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=false: a
+#                 cert for principal `nixremote` must be refused (and
+#                 for the AllowUsers reason, not "invalid user" -- the
+#                 account itself is untouched), while a cert for
+#                 principal `ci-nix` still succeeds over ssh-ng exactly
+#                 like the "populated" case below.
 #   populated  -- a cert for principal `ci-nix` must be accepted, and the
 #                 daemon must answer over ssh-ng (`nix store ping`
 #                 reports Trusted: 1, the same proof used live).
@@ -56,7 +63,7 @@ command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
 work=$(mktemp -d)
 cleanup() {
-  docker rm -f "$net-server" "$net-server-baseline" >/dev/null 2>&1 || true
+  docker rm -f "$net-server" "$net-server-baseline" "$net-server-nixremote-disabled" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -66,11 +73,16 @@ echo "== building the nix-worker image under test =="
 docker buildx build --load --tag "$net:head" --file "$here/image/nix-worker/Dockerfile" "$here/image/" || {
   echo "::error::failed to build image/nix-worker/Dockerfile" >&2; exit 1; }
 
-# One CA, one host key, one client cert -- shared by every scenario below.
+# One CA, one host key, one client cert per login -- shared by every
+# scenario below. `client_key` carries the `ci-nix` principal (the `nix`
+# ssh-ng login); `client_key_nixremote` carries `nixremote` itself, used
+# only by the nixremote-disabled scenario to prove that login is refused.
 ssh-keygen -q -t ed25519 -N '' -f "$work/ca_key" -C test-ca
 ssh-keygen -q -t ed25519 -N '' -f "$work/host_key" -C worker-host
 ssh-keygen -q -t ed25519 -N '' -f "$work/client_key" -C test-client
 ssh-keygen -s "$work/ca_key" -I ci-nix-test-cert -n ci-nix -V always:forever "$work/client_key.pub" >/dev/null
+ssh-keygen -q -t ed25519 -N '' -f "$work/client_key_nixremote" -C test-client-nixremote
+ssh-keygen -s "$work/ca_key" -I nixremote-test-cert -n nixremote -V always:forever "$work/client_key_nixremote.pub" >/dev/null
 
 mkdir -p "$work/ssh" "$work/ca"
 cp "$work/host_key" "$work/ssh/ssh_host_ed25519_key"
@@ -98,11 +110,14 @@ docker network create "$net" >/dev/null
 # is the exact proof used live: Trusted: 1 means auth succeeded AND the
 # forced command (`nix-daemon --stdio`) answered the wire protocol.
 run_scenario() {
-  local image="$1" name="$2" principals_dir="$3" expect="$4" # expect: pass|fail
+  local image="$1" name="$2" principals_dir="$3" expect="$4" extra_env="${5:-}" # expect: pass|fail
   docker rm -f "$name" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086 # extra_env is a single "-e VAR=value" this
+  # script builds itself, never external input; word-splitting is the point.
   docker run -d --name "$name" --network "$net" --privileged \
     -e NIX_WORKER_RUNTIME_DIR=/run/nix-worker \
     -e NIX_WORKER_ACCOUNTS_NIX_TRUSTED=true \
+    $extra_env \
     -v "$work/ssh:/etc/nix-worker/ssh:ro" \
     -v "$work/ca:/etc/nix-worker/ca:ro" \
     -v "$principals_dir:/etc/nix-worker/principals-src:ro" \
@@ -152,6 +167,46 @@ run_scenario() {
   fi
   return 0
 }
+
+# The legacy `nixremote` login (`nix-store --serve`), attempted with a
+# certificate carrying the `nixremote` principal. Used only by the
+# nixremote-disabled scenario below: when
+# nixWorkers.accounts.nixremote.enabled is false, this must be refused
+# for the SAME reason a normal AllowUsers restriction refuses anyone --
+# not "invalid user" (which would just mean the account itself was
+# removed, a later step this change deliberately does not take).
+check_nixremote_refused() {
+  local image="$1" name="$2"
+  local out rc server_log
+  out=$(docker run --rm --network "$net" -v "$work:/keys:ro" --entrypoint /bin/bash "$image" -c \
+    'ssh -p 2222 -i /keys/client_key_nixremote -o CertificateFile=/keys/client_key_nixremote-cert.pub -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 nixremote@'"$name"' true' 2>&1)
+  rc=$?
+  server_log=$(docker logs "$name" 2>&1)
+  if [ $rc -eq 0 ]; then
+    echo "::error::expected the legacy nixremote login to be refused, it succeeded" >&2
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
+  if ! grep -q 'not allowed because not listed in AllowUsers' <<<"$server_log"; then
+    echo "::error::nixremote login was refused, but not for the expected AllowUsers reason -- server log:" >&2
+    printf '%s\n' "$server_log" >&2
+    return 1
+  fi
+  return 0
+}
+
+echo "== nixremote disabled: legacy login is refused, nix login still succeeds (Trusted: 1) =="
+make_principals_mount "$work/principals-populated" "ci-nix"
+if run_scenario "$net:head" "$net-server-nixremote-disabled" "$work/principals-populated" pass \
+     "-e NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=false"; then
+  if check_nixremote_refused "$net:head" "$net-server-nixremote-disabled"; then
+    echo "ok    nixremote disabled: nixremote login refused (AllowUsers), nix login succeeds (Trusted: 1)"
+  else
+    echo "FAIL  nixremote disabled: legacy login was not refused as expected"; fail=1
+  fi
+else
+  echo "FAIL  nixremote disabled: the nix login regressed"; fail=1
+fi
 
 echo "== populated principals: login as nix must succeed (Trusted: 1) =="
 make_principals_mount "$work/principals-populated" "ci-nix"

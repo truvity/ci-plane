@@ -45,6 +45,14 @@ allow_nix_login=false
 [[ -s "$nix_principals_file" ]] && allow_nix_login=true
 nix_trusted=${NIX_WORKER_ACCOUNTS_NIX_TRUSTED:-false}
 
+# The legacy `nixremote` login (`nix-store --serve`), on by default --
+# today's only way in. false makes it unreachable at once: it drops out
+# of AllowUsers below and out of allowed-users/trusted-users here,
+# nothing else changes. The image keeps the `nixremote` user and its
+# nix-worker-ssh-command shim either way -- removing either is a later,
+# separate step.
+nixremote_enabled=${NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED:-true}
+
 # Host certificates: sign this worker's OWN SSH host key so a client's
 # known_hosts can trust one `@cert-authority` line instead of pinning one
 # host key Secret per architecture (charts/ci-builders values.nixWorkers.hostCertificate).
@@ -68,10 +76,19 @@ rm -f /nix/var/nix/daemon-socket/socket
 # trusted-users grants IMPORT WITHOUT SIGNATURE VERIFICATION -- the whole
 # point of Nix's sandboxing model -- so `nix` joins it only when the
 # operator opted in (nixWorkers.accounts.nix.trusted); `allowed-users`
-# (what may talk to the daemon at all) always includes it, same as
-# nixremote, since sshd -- not nix-daemon -- is what actually decides
-# whether the account is reachable.
-trusted_users="root nixremote"
+# (what may talk to the daemon at all) always includes `nix`, whether or
+# not sshd will ever let anyone reach it, since sshd -- not nix-daemon --
+# is what actually decides whether an account is reachable. `nixremote`
+# joins both lists only while its own login is enabled
+# (nixWorkers.accounts.nixremote.enabled); disabled, nix-daemon simply
+# never hears from an account sshd no longer admits either.
+trusted_users="root"
+allowed_users="root"
+if [[ "$nixremote_enabled" == "true" ]]; then
+  trusted_users="$trusted_users nixremote"
+  allowed_users="$allowed_users nixremote"
+fi
+allowed_users="$allowed_users nix"
 [[ "$nix_trusted" == "true" ]] && trusted_users="$trusted_users nix"
 
 # Preserve the image's cache-first substituters and add only worker
@@ -81,7 +98,7 @@ trusted_users="root nixremote"
 export NIX_CONFIG="$(cat /home/runner/.config/nix/nix.conf)
  sandbox = true
  build-users-group = nixbld
- allowed-users = root nixremote nix
+ allowed-users = $allowed_users
  trusted-users = $trusted_users
  max-jobs = $max_jobs
  cores = $cores
@@ -124,8 +141,20 @@ fi
 # all, so it is worth being exact rather than convenient.
 runtime_sshd_config="$runtime_dir/sshd_config"
 cp /etc/nix-worker/sshd_config "$runtime_sshd_config"
-if [[ "$allow_nix_login" == "true" ]]; then
-  sed -i 's/^AllowUsers nixremote$/AllowUsers nixremote nix/' "$runtime_sshd_config"
+if [[ "$nixremote_enabled" == "true" ]]; then
+  if [[ "$allow_nix_login" == "true" ]]; then
+    sed -i 's/^AllowUsers nixremote$/AllowUsers nixremote nix/' "$runtime_sshd_config"
+  fi
+  # else: the baked file already reads "AllowUsers nixremote" -- byte
+  # identical to before this toggle existed.
+elif [[ "$allow_nix_login" == "true" ]]; then
+  sed -i 's/^AllowUsers nixremote$/AllowUsers nix/' "$runtime_sshd_config"
+else
+  # Only reachable when the chart's own render-time refusal is bypassed
+  # (nixremote disabled and no nix principal configured either): kept
+  # so this script stays correct standalone, e.g. under
+  # hack/nix-worker-principals-e2e.sh, which drives it without the chart.
+  sed -i 's/^AllowUsers nixremote$/AllowUsers/' "$runtime_sshd_config"
 fi
 if [[ "$host_cert_enabled" == "true" ]]; then
   # Inserted right after the `HostKey` line, NOT appended at the end of
