@@ -5,6 +5,8 @@ runtime_dir=${NIX_WORKER_RUNTIME_DIR:-/run/nix-worker}
 ssh_dir=${NIX_WORKER_SSH_DIR:-/etc/nix-worker/ssh}
 trusted_user_ca=${NIX_WORKER_TRUSTED_USER_CA_FILE:-/etc/nix-worker/ca/trusted_user_ca_keys}
 principals_src_dir=${NIX_WORKER_PRINCIPALS_SRC_DIR:-/etc/nix-worker/principals-src}
+opkssh_src_dir=${NIX_WORKER_OPKSSH_SRC_DIR:-/etc/nix-worker/opkssh-src}
+opk_dir=${NIX_WORKER_OPK_DIR:-/etc/opk}
 max_jobs=${NIX_WORKER_MAX_JOBS:-2}
 cores=${NIX_WORKER_CORES:-4}
 min_free=${NIX_WORKER_MIN_FREE_BYTES:-10737418240}
@@ -44,6 +46,43 @@ nix_principals_file="$runtime_dir/principals/nix"
 allow_nix_login=false
 [[ -s "$nix_principals_file" ]] && allow_nix_login=true
 nix_trusted=${NIX_WORKER_ACCOUNTS_NIX_TRUSTED:-false}
+
+# opkssh (the people pilot): OIDC sign-in with no CA, onto the
+# SAME `nix` account as the OpenBao-certificate machine login above (the
+# shared account the pilot's design calls for) and a SEPARATE `admin`
+# shell account no certificate ever reaches. false (the default) leaves
+# both untouched by anything below: `admin` never joins AllowUsers, and
+# `nix`'s reachability is still decided by the principals file alone,
+# exactly as before this feature existed.
+#
+# true forces allow_nix_login regardless of the principals file's own
+# content: an opkssh-only worker (no OpenBao SSH-sign role wired up yet)
+# must still be able to reach `nix` -- sshd's AllowUsers, not the
+# principals file, is what actually decides whether either credential
+# mechanism ever gets a chance to run.
+opkssh_enabled=${NIX_WORKER_OPKSSH_ENABLED:-false}
+[[ "$opkssh_enabled" == "true" ]] && allow_nix_login=true
+
+# /etc/opk is an emptyDir in the chart (shadowing the image's own
+# read-only placeholder directory): readOnlyRootFilesystem: true means
+# opkssh's own hardcoded /etc/opk/{providers,auth_id} paths (there is no
+# flag to relocate them) can only ever be writable if something backs
+# them with a real volume, the same reason $runtime_dir under
+# /run/nix-worker exists for the CA-certificate files above. Rebuilt
+# from scratch every start, same content-addressed ConfigMap pattern as
+# the principals file: enabled false (or the ConfigMap rendering empty
+# content) leaves both files present but empty, which is what
+# `opkssh verify` reads as "nobody" -- it never fails to find the
+# files, it fails every identity check against them.
+install -d -o root -g opksshuser -m 0750 "$opk_dir"
+if [[ "$opkssh_enabled" == "true" ]]; then
+  [[ -e "$opkssh_src_dir/providers" && -e "$opkssh_src_dir/auth_id" ]]
+  install -o root -g opksshuser -m 0640 "$opkssh_src_dir/providers" "$opk_dir/providers"
+  install -o root -g opksshuser -m 0640 "$opkssh_src_dir/auth_id" "$opk_dir/auth_id"
+else
+  install -o root -g opksshuser -m 0640 /dev/null "$opk_dir/providers"
+  install -o root -g opksshuser -m 0640 /dev/null "$opk_dir/auth_id"
+fi
 
 # The legacy `nixremote` login (`nix-store --serve`), on by default --
 # today's only way in. false makes it unreachable at once: it drops out
@@ -155,6 +194,18 @@ else
   # so this script stays correct standalone, e.g. under
   # hack/nix-worker-principals-e2e.sh, which drives it without the chart.
   sed -i 's/^AllowUsers nixremote$/AllowUsers/' "$runtime_sshd_config"
+fi
+if [[ "$opkssh_enabled" == "true" ]]; then
+  # Layered onto whichever of the three shapes above the file now has
+  # (with or without nixremote/nix already listed), rather than folded
+  # into that if/elif/else: `admin` is a THIRD, independent dimension
+  # (opkssh's own account, no CA path at all), and combining three
+  # independent booleans into one sed pattern per combination does not
+  # get more readable. Both forms the block above can have produced
+  # ("AllowUsers <something>" and the bare "AllowUsers") are covered.
+  sed -i -e '/^AllowUsers .\+$/s/$/ admin/' \
+         -e 's/^AllowUsers$/AllowUsers admin/' \
+         "$runtime_sshd_config"
 fi
 if [[ "$host_cert_enabled" == "true" ]]; then
   # Inserted right after the `HostKey` line, NOT appended at the end of

@@ -28,7 +28,7 @@
 # required on the host running this script, hosted GitHub runners
 # included.
 #
-# Three scenarios, every run:
+# Four scenarios, every run:
 #   nixremote disabled -- NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=false: a
 #                 cert for principal `nixremote` must be refused (and
 #                 for the AllowUsers reason, not "invalid user" -- the
@@ -42,6 +42,18 @@
 #                 must still leave `nix` unreachable -- AllowUsers is
 #                 decided once at container startup and this must not
 #                 regress just because the principals path moved.
+#   opkssh     -- the people pilot (see check_opkssh below): with
+#                 NIX_WORKER_OPKSSH_ENABLED=false (the default), `admin`
+#                 must be refused for the AllowUsers reason, same as a
+#                 disabled `nixremote` above; with it true, `admin` must
+#                 be REACHABLE (AllowUsers admits the connection and
+#                 sshd runs opkssh's own AuthorizedKeysCommand) while
+#                 still refusing a plain key that carries no OpenPubkey
+#                 ID token -- this script has no OIDC provider to mint a
+#                 real one against, so it proves the sshd-level wiring
+#                 (account admitted, opkssh actually invoked, no
+#                 accidental bypass) and leaves verifying a genuine
+#                 sign-in to the live pilot's own smoke test.
 #
 # A THIRD, opt-in scenario proves this test actually catches the bug:
 # with PROVE_CATCHES_BUG=1, it also builds the image from BASELINE_REF
@@ -63,7 +75,7 @@ command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
 
 work=$(mktemp -d)
 cleanup() {
-  docker rm -f "$net-server" "$net-server-baseline" "$net-server-nixremote-disabled" >/dev/null 2>&1 || true
+  docker rm -f "$net-server" "$net-server-baseline" "$net-server-nixremote-disabled" "$net-server-opkssh" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -87,6 +99,18 @@ ssh-keygen -s "$work/ca_key" -I nixremote-test-cert -n nixremote -V always:forev
 mkdir -p "$work/ssh" "$work/ca"
 cp "$work/host_key" "$work/ssh/ssh_host_ed25519_key"
 cp "$work/ca_key.pub" "$work/ca/trusted_user_ca_keys"
+
+# opkssh (the people pilot) fixtures. A PLAIN keypair, no
+# certificate at all: this script has no OIDC provider to mint a real
+# OpenPubkey ID token against, so it cannot prove a genuine sign-in
+# succeeds -- only that the `admin` account is reachable at the sshd
+# level (AllowUsers admits the connection, sshd actually invokes
+# `opkssh verify`) and that a bogus credential is still refused by
+# opkssh itself, not silently accepted.
+ssh-keygen -q -t ed25519 -N '' -f "$work/plain_client_key" -C test-plain-key
+mkdir -p "$work/opkssh-src"
+printf 'https://issuer.example opkssh 24h\n' > "$work/opkssh-src/providers"
+printf 'admin oidc:groups:test.group https://issuer.example\n' > "$work/opkssh-src/auth_id"
 
 # The ConfigMap volume shape kubelet actually produces (the "atomic
 # writer"): a timestamped real directory, a `..data` symlink to it, the
@@ -121,6 +145,7 @@ run_scenario() {
     -v "$work/ssh:/etc/nix-worker/ssh:ro" \
     -v "$work/ca:/etc/nix-worker/ca:ro" \
     -v "$principals_dir:/etc/nix-worker/principals-src:ro" \
+    -v "$work/opkssh-src:/etc/nix-worker/opkssh-src:ro" \
     --entrypoint /bin/bash \
     "$image" \
     -c 'NIX_WORKER_SEED_ROOT=/seed-scratch nix-worker-seed && exec nix-worker-entrypoint' >/dev/null
@@ -195,6 +220,66 @@ check_nixremote_refused() {
   return 0
 }
 
+# opkssh (the people pilot). No OIDC provider exists in this
+# harness to mint a real OpenPubkey ID token, so `admin`'s login always
+# fails here -- what these two checks tell apart is WHY it fails.
+# Admitted: sshd's AllowUsers let the connection through and actually
+# invoked `opkssh verify` (proven by that exact log line and by
+# "Failed publickey", opkssh's own refusal of a non-certificate key --
+# never "not allowed because not listed in AllowUsers", which would mean
+# opkssh was never reached at all).
+check_opkssh_admitted() {
+  local image="$1" name="$2"
+  local out rc server_log
+  out=$(docker run --rm --network "$net" -v "$work:/keys:ro" --entrypoint /bin/bash "$image" -c \
+    'ssh -p 2222 -i /keys/plain_client_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 admin@'"$name"' true' 2>&1)
+  rc=$?
+  server_log=$(docker logs "$name" 2>&1)
+  if [ $rc -eq 0 ]; then
+    echo "::error::expected the bogus-key admin login to be refused, it succeeded" >&2
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
+  if grep -q 'not allowed because not listed in AllowUsers' <<<"$server_log"; then
+    echo "::error::admin login was refused at AllowUsers -- opkssh was never invoked" >&2
+    return 1
+  fi
+  if ! grep -q '/usr/local/bin/opkssh verify admin ' <<<"$server_log"; then
+    echo "::error::sshd log is missing the expected AuthorizedKeysCommand invocation" >&2
+    printf '%s\n' "$server_log" >&2
+    return 1
+  fi
+  if ! grep -q 'Failed publickey for admin' <<<"$server_log"; then
+    echo "::error::admin login was refused, but not by opkssh's own publickey check -- server log:" >&2
+    printf '%s\n' "$server_log" >&2
+    return 1
+  fi
+  return 0
+}
+
+# opkssh disabled (NIX_WORKER_OPKSSH_ENABLED unset, the default): `admin`
+# must be refused for the SAME AllowUsers reason nixremote is above when
+# ITS toggle is off -- opkssh verify must never even run.
+check_opkssh_refused_disabled() {
+  local image="$1" name="$2"
+  local out rc server_log
+  out=$(docker run --rm --network "$net" -v "$work:/keys:ro" --entrypoint /bin/bash "$image" -c \
+    'ssh -p 2222 -i /keys/plain_client_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 admin@'"$name"' true' 2>&1)
+  rc=$?
+  server_log=$(docker logs "$name" 2>&1)
+  if [ $rc -eq 0 ]; then
+    echo "::error::expected the admin login to be refused with opkssh disabled, it succeeded" >&2
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
+  if ! grep -q 'not allowed because not listed in AllowUsers' <<<"$server_log"; then
+    echo "::error::admin login was refused, but not for the expected AllowUsers reason -- server log:" >&2
+    printf '%s\n' "$server_log" >&2
+    return 1
+  fi
+  return 0
+}
+
 echo "== nixremote disabled: legacy login is refused, nix login still succeeds (Trusted: 1) =="
 make_principals_mount "$work/principals-populated" "ci-nix"
 if run_scenario "$net:head" "$net-server-nixremote-disabled" "$work/principals-populated" pass \
@@ -222,6 +307,29 @@ if run_scenario "$net:head" "$net-server" "$work/principals-empty" fail; then
   echo "ok    empty principals: nix login is still refused (AllowUsers unchanged)"
 else
   echo "FAIL  empty principals"; fail=1
+fi
+
+echo "== opkssh enabled: admin is reachable, opkssh itself refuses a non-certificate key =="
+if run_scenario "$net:head" "$net-server-opkssh" "$work/principals-empty" fail \
+     "-e NIX_WORKER_OPKSSH_ENABLED=true"; then
+  if check_opkssh_admitted "$net:head" "$net-server-opkssh"; then
+    echo "ok    opkssh enabled: admin login reaches opkssh verify (AllowUsers admits it), refused only for lacking a real ID token"
+  else
+    echo "FAIL  opkssh enabled: admin was not admitted/verified as expected"; fail=1
+  fi
+else
+  echo "FAIL  opkssh enabled: the empty-principals nix scenario regressed"; fail=1
+fi
+
+echo "== opkssh disabled (the default): admin stays unreachable =="
+if run_scenario "$net:head" "$net-server" "$work/principals-empty" fail; then
+  if check_opkssh_refused_disabled "$net:head" "$net-server"; then
+    echo "ok    opkssh disabled: admin login refused (AllowUsers unchanged)"
+  else
+    echo "FAIL  opkssh disabled: admin login was not refused for the expected AllowUsers reason"; fail=1
+  fi
+else
+  echo "FAIL  opkssh disabled: the empty-principals nix scenario regressed"; fail=1
 fi
 
 if [ "${PROVE_CATCHES_BUG:-0}" = 1 ]; then

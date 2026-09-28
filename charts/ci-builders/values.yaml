@@ -214,6 +214,47 @@ nixWorkers:
       # operator fully controls end to end.
       trusted: false
 
+  # opkssh (the people pilot): OIDC sign-in with no CA, onto the
+  # SAME `nix` account as accounts.nix above (people and CI share it) and
+  # a separate `admin` shell account (interactive, sudo) opkssh alone can
+  # reach. ADDITIVE and OFF by default: accounts.nix/nixremote and
+  # hostCertificate above are UNCHANGED either way -- this only adds a
+  # second, independent credential path onto accounts the OpenBao
+  # certificate route above already owns.
+  opkssh:
+    # Explicit allow-list of architectures this worker renders opkssh
+    # for. Empty (the default) means every worker renders exactly as it
+    # did before this feature existed -- the account, the binary and the
+    # AuthorizedKeysCommand line are always in the image, but nothing in
+    # AllowUsers or /etc/opk ever changes. This pilot names exactly ONE
+    # worker: naming one architecture here (e.g. ["amd64"]) turns opkssh
+    # on for that arch's StatefulSet alone, leaving the other(s)
+    # untouched -- the same allow-list shape as
+    # truvity/tailscale's router rollout (opksshEnvs).
+    archs: []
+    # The access-roster OIDC issuer and the opkssh client's own client_id
+    # (a distinct client, never a browser client's -- this pilot's own
+    # design: reusing one would let a token minted for one purpose be
+    # replayed against the other). Required when archs above is
+    # non-empty; the chart refuses to render otherwise
+    # (templates/nix-workers.yaml).
+    issuer: ""
+    clientId: opkssh
+    # opkssh's own /etc/opk/providers "expiration" column: how long a
+    # signed-in session's certificate stays valid before a fresh
+    # `opkssh login` is required.
+    expiration: 24h
+    # /etc/opk/auth_id identity values, already dot-rewritten for
+    # opkssh's own colon-splitting parser (access-roster's per-audience
+    # `groups_delimiter`, ADR 0015; see cfg/access.yaml's `opkssh` client
+    # row) -- e.g. "devel.nix-workers.user" /
+    # "devel.nix-workers.admin", never the colon form. Empty (the
+    # default) admits nobody through that account even when archs above
+    # is non-empty: the account exists and is reachable, but no token
+    # matches.
+    nixGroup: ""
+    adminGroup: ""
+
   # Each architecture owns its store. The stores are deliberately not
   # shared with BuildKit: independent capacity, GC and failure domains.
   storeSize: 100Gi
