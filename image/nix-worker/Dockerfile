@@ -28,6 +28,28 @@
 # renovate: datasource=github-releases depName=NixOS/nix
 ARG NIX_VERSION=2.35.2
 
+# opkssh (the people pilot): OIDC sign-in with no CA, additive to
+# the OpenBao-signed certificate logins above (AuthorizedKeysCommand and
+# TrustedUserCAKeys/AuthorizedPrincipalsFile are independent sshd
+# mechanisms -- sshd tries each configured one in turn for pubkey auth,
+# exactly as truvity/tailscale's awsrouter package already relies on for
+# the EC2 subnet routers' own opkssh rollout). Hand-maintained, not
+# renovate-tracked: a version bump here needs BOTH sha256 digests below
+# updated in the same commit (curl -fsSL
+# https://github.com/openpubkey/opkssh/releases/download/v<X>/checksums.txt),
+# and an automated PR that bumped only the version would fail the build
+# on the very next line rather than silently drift -- an acceptable
+# trade against the risk of a half-updated pin.
+#
+# The OWN steps below (never opkssh's upstream scripts/install-linux.sh)
+# for the same reason truvity/tailscale v1.11.0 stopped calling it: that
+# script's determine_linux_type() does not recognize every base image
+# family, and owning the four steps it would have taken (create the
+# service account, install the verified binary, write the sshd
+# AuthorizedKeysCommand drop-in) is small enough that depending on an
+# upstream shell script buys nothing here either.
+ARG OPKSSH_VERSION=0.16.0
+
 # The in-cluster read-through cache of cache.nixos.org first, then nix's
 # default upstream as automatic fallback: cache down = slower, never
 # broken. `substituters`, NOT `extra-substituters` -- the extra- form
@@ -60,15 +82,22 @@ FROM ubuntu:24.04
 
 ARG NIX_VERSION
 ARG NIX_SUBSTITUTERS
+ARG OPKSSH_VERSION
+# Set by buildx for the platform this stage is building FOR (not the
+# builder's own platform -- this stage has no --platform=$BUILDPLATFORM,
+# unlike the hostcert stage above, because opkssh ships prebuilt
+# per-arch binaries, nothing to cross-compile).
+ARG TARGETARCH
 
 # tini is the chart's entrypoint (PID 1 reaps the daemon and sshd);
 # openssh-server IS the worker's job; openssh-client is ssh-keygen,
 # which the health check runs against the trusted CA file; xz-utils and
 # curl are the nix installer's; bash is what every script asks for by
-# shebang and what the health check's /dev/tcp probe needs.
+# shebang and what the health check's /dev/tcp probe needs; sudo is the
+# `admin` account's whole reason to exist (the people pilot).
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
-      bash ca-certificates curl openssh-server openssh-client tini xz-utils \
+      bash ca-certificates curl openssh-server openssh-client sudo tini xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # `runner` is not a leftover of the old base: the worker scripts resolve
@@ -114,10 +143,32 @@ RUN groupadd --system nixbld \
       --shell /bin/bash nix \
  && passwd -d nix \
  && useradd --create-home --home-dir /home/runner --shell /bin/bash runner \
- && mkdir -p /etc/nix-worker /etc/nix-worker/principals-src /run/sshd \
+ && mkdir -p /etc/nix-worker /etc/nix-worker/principals-src /etc/nix-worker/opkssh-src /run/sshd \
  && chmod 0755 /run/sshd \
  && mkdir -m 0755 /nix \
  && chown runner:runner /nix
+
+# `admin` (the people pilot): the ONE account on this worker that
+# gets an interactive shell and root, both by design -- opkssh only, no
+# OpenBao certificate reaches it (image/sshd_config's `Match User admin`
+# block: `ForceCommand none`, `PermitTTY yes`). No password either (same
+# `passwd -d` as every other account here): PasswordAuthentication and
+# KbdInteractiveAuthentication are both `no`, so a password could never
+# be entered anyway, and sudo below is passwordless for the same reason.
+#
+# `opksshuser` (upstream opkssh's own convention, the same account name
+# truvity/tailscale's awsrouter package uses for the EC2 subnet
+# routers): a system account with no shell, whose only job is to be the
+# uid sshd's AuthorizedKeysCommand execs `opkssh verify` as -- it never
+# logs in itself.
+RUN useradd --create-home --home-dir /home/admin --shell /bin/bash admin \
+ && passwd -d admin \
+ && install -d -m 0750 /home/admin/.ssh \
+ && chown admin:admin /home/admin/.ssh \
+ && printf 'admin ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/admin \
+ && chmod 0440 /etc/sudoers.d/admin \
+ && visudo -cf /etc/sudoers.d/admin \
+ && useradd --system --no-create-home --shell /usr/sbin/nologin opksshuser
 
 COPY --chmod=0755 nix-worker-seed.sh /usr/local/bin/nix-worker-seed
 COPY --chmod=0755 nix-worker-entrypoint.sh /usr/local/bin/nix-worker-entrypoint
@@ -170,6 +221,31 @@ RUN mkdir -p /usr/local/libexec/nix-worker \
       /usr/local/libexec/nix-worker/nix-daemon \
  && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-store)" \
       /usr/local/libexec/nix-worker/nix-store
+
+# opkssh's own prebuilt per-arch binaries (linux-amd64, linux-arm64;
+# checksums from that release's own checksums.txt, verified above). No
+# `arm64|amd64` case for anything else in this Dockerfile -- these are
+# the only two TARGETARCH values ci-plane releases
+# (charts/ci-builders default nixWorkers.archs), and an unrecognized one
+# fails the build rather than installing an unverified binary.
+#
+# /usr/local/bin/opkssh itself does not need to be writable at runtime
+# (readOnlyRootFilesystem: true in the chart is fine for a baked
+# binary); /etc/opk does -- see image/nix-worker-entrypoint.sh and the
+# chart's own `opk` emptyDir mount, which shadows the placeholder
+# directory below at container start.
+RUN case "$TARGETARCH" in \
+      amd64) opkssh_sha256=c018c3e7baf98612b923e742dd87be38650bf61e3b755fb2bc90de177568b1bf ;; \
+      arm64) opkssh_sha256=9dd10c2b6ce99cde18e52c054877ca014134b291fd82afe71741c68db4f83d44 ;; \
+      *) echo "opkssh: unsupported TARGETARCH $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/opkssh \
+      "https://github.com/openpubkey/opkssh/releases/download/v${OPKSSH_VERSION}/opkssh-linux-${TARGETARCH}" \
+ && echo "${opkssh_sha256}  /tmp/opkssh" | sha256sum -c - \
+ && install -m 0755 -o root -g opksshuser /tmp/opkssh /usr/local/bin/opkssh \
+ && rm -f /tmp/opkssh \
+ && mkdir -m 0750 /etc/opk \
+ && chown root:opksshuser /etc/opk
 
 # The chart runs both containers as uid 0 (the daemon needs it) and
 # names the command itself, so no ENTRYPOINT/CMD here: an image that

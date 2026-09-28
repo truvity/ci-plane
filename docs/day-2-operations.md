@@ -149,6 +149,36 @@ both; then runner configuration (`sshMount`, `sshCAPublicKeys`) moves
 signing to the new one. Recycle all warm runners or wait the one-hour
 maximum before removing the old public key from the workers.
 
+### opkssh (the people pilot): people, enable/disable and diagnosis
+
+`nixWorkers.opkssh.archs` is the one switch: an architecture named
+there gets `NIX_WORKER_OPKSSH_ENABLED=true`, admits `admin` (a real
+shell, `sudo`) and `nix` (the same `nix-daemon --stdio` account phase 2
+above uses) through opkssh, no OpenBao certificate involved. An
+architecture NOT named there renders exactly as before this feature
+existed, even sharing the same image and the same opkssh ConfigMap — a
+provider/group edit or flipping an architecture in or out of the
+allow-list both roll the StatefulSet (`checksum/nix-worker-opkssh`).
+
+Diagnosis is `kubectl logs` on the worker pod: sshd runs with `-e`
+(log to its own stderr, which is the container's stdout), so
+`AuthorizedKeysCommand`'s own output — `opkssh verify <user> ...`,
+`Providers loaded: ...`, and either `successfully verified` or `failed
+to verify: <reason>` — appears there directly. `/var/log/opkssh.log`
+(opkssh's own hardcoded path) is deliberately NOT mounted: the pod runs
+`readOnlyRootFilesystem: true` and opkssh degrades gracefully when it
+cannot open that file (logs "Error opening log file" to stderr, once,
+and continues), so `kubectl logs` is the pilot's whole audit trail, not
+a missing feature.
+
+A rejected sign-in that never reaches opkssh at all logs `User <name>
+from <ip> not allowed because not listed in AllowUsers` instead — that
+means the architecture is not in `opkssh.archs`, not a policy refusal.
+`hack/nix-worker-principals-e2e.sh` proves both shapes against the real
+image without a live OIDC provider (a plain, non-certificate key
+reaches `opkssh verify` and is refused BY opkssh; with the feature off,
+the same key never gets that far).
+
 ### Host-key rotation
 
 Host rotation is independent from the client CA and affects both

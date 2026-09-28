@@ -11,6 +11,22 @@
      empty accounts.nix.principals would leave this worker with NO
      machine login at all -- neither account could ever be reached. */}}
 {{- if and (not $n.accounts.nixremote.enabled) (not $n.accounts.nix.principals) }}{{ fail "nixWorkers.accounts.nixremote.enabled is false and nixWorkers.accounts.nix.principals is empty: this worker would have no machine login at all" }}{{ end }}
+{{- /* opkssh (the people pilot). archs is an allow-list INTO
+     $n.archs, not a parallel list of its own -- naming an architecture
+     this worker does not run is always a mistake, never a wider render.
+     issuer/clientId are required the moment archs is non-empty: an
+     enabled worker with neither would bake an AllowUsers/nix.conf
+     change onto accounts nobody's token could ever reach, which is a
+     worse silent-no-op than the render simply refusing. nixGroup/
+     adminGroup are NOT required here -- a worker piloting `admin` alone
+     (or `nix` alone) is a valid, intentional shape. */}}
+{{- range $arch := $n.opkssh.archs }}
+{{- if not (has $arch $n.archs) }}{{ fail (printf "nixWorkers.opkssh.archs names %q, which is not in nixWorkers.archs" $arch) }}{{ end }}
+{{- end }}
+{{- if $n.opkssh.archs }}
+{{- if not $n.opkssh.issuer }}{{ fail "nixWorkers.opkssh.issuer is required when nixWorkers.opkssh.archs is non-empty" }}{{ end }}
+{{- if not $n.opkssh.clientId }}{{ fail "nixWorkers.opkssh.clientId is required when nixWorkers.opkssh.archs is non-empty" }}{{ end }}
+{{- end }}
 {{- /* INF host-certificates phase 1. Validated the same way as
      arc-runners' nixBuilders.openbao.certificateTTL: a whole number of
      s/m/h, converted to seconds so renewEvery can be compared against it
@@ -91,6 +107,38 @@ data:
   # mounts as a genuinely zero-byte file.
   nix: {{ join "\n" $n.accounts.nix.principals | quote }}
 immutable: true
+---
+# /etc/opk/{providers,auth_id} content for opkssh (the people pilot).
+# ONE ConfigMap shared by every architecture -- the identity
+# content itself (issuer, client id, the two groups) does not vary by
+# arch, only WHICH arch's container actually copies it in ever does
+# (NIX_WORKER_OPKSSH_ENABLED below, set per-arch from opkssh.archs).
+# Content-addressed and rendered even when opkssh.archs is empty, same
+# reasoning as the principals ConfigMap above: an absent mount would
+# read the same way as an empty one, but an always-present object keeps
+# the container's own behaviour independent of whether this happens to
+# exist, and a later `helm diff` on JUST opkssh.archs never touches this
+# object at all.
+{{- $opksshProviders := "" }}
+{{- if $n.opkssh.issuer }}{{ $opksshProviders = printf "%s %s %s" $n.opkssh.issuer $n.opkssh.clientId $n.opkssh.expiration }}{{ end }}
+{{- $opksshAuthIdLines := list }}
+{{- if $n.opkssh.nixGroup }}{{ $opksshAuthIdLines = append $opksshAuthIdLines (printf "nix oidc:groups:%s %s" $n.opkssh.nixGroup $n.opkssh.issuer) }}{{ end }}
+{{- if $n.opkssh.adminGroup }}{{ $opksshAuthIdLines = append $opksshAuthIdLines (printf "admin oidc:groups:%s %s" $n.opkssh.adminGroup $n.opkssh.issuer) }}{{ end }}
+{{- $opksshAuthId := join "\n" $opksshAuthIdLines }}
+{{- $opksshName := printf "nix-worker-opkssh-%s" (list $opksshProviders $opksshAuthId | join "|" | sha256sum | trunc 12) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $opksshName }}
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+data:
+  # Quoted FLOW scalars, for the same "empty must mount zero bytes, not
+  # a whitespace line" reason as the principals ConfigMap's `nix` key.
+  providers: {{ $opksshProviders | quote }}
+  auth_id: {{ $opksshAuthId | quote }}
+immutable: true
 {{- if $n.hostCertificate.enabled }}
 {{- if $n.serviceAccount.create }}
 ---
@@ -117,6 +165,7 @@ data:
     {{- $n.openbao.caBundle | b64dec | nindent 4 }}
 {{- end }}
 {{- range $arch := $n.archs }}
+{{- $opksshOnArch := has $arch $n.opkssh.archs }}
 ---
 apiVersion: v1
 kind: Service
@@ -167,6 +216,15 @@ spec:
         # startup, never re-read live, so a running pod's ability to
         # reach `nix` at all is fixed until it restarts.
         checksum/nix-worker-principals: {{ join "," $n.accounts.nix.principals | sha256sum }}
+        # Same reasoning, for opkssh's own two files: whether THIS arch
+        # copies them in is fixed at container start
+        # (NIX_WORKER_OPKSSH_ENABLED below), so a provider/group edit --
+        # or flipping this arch in or out of opkssh.archs -- must roll
+        # the StatefulSet too. Keyed on the arch's own opkssh state, not
+        # just the shared ConfigMap's content: two identical ConfigMaps
+        # can still mean different things to an on-list vs. an off-list
+        # arch.
+        checksum/nix-worker-opkssh: {{ printf "%s:%s:%s:%s:%t" $n.opkssh.issuer $n.opkssh.clientId $n.opkssh.nixGroup $n.opkssh.adminGroup $opksshOnArch | sha256sum }}
         {{- with $n.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -226,6 +284,13 @@ spec:
               value: {{ $n.accounts.nix.trusted | quote }}
             - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
               value: {{ $n.accounts.nixremote.enabled | quote }}
+            # opkssh (the people pilot): true only for the
+            # architecture(s) named in nixWorkers.opkssh.archs -- every
+            # other arch's container gets "false" and renders exactly as
+            # it did before this feature existed, even though it shares
+            # the same image and the same opkssh-src ConfigMap.
+            - name: NIX_WORKER_OPKSSH_ENABLED
+              value: {{ $opksshOnArch | quote }}
             {{- if $n.hostCertificate.enabled }}
             - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
               value: "true"
@@ -300,6 +365,18 @@ spec:
             - name: principals
               mountPath: /etc/nix-worker/principals-src
               readOnly: true
+            - name: opkssh-src
+              mountPath: /etc/nix-worker/opkssh-src
+              readOnly: true
+            # /etc/opk backed by a real (writable) emptyDir, shadowing
+            # the image's own placeholder directory: readOnlyRootFilesystem
+            # above means opkssh's hardcoded /etc/opk/{providers,auth_id}
+            # paths could never be written at container start otherwise
+            # (image/nix-worker-entrypoint.sh does that write, every
+            # arch, regardless of NIX_WORKER_OPKSSH_ENABLED -- see that
+            # script for why leaving it unmounted is not an option).
+            - name: opk
+              mountPath: /etc/opk
             {{- if $n.hostCertificate.enabled }}
             - name: openbao-token
               mountPath: /var/run/secrets/openbao
@@ -332,6 +409,13 @@ spec:
           configMap:
             name: {{ $principalsName }}
             defaultMode: 0444
+        - name: opkssh-src
+          configMap:
+            name: {{ $opksshName }}
+            defaultMode: 0444
+        - name: opk
+          emptyDir:
+            sizeLimit: 1Mi
         {{- if $n.hostCertificate.enabled }}
         - name: openbao-token
           projected:

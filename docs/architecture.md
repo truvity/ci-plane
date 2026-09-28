@@ -289,6 +289,71 @@ with — a real, load-bearing side effect of *when* the entrypoint script
 exports it, not a documented daemon feature, which is why it is written
 down here rather than left to be rediscovered.
 
+### People, over opkssh (the people pilot)
+
+Phases 1-2 above are machines only (CI runners, an OpenBao-signed
+certificate). This pilot adds a SEPARATE, independent credential path
+for PEOPLE onto the same `nix` account, plus a new `admin` account no
+certificate ever reaches: OpenPubkey SSH (opkssh), the same
+no-CA OIDC sign-in `truvity/tailscale`'s EC2 subnet routers already use.
+`AuthorizedKeysCommand` and `TrustedUserCAKeys`/`AuthorizedPrincipalsFile`
+are independent sshd mechanisms tried in turn for pubkey auth, so this
+never displaces or reorders phases 1-2 — a worker can run every
+combination of `accounts.nix`, `hostCertificate` and `opkssh` at once,
+and a worker with `opkssh.archs` empty (the default) renders exactly as
+it did before this feature existed.
+
+`opkssh`, `opksshuser` and the `admin` account are baked into every
+`nix-worker` image unconditionally (`image/nix-worker/Dockerfile`) —
+whether either is ever REACHABLE is decided entirely by
+`nixWorkers.opkssh.archs`, an explicit allow-list into `nixWorkers.archs`
+(the same shape as `truvity/tailscale`'s `opksshEnvs`): naming an
+architecture there is "one pilot worker", every other architecture's
+StatefulSet shares the image and the opkssh ConfigMap but never sets
+`NIX_WORKER_OPKSSH_ENABLED`, so `AllowUsers` never gains `admin` and
+`/etc/opk/{providers,auth_id}` render empty (`nix-worker-entrypoint.sh`).
+
+The OWN install steps (never opkssh's upstream `install-linux.sh`) for
+the same reason `truvity/tailscale` v1.11.0 stopped calling it: that
+script's OS-family detection does not recognize every base image, and
+owning the handful of steps it would have taken — create `opksshuser`,
+install the checksum-verified binary, write the sshd
+`AuthorizedKeysCommand` drop-in — costs less than depending on it.
+
+`/etc/opk` is a writable `emptyDir` in the chart, not the image's own
+directory: `readOnlyRootFilesystem: true` means opkssh's hardcoded
+`/etc/opk/{providers,auth_id}` paths (there is no flag to relocate them)
+could never be written at container start otherwise — the same reason
+`$runtime_dir` under `/run/nix-worker` exists for the CA-certificate
+files phases 1-2 use. `nix-worker-entrypoint.sh` rebuilds both files
+from the chart's ConfigMap every start, exactly the "empty means nobody"
+default the principals ConfigMap already establishes.
+
+`admin` is the one account on this worker with a real interactive shell
+and `sudo` (passwordless: there is no password authentication method to
+enter one against). `Match User admin` in `image/sshd_config` sets
+`ForceCommand none` — overriding the GLOBAL `ForceCommand` (the legacy
+`nixremote` shim) that would otherwise force `admin`'s session through
+it too — and `PermitTTY yes`, the one place this worker grants a real
+terminal. `nix` stays `ForceCommand nix-daemon --stdio` regardless of
+which credential (certificate or opkssh) reached it: opkssh only adds a
+SECOND way in, never a different account or a different forced command.
+
+Trust in `nix.conf`'s `trusted-users` (`nixWorkers.accounts.nix.trusted`)
+is an EXISTING, independent toggle (phase 1) opkssh does not touch,
+override, or gate on: it is a property of the ACCOUNT (`nix`), not of
+which credential mechanism reached it, so it applies identically to a
+certificate-authenticated session and an opkssh-authenticated one.
+**This installation keeps `nix` trusted** (an install that already sets
+`accounts.nix.trusted: true` for its own CI principal, as the pre-existing
+value comment describes) — opkssh does not narrow this. That means
+EVERYONE who can reach `nix`, by either credential, can import a store
+path without signature verification, which CI's own builds then trust
+implicitly. Whether that population should stay this wide, or narrow to
+whoever also operates CI, is a decision for each installation's own
+identity policy to name explicitly (see the consuming estate's own
+access-control docs) — this chart does not decide it.
+
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox

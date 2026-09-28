@@ -130,6 +130,76 @@ jobs:
             echo "nixremote.enabled=false guard did not fire on an empty accounts.nix.principals" >&2
             exit 1
           fi
+          # opkssh (the people pilot). nixWorkers.opkssh.archs is
+          # an allow-list into nixWorkers.archs, not a parallel switch: a
+          # worker named in it renders NIX_WORKER_OPKSSH_ENABLED=true,
+          # every other arch's worker (sharing the same image and the
+          # same opkssh ConfigMap) renders "false" -- proving that is
+          # the one property most worth a render test, since a bug here
+          # widens the pilot past the one worker it names.
+          opkssh_out=$(helm template test charts/ci-builders \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            --set 'nixWorkers.opkssh.archs={amd64}' \
+            --set nixWorkers.opkssh.issuer=https://access.example \
+            --set nixWorkers.opkssh.clientId=opkssh \
+            --set nixWorkers.opkssh.nixGroup=devel.nix-workers.user \
+            --set nixWorkers.opkssh.adminGroup=devel.nix-workers.admin)
+          # Scoped to each arch's OWN `kind: StatefulSet` document (by its
+          # `name: nix-worker-<arch>` a couple of lines below `kind:`) --
+          # a plain `ci-plane.io/arch: <arch>` grep also matches
+          # buildkitd's own per-arch labels earlier in the same render.
+          statefulset_env_value() {
+            local arch="$1" ss_line
+            ss_line=$(awk -v arch="$arch" '
+              /^kind: StatefulSet$/ { ss=NR }
+              ss && $0 ~ ("^  name: nix-worker-" arch "$") { print ss; exit }
+            ' <<<"$opkssh_out")
+            [ -n "$ss_line" ] || return 1
+            awk -v start="$ss_line" '
+              NR>start && /- name: NIX_WORKER_OPKSSH_ENABLED/ { getline; print; exit }
+            ' <<<"$opkssh_out"
+          }
+          if ! grep -qF 'value: "true"' <<<"$(statefulset_env_value amd64)"; then
+            echo "nixWorkers.opkssh.archs=[amd64] did not enable NIX_WORKER_OPKSSH_ENABLED on the amd64 worker" >&2
+            exit 1
+          fi
+          if ! grep -qF 'value: "false"' <<<"$(statefulset_env_value arm64)"; then
+            echo "nixWorkers.opkssh.archs=[amd64] leaked NIX_WORKER_OPKSSH_ENABLED onto the arm64 worker" >&2
+            exit 1
+          fi
+          if ! grep -qF 'auth_id: "nix oidc:groups:devel.nix-workers.user https://access.example\nadmin oidc:groups:devel.nix-workers.admin https://access.example"' <<<"$opkssh_out"; then
+            echo "opkssh ConfigMap auth_id did not render both identity lines as expected" >&2
+            exit 1
+          fi
+          # The bare render (nixWorkers.opkssh.archs at its default,
+          # empty) must carry no opkssh identity content at all -- same
+          # "default off leaves no trace" bar as the bazel-remote S3
+          # check above.
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               | grep -qE 'oidc:groups|NIX_WORKER_OPKSSH_ENABLED.{0,40}"true"'; then
+            echo "bare nixWorkers render leaked opkssh identity content or an enabled flag" >&2
+            exit 1
+          fi
+          # Two render-time refusals: an architecture opkssh.archs names
+          # that nixWorkers.archs does not run, and archs non-empty with
+          # no issuer to pin against.
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set 'nixWorkers.opkssh.archs={riscv}' > /dev/null 2>&1; then
+            echo "nixWorkers.opkssh.archs guard did not fire on an architecture outside nixWorkers.archs" >&2
+            exit 1
+          fi
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set 'nixWorkers.opkssh.archs={amd64}' > /dev/null 2>&1; then
+            echo "nixWorkers.opkssh.archs guard did not fire on a missing issuer" >&2
+            exit 1
+          fi
           # Three render-time refusals, the same idiom as the goModproxy
           # guard below: enabling hostCertificate without its required
           # OpenBao route, and a renewEvery at or past certificateTTL --

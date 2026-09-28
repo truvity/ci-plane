@@ -28,6 +28,21 @@ GatewayPorts no
 ForceCommand /usr/local/bin/nix-worker-ssh-command
 LogLevel VERBOSE
 
+# opkssh (the people pilot): OIDC sign-in with no CA, additive to
+# the OpenBao-certificate logins above -- AuthorizedKeysCommand and
+# TrustedUserCAKeys/AuthorizedPrincipalsFile are independent sshd
+# mechanisms, tried in turn for pubkey auth, so this line never displaces
+# or reorders the `Match User nix` block below (truvity/tailscale's
+# awsrouter package relies on the exact same independence for the EC2
+# subnet routers). Baked unconditionally, like ForceCommand above: the
+# `opksshuser`-owned /etc/opk/{providers,auth_id} files decide who is
+# actually admitted (empty, the default, admits nobody), and AllowUsers
+# below decides which accounts can even attempt pubkey auth as `nix` or
+# `admin` in the first place -- image/nix-worker-entrypoint.sh sets both
+# from NIX_WORKER_OPKSSH_ENABLED, never this file.
+AuthorizedKeysCommand /usr/local/bin/opkssh verify %u %k %t
+AuthorizedKeysCommandUser opksshuser
+
 # A SECOND login (INF host-certificates phase 1): the modern ssh-ng
 # protocol via `nix-daemon --stdio`, gated independently of `nixremote`
 # above. AuthorizedPrincipalsFile, not a fixed principal: the chart
@@ -50,3 +65,21 @@ Match User nix
     ForceCommand /usr/local/libexec/nix-worker/nix-daemon --stdio
     PermitTTY no
     DisableForwarding yes
+
+# `admin` (the people pilot): the one account on this worker that
+# gets a real interactive shell, opkssh only -- no OpenBao certificate
+# reaches it (there is no AuthorizedPrincipalsFile line here, unlike
+# `nix` above). `admin` is only ever in AllowUsers when
+# nixWorkers.opkssh's allow-list includes this worker's architecture
+# (image/nix-worker-entrypoint.sh), so this block existing unconditionally
+# in the baked file is harmless the same way the `nix` block above is:
+# unreachable usernames never reach a Match block at all.
+#
+# ForceCommand none overrides the global ForceCommand above (the legacy
+# nix-worker-ssh-command shim) -- without it `admin` would be forced
+# through that script too and could never get a shell. PermitTTY yes is
+# the one thing this worker grants nowhere else. Forwarding stays
+# disabled: the global DisableForwarding yes is not overridden here.
+Match User admin
+    ForceCommand none
+    PermitTTY yes
