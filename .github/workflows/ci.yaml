@@ -58,14 +58,79 @@ jobs:
             --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a}' \
             --set nixWorkers.hostCertificate.enabled=true \
             --set nixWorkers.openbao.address=https://openbao.example \
-            --set nixWorkers.openbao.namespace=devel \
+            --set nixWorkers.openbao.namespace=dev \
             --set nixWorkers.openbao.caBundle=dGVzdA== \
-            --set nixWorkers.openbao.authMount=jwt-devel \
+            --set nixWorkers.openbao.authMount=jwt-dev \
             --set nixWorkers.openbao.authRole=nix-worker \
             --set-string 'nixWorkers.accounts.nix.principals[0]=ci@example' \
             --set nixWorkers.accounts.nix.trusted=true \
-            > /dev/null
-          # Two render-time refusals, the same idiom as the goModproxy
+            > /tmp/hostcert-overlay.yaml
+          # The nix-worker readinessProbe alone carries "--readiness" --
+          # it is the only probe allowed to watch the host certificate's
+          # remaining life. Matched on the exact command-line literals
+          # (not "readinessProbe:" generally, which also matches
+          # nixCache/bazelRemote's unrelated probes in this same chart),
+          # so counts are exact regardless of nixWorkers.archs. With
+          # hostCertificate enabled, the render must also carry the
+          # minRemaining env var the health check reads.
+          nix_worker_readiness=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck", "--readiness"]' /tmp/hostcert-overlay.yaml)
+          nix_worker_other_probes=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck"]' /tmp/hostcert-overlay.yaml)
+          # One readinessProbe, two (startup+liveness) others, per arch.
+          if [ "$nix_worker_readiness" = 0 ] || [ "$nix_worker_other_probes" != "$(( nix_worker_readiness * 2 ))" ]; then
+            echo "expected --readiness on exactly the nix-worker readinessProbe, one per arch: got $nix_worker_readiness readiness / $nix_worker_other_probes other probes" >&2
+            exit 1
+          fi
+          if ! grep -A1 'NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING' /tmp/hostcert-overlay.yaml | grep -qF -- 'value: "2h"'; then
+            echo "hostCertificate.enabled render is missing NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING (default 2h)" >&2
+            exit 1
+          fi
+          # The bare nixWorkers.enabled=true render (no hostCertificate)
+          # must still carry --readiness on the readinessProbe alone --
+          # the flag is unconditional; only the env var it reads for is
+          # gated -- and nixremote's login toggle at its own default
+          # (true).
+          bare_out=$(helm template test charts/ci-builders \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST')
+          bare_readiness=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck", "--readiness"]' <<<"$bare_out")
+          bare_other_probes=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck"]' <<<"$bare_out")
+          if [ "$bare_readiness" = 0 ] || [ "$bare_other_probes" != "$(( bare_readiness * 2 ))" ]; then
+            echo "the bare nixWorkers render must still carry --readiness on exactly the readinessProbe" >&2
+            exit 1
+          fi
+          # nixWorkers.accounts.nixremote.enabled (the legacy login
+          # toggle): true by default, and the render must say so
+          # explicitly -- nix-worker-entrypoint.sh's own bash default
+          # exists only for scripts that drive it outside the chart
+          # (hack/nix-worker-principals-e2e.sh).
+          nixremote_default_out=$(helm template test charts/ci-builders \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST')
+          if ! grep -A1 'NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED' <<< "$nixremote_default_out" | grep -qF -- 'value: "true"'; then
+            echo "nixWorkers.accounts.nixremote.enabled default render is missing NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=true" >&2
+            exit 1
+          fi
+          nixremote_off_out=$(helm template test charts/ci-builders \
+            --set nixWorkers.enabled=true \
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            --set nixWorkers.accounts.nixremote.enabled=false \
+            --set-string 'nixWorkers.accounts.nix.principals[0]=ci@example')
+          if ! grep -A1 'NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED' <<< "$nixremote_off_out" | grep -qF -- 'value: "false"'; then
+            echo "nixWorkers.accounts.nixremote.enabled=false did not render NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=false" >&2
+            exit 1
+          fi
+          # And the refusal: disabling the legacy login with no nix
+          # principal configured either would leave this worker with no
+          # machine login at all -- the same idiom as the goModproxy
+          # guard below.
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixWorkers.accounts.nixremote.enabled=false > /dev/null 2>&1; then
+            echo "nixremote.enabled=false guard did not fire on an empty accounts.nix.principals" >&2
+            exit 1
+          fi
+          # Three render-time refusals, the same idiom as the goModproxy
           # guard below: enabling hostCertificate without its required
           # OpenBao route, and a renewEvery at or past certificateTTL --
           # a renewal that can never land before the current certificate
@@ -82,13 +147,27 @@ jobs:
                --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
                --set nixWorkers.hostCertificate.enabled=true \
                --set nixWorkers.openbao.address=https://openbao.example \
-               --set nixWorkers.openbao.namespace=devel \
+               --set nixWorkers.openbao.namespace=dev \
                --set nixWorkers.openbao.caBundle=dGVzdA== \
-               --set nixWorkers.openbao.authMount=jwt-devel \
+               --set nixWorkers.openbao.authMount=jwt-dev \
                --set nixWorkers.openbao.authRole=nix-worker \
                --set nixWorkers.hostCertificate.renewEvery=24h \
                --set nixWorkers.hostCertificate.certificateTTL=24h > /dev/null 2>&1; then
             echo "hostCertificate guard did not fire on renewEvery >= certificateTTL" >&2
+            exit 1
+          fi
+          if helm template test charts/ci-builders \
+               --set nixWorkers.enabled=true \
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixWorkers.hostCertificate.enabled=true \
+               --set nixWorkers.openbao.address=https://openbao.example \
+               --set nixWorkers.openbao.namespace=dev \
+               --set nixWorkers.openbao.caBundle=dGVzdA== \
+               --set nixWorkers.openbao.authMount=jwt-dev \
+               --set nixWorkers.openbao.authRole=nix-worker \
+               --set nixWorkers.hostCertificate.minRemaining=24h \
+               --set nixWorkers.hostCertificate.certificateTTL=24h > /dev/null 2>&1; then
+            echo "hostCertificate guard did not fire on minRemaining >= certificateTTL" >&2
             exit 1
           fi
           helm template test charts/arc-runners \
@@ -97,11 +176,11 @@ jobs:
             --set nodeSelector."karpenter\.sh/nodepool"=ci \
             --set nixBuilders.enabled=true \
             --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.namespace=dev \
             --set nixBuilders.openbao.caBundle=dGVzdA== \
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
             --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authMount=jwt-dev \
             --set nixBuilders.openbao.authRole=runner-example \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
@@ -115,11 +194,11 @@ jobs:
             --set runnerServiceAccountName=preview-runner \
             --set nixBuilders.enabled=true \
             --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.namespace=dev \
             --set nixBuilders.openbao.caBundle=dGVzdA== \
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
             --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authMount=jwt-dev \
             --set nixBuilders.openbao.authRole=runner-example \
             --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.ci-cache.svc.cluster.local' \
             --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA')
@@ -134,11 +213,11 @@ jobs:
                --set runnerServiceAccountName=preview-runner \
                --set nixBuilders.enabled=true \
                --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=devel \
+               --set nixBuilders.openbao.namespace=dev \
                --set nixBuilders.openbao.caBundle=dGVzdA== \
                --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
                --set nixBuilders.knownHosts.revision=test-v1 \
-               --set nixBuilders.openbao.authMount=jwt-devel \
+               --set nixBuilders.openbao.authMount=jwt-dev \
                --set nixBuilders.openbao.authRole=runner-example \
                --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA' > /dev/null 2>&1; then
             echo "certAuthorities guard did not fire on a missing hosts list" >&2
@@ -152,11 +231,11 @@ jobs:
             --set runnerServiceAccountName=preview-runner \
             --set nixBuilders.enabled=true \
             --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.namespace=dev \
             --set nixBuilders.openbao.caBundle=dGVzdA== \
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
             --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authMount=jwt-dev \
             --set nixBuilders.openbao.authRole=ci-nix \
             --set nixBuilders.openbao.sshRole=ci-nix \
             --set nixBuilders.login.user=nix \
@@ -178,11 +257,11 @@ jobs:
                --set runnerServiceAccountName=preview-runner \
                --set nixBuilders.enabled=true \
                --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=devel \
+               --set nixBuilders.openbao.namespace=dev \
                --set nixBuilders.openbao.caBundle=dGVzdA== \
                --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
                --set nixBuilders.knownHosts.revision=test-v1 \
-               --set nixBuilders.openbao.authMount=jwt-devel \
+               --set nixBuilders.openbao.authMount=jwt-dev \
                --set nixBuilders.openbao.authRole=runner-example \
                --set nixBuilders.login.protocol=bogus > /dev/null 2>&1; then
             echo "nixBuilders.login.protocol guard did not fire on an unknown protocol" >&2
@@ -195,10 +274,10 @@ jobs:
             --set runnerServiceAccountName=preview-runner \
             --set nixBuilders.enabled=true \
             --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=devel \
+            --set nixBuilders.openbao.namespace=dev \
             --set nixBuilders.openbao.caBundle=dGVzdA== \
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixBuilders.openbao.authMount=jwt-devel \
+            --set nixBuilders.openbao.authMount=jwt-dev \
             --set nixBuilders.openbao.authRole=runner-example \
             --set nixBuilders.knownHosts.pinned=false \
             --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.ci-cache.svc.cluster.local' \
@@ -218,10 +297,10 @@ jobs:
                --set runnerServiceAccountName=preview-runner \
                --set nixBuilders.enabled=true \
                --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=devel \
+               --set nixBuilders.openbao.namespace=dev \
                --set nixBuilders.openbao.caBundle=dGVzdA== \
                --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-               --set nixBuilders.openbao.authMount=jwt-devel \
+               --set nixBuilders.openbao.authMount=jwt-dev \
                --set nixBuilders.openbao.authRole=runner-example \
                --set nixBuilders.knownHosts.pinned=false > /dev/null 2>&1; then
             echo "knownHosts.pinned=false guard did not fire on an empty certAuthorities list" >&2
@@ -236,11 +315,11 @@ jobs:
             --set runnerServiceAccountName=preview-runner
             --set nixBuilders.enabled=true
             --set nixBuilders.openbao.address=https://openbao.example
-            --set nixBuilders.openbao.namespace=devel
+            --set nixBuilders.openbao.namespace=dev
             --set nixBuilders.openbao.caBundle=dGVzdA==
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST'
             --set nixBuilders.knownHosts.revision=test-v1
-            --set nixBuilders.openbao.authMount=jwt-devel
+            --set nixBuilders.openbao.authMount=jwt-dev
             --set nixBuilders.openbao.authRole=runner-example
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
           )
@@ -343,6 +422,15 @@ jobs:
       # all render and run fine, and the runners quietly spread again.
       - name: packing cases
         run: ./hack/packing-cases.sh
+
+      # The health check's host-certificate parser
+      # (image/nix-worker-healthcheck.sh) against hand-built
+      # certificates -- fresh, low on validity, expired, missing,
+      # unparseable -- with no nix-daemon/sshd/port 2222 needed for any
+      # of that: the script only calls its own checks from main(), so
+      # sourcing it here just defines them.
+      - name: nix-worker health-check host-certificate cases
+        run: ./hack/nix-worker-healthcheck-cases.sh
 
       # Two guards on the image split (2026-09-24), both asserting a
       # property that is invisible in a green run.

@@ -7,6 +7,10 @@
 {{- if not $n.archs }}{{ fail "nixWorkers.archs is required when nixWorkers is enabled" }}{{ end }}
 {{- if le (int $n.maxJobs) 0 }}{{ fail "nixWorkers.maxJobs must be positive" }}{{ end }}
 {{- if le (int $n.cores) 0 }}{{ fail "nixWorkers.cores must be positive" }}{{ end }}
+{{- /* nixWorkers.accounts.nixremote.enabled: false together with an
+     empty accounts.nix.principals would leave this worker with NO
+     machine login at all -- neither account could ever be reached. */}}
+{{- if and (not $n.accounts.nixremote.enabled) (not $n.accounts.nix.principals) }}{{ fail "nixWorkers.accounts.nixremote.enabled is false and nixWorkers.accounts.nix.principals is empty: this worker would have no machine login at all" }}{{ end }}
 {{- /* INF host-certificates phase 1. Validated the same way as
      arc-runners' nixBuilders.openbao.certificateTTL: a whole number of
      s/m/h, converted to seconds so renewEvery can be compared against it
@@ -32,6 +36,10 @@
 {{- $ttlSeconds := mul (int (regexFind "^[0-9]+" $ttl)) (get $unitSeconds (regexFind "[smh]$" $ttl)) }}
 {{- $renewSeconds := mul (int (regexFind "^[0-9]+" $renew)) (get $unitSeconds (regexFind "[smh]$" $renew)) }}
 {{- if ge (int $renewSeconds) (int $ttlSeconds) }}{{ fail (printf "nixWorkers.hostCertificate.renewEvery %q must be less than certificateTTL %q: a renewal at or after the certificate's own lifetime leaves the worker unreachable between expiry and the (too-late) renewal" $renew $ttl) }}{{ end }}
+{{- $minRemaining := toString $n.hostCertificate.minRemaining }}
+{{- if not (regexMatch "^[0-9]+[smh]$" $minRemaining) }}{{ fail (printf "nixWorkers.hostCertificate.minRemaining %q must be a whole number of s, m or h (e.g. 2h)" $minRemaining) }}{{ end }}
+{{- $minRemainingSeconds := mul (int (regexFind "^[0-9]+" $minRemaining)) (get $unitSeconds (regexFind "[smh]$" $minRemaining)) }}
+{{- if ge (int $minRemainingSeconds) (int $ttlSeconds) }}{{ fail (printf "nixWorkers.hostCertificate.minRemaining %q must be less than certificateTTL %q" $minRemaining $ttl) }}{{ end }}
 {{- end }}
 {{- $trustedCAs := join "\n" $n.ssh.trustedUserCAKeys }}
 {{- $caName := printf "nix-worker-trusted-user-ca-%s" ($trustedCAs | sha256sum | trunc 12) }}
@@ -216,11 +224,15 @@ spec:
               value: {{ $n.maxFreeBytes | quote }}
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
               value: {{ $n.accounts.nix.trusted | quote }}
+            - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
+              value: {{ $n.accounts.nixremote.enabled | quote }}
             {{- if $n.hostCertificate.enabled }}
             - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
               value: "true"
             - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
               value: {{ $n.hostCertificate.renewEvery | quote }}
+            - name: NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING
+              value: {{ $n.hostCertificate.minRemaining | quote }}
             - name: NIX_WORKER_CERTIFICATE_TTL
               value: {{ $n.hostCertificate.certificateTTL | quote }}
             - name: NIX_WORKER_OPENBAO_ADDRESS
@@ -255,7 +267,13 @@ spec:
             periodSeconds: 2
           readinessProbe:
             exec:
-              command: ["/usr/local/bin/nix-worker-healthcheck"]
+              # --readiness, on THIS probe alone: it is the only one of
+              # the three that may watch the host certificate's
+              # remaining life (image/nix-worker-healthcheck.sh) --
+              # startupProbe/livenessProbe below stay identical to
+              # before so a stalled renewal loop never kills a pod that
+              # still serves under a still-valid certificate.
+              command: ["/usr/local/bin/nix-worker-healthcheck", "--readiness"]
             periodSeconds: 10
           livenessProbe:
             exec:
