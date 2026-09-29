@@ -190,6 +190,52 @@ RUN ARCH=$(dpkg --print-architecture) \
  && rm /tmp/devbox.tgz \
  && devbox version
 
+# accessctl (truvity/access-roster's CLI) and r2broker (truvity/
+# cloudflare's R2 temporary-credentials broker CLI). `accessctl r2`
+# authenticates against the estate's access-roster issuer and execs the
+# real `r2broker` binary unchanged
+# (access-roster docs/reference/accessctl.md#r2) -- accessctl alone has
+# nothing to run, so the two ship together or not at all. Together they
+# are what an `awsConfig.credentialProcess` line (arc-runners v4.2.0)
+# names: `accessctl r2 --service-url <broker> -- credentials --bucket
+# <bucket> --prefix <prefix>`, so the Go build cache's S3-compatible
+# client can read a short-lived, prefix-scoped credential instead of a
+# static key in a Secret.
+#
+# BAKED, same reasoning as go-cache-plugin above: the credential_process
+# the AWS SDK execs is invoked BY that client, which already has to
+# pre-exist the first `go` invocation of a job -- so whatever it in turn
+# execs has to pre-exist it too. Neither binary is required by a job that
+# never sets AWS_CONFIG_FILE at a line naming `accessctl r2`: idle
+# binaries on PATH, invoked by nothing.
+#
+# Verified against that release's own checksums.txt rather than a
+# hand-pinned digest (contrast image/nix-worker/Dockerfile's opkssh,
+# hand-maintained because ITS upstream ships no per-release checksums
+# file): a Renovate version bump here downloads the NEW release's
+# checksums.txt in the same build, so the version pin and its checksum
+# can never desync the way two separately hand-maintained values could.
+# renovate: datasource=github-releases depName=truvity/access-roster
+ARG ACCESSCTL_VERSION=1.39.2
+# renovate: datasource=github-releases depName=truvity/cloudflare
+ARG R2BROKER_VERSION=2.7.1
+RUN ARCH=$(dpkg --print-architecture) \
+ && cd /tmp \
+ && curl -fsSLO "https://github.com/truvity/access-roster/releases/download/v${ACCESSCTL_VERSION}/access-roster_${ACCESSCTL_VERSION}_checksums.txt" \
+ && curl -fsSLO "https://github.com/truvity/access-roster/releases/download/v${ACCESSCTL_VERSION}/accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" \
+ && grep -F "  accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" "access-roster_${ACCESSCTL_VERSION}_checksums.txt" | sha256sum -c - \
+ && tar -xzf "accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" accessctl \
+ && install -m 0755 accessctl /usr/local/bin/accessctl \
+ && rm -f "access-roster_${ACCESSCTL_VERSION}_checksums.txt" "accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" accessctl \
+ && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/cloudflare_${R2BROKER_VERSION}_checksums.txt" \
+ && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" \
+ && grep -F "  r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" "cloudflare_${R2BROKER_VERSION}_checksums.txt" | sha256sum -c - \
+ && tar -xzf "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
+ && install -m 0755 r2broker /usr/local/bin/r2broker \
+ && rm -f "cloudflare_${R2BROKER_VERSION}_checksums.txt" "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
+ && accessctl --version \
+ && r2broker --version
+
 # The same manifest also serves dedicated Nix workers when Kubernetes
 # overrides the command. ARC keeps the upstream runner command and user.
 # Worker-only packages and accounts are inert in ordinary job pods.
