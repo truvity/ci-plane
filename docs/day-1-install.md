@@ -212,6 +212,16 @@ half of).
   that hold no job, match a stuck-log signature, and outlived a grace
   period.
 
+## A Go cache credential with no pod identity
+
+`extraEnvFrom`/`extraEnv` above are for a store the runner reaches with
+a long-lived key in a Secret. For a short-lived one instead —
+Cloudflare R2 through `truvity/cloudflare`'s r2broker, fronted by
+`accessctl r2` (access-roster v1.39+, baked into this image) — set
+`awsConfig` and grant the calling workflow `id-token: write`; see
+[architecture.md#an-aws-profile-for-a-broker](architecture.md#an-aws-profile-for-a-broker)
+for the worked example and what it renders.
+
 ## Wiring workflows
 
 Point `runs-on` at the scale-set names (via org variables so a rename

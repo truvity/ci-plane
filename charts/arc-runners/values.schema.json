@@ -172,6 +172,88 @@
         "type": "object"
       }
     },
+    "extraVolumes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraInitContainers": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "projectedServiceAccountTokens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "audience",
+          "path"
+        ],
+        "properties": {
+          "audience": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expirationSeconds": {
+            "type": "integer",
+            "minimum": 600,
+            "description": "The Kubernetes TokenRequest API's own floor."
+          }
+        }
+      }
+    },
+    "awsConfig": {
+      "type": "object",
+      "description": "Empty/disabled by default: no ConfigMap, no mount, neither AWS_CONFIG_FILE nor AWS_PROFILE set. templates/runnersets.yaml also refuses this alongside an extraEnv entry named AWS_ACCESS_KEY_ID -- a check this schema cannot express.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "credentialProcess": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "profile",
+          "credentialProcess"
+        ],
+        "properties": {
+          "profile": {
+            "minLength": 1
+          },
+          "credentialProcess": {
+            "minLength": 1
+          }
+        }
+      }
+    },
     "nixCache": {
       "type": "object",
       "properties": {

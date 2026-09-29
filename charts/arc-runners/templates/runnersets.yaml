@@ -42,6 +42,28 @@
 {{- if le (int $builder.speedFactor) 0 }}{{ fail (printf "nixBuilders.builders[%d].speedFactor must be positive" $i) }}{{ end }}
 {{- end }}
 {{- end }}
+{{- /*
+awsConfig and projectedServiceAccountTokens are release-wide only (no
+per-scale-set override, unlike extraEnv/extraEnvFrom above) — one
+runner-shaped credential path, not one per scale set. Checked here
+because the schema cannot express either: a cross-key constraint
+(awsConfig vs. a NAMED extraEnv entry) and a cross-item one (no two
+projected tokens sharing a mount path).
+*/}}
+{{- if .Values.awsConfig.enabled }}
+{{- if not .Values.awsConfig.profile }}{{ fail "awsConfig.profile is required when awsConfig.enabled" }}{{ end }}
+{{- if not .Values.awsConfig.credentialProcess }}{{ fail "awsConfig.credentialProcess is required when awsConfig.enabled" }}{{ end }}
+{{- range $e := .Values.extraEnv }}
+{{- if eq $e.name "AWS_ACCESS_KEY_ID" }}{{ fail "awsConfig.enabled with an extraEnv entry named AWS_ACCESS_KEY_ID: the AWS SDK's own credential chain checks environment variables BEFORE a config file's credential_process, so this static key would silently keep winning over the broker-minted one -- drop it (and its extraEnvFrom Secret, if that is where it comes from) before enabling awsConfig; the two are alternatives for the same job-scoped credential, never both at once" }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if .Values.projectedServiceAccountTokens }}
+{{- $seenPaths := dict }}
+{{- range $i, $t := .Values.projectedServiceAccountTokens }}
+{{- if hasKey $seenPaths $t.path }}{{ fail (printf "projectedServiceAccountTokens[%d]: path %q is already used by another entry -- the kubelet projects every source into ONE directory, so a second entry naming the same path would silently replace the first at apply time" $i $t.path) }}{{ end }}
+{{- $_ := set $seenPaths $t.path true }}
+{{- end }}
+{{- end }}
 {{- $root := . }}
 {{- range $name, $p := .Values.scaleSets }}
 {{- /*
@@ -115,6 +137,22 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- if hasKey $p "extraEnvFrom" }}{{ $_ := set $spec "extraEnvFrom" $extraEnvFrom }}{{ end }}
 {{- if $p.extraNixConfig }}{{ $_ := set $spec "extraNixConfig" $p.extraNixConfig }}{{ end }}
 {{- if $nixSandbox.enabled }}{{ $_ := set $spec "nixSandbox" $nixSandbox }}{{ end }}
+{{- if $root.Values.awsConfig.enabled }}{{ $_ := set $spec "awsConfig" $root.Values.awsConfig }}{{ end }}
+{{- if $root.Values.projectedServiceAccountTokens }}{{ $_ := set $spec "projectedServiceAccountTokens" $root.Values.projectedServiceAccountTokens }}{{ end }}
+{{- if $root.Values.extraVolumes }}{{ $_ := set $spec "extraVolumes" $root.Values.extraVolumes }}{{ end }}
+{{- if $root.Values.extraVolumeMounts }}{{ $_ := set $spec "extraVolumeMounts" $root.Values.extraVolumeMounts }}{{ end }}
+{{- if $root.Values.extraInitContainers }}{{ $_ := set $spec "extraInitContainers" $root.Values.extraInitContainers }}{{ end }}
+{{- /*
+Whether the pod spec carries an initContainers/volumeMounts/volumes key
+at all — each stays OMITTED, not rendered empty, when none of its
+sources are in play, which is what keeps a release using none of these
+v4.2.0 hooks byte-identical to one built without them (the golden proof
+for the default case, same rule the keys above already follow for the
+values-hash).
+*/}}
+{{- $hasInitContainers := or $root.Values.nixBuilders.enabled (gt (len $root.Values.extraInitContainers) 0) }}
+{{- $hasVolumeMounts := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled (gt (len $root.Values.extraVolumeMounts) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
+{{- $hasVolumes := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled (gt (len $root.Values.extraVolumes) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -193,8 +231,9 @@ spec:
       affinity:
         {{- . | nindent 8 }}
       {{- end }}
-      {{- if $root.Values.nixBuilders.enabled }}
+      {{- if $hasInitContainers }}
       initContainers:
+        {{- if $root.Values.nixBuilders.enabled }}
         - name: prepare-nix-builder-ssh
           image: {{ include "arc-runners.runnerImage" $root }}
           command: ["/usr/local/bin/nix-worker-client-setup"]
@@ -229,6 +268,10 @@ spec:
               mountPath: /var/run/nix-builder-ssh
             - name: nix-builders
               mountPath: /var/run/nix-builders
+        {{- end }}
+        {{- with $root.Values.extraInitContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       containers:
         - name: runner
@@ -287,14 +330,34 @@ spec:
               value: /etc/nix-builders
             {{- include "arc-runners.nixBuilderEnv" $root | nindent 12 }}
             {{- end }}
+            {{- if $root.Values.awsConfig.enabled }}
+            # JOB-scoped, not CLIENT-scoped: an ephemeral runner's `runner`
+            # container is the one place every step of ONE job runs, so
+            # AWS_PROFILE here is the default for any `aws`/SDK call that
+            # job makes, not only the Go cache client this exists for. A
+            # step that needs a DIFFERENT AWS identity in the same job sets
+            # its own AWS_PROFILE (or --profile) to override this default,
+            # exactly as it would override any other environment default.
+            # See values.yaml's awsConfig comment for the render-time
+            # refusal that catches the opposite direction: a static
+            # AWS_ACCESS_KEY_ID left in extraEnv, which would silently
+            # outrank this profile rather than the other way around.
+            - name: AWS_CONFIG_FILE
+              value: /var/run/aws-config/config
+            - name: AWS_PROFILE
+              value: {{ $root.Values.awsConfig.profile | quote }}
+            {{- end }}
           resources:
             {{- toYaml $p.resources | nindent 12 }}
+          {{- if $hasVolumeMounts }}
           {{- if $root.Values.nixBuilders.enabled }}
           # Writable by `runner` (the init container chowns both emptyDirs to
           # it): the job-started hook replaces the key, certificate and
           # machines file. The projected token is here for the same hook, so
           # workflow code can read it too — see docs/architecture.md.
+          {{- end }}
           volumeMounts:
+            {{- if $root.Values.nixBuilders.enabled }}
             {{- if $root.Values.nixBuilders.knownHosts.pinned }}
             - name: nix-builder-known-hosts
               mountPath: /var/run/nix-builder-known-hosts
@@ -310,9 +373,24 @@ spec:
               mountPath: /home/runner/.ssh
             - name: nix-builders
               mountPath: /etc/nix-builders
+            {{- end }}
+            {{- if $root.Values.awsConfig.enabled }}
+            - name: aws-config
+              mountPath: /var/run/aws-config
+              readOnly: true
+            {{- end }}
+            {{- if $root.Values.projectedServiceAccountTokens }}
+            - name: extra-tokens
+              mountPath: /var/run/secrets/tokens
+              readOnly: true
+            {{- end }}
+            {{- with $root.Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- if $root.Values.nixBuilders.enabled }}
+      {{- if $hasVolumes }}
       volumes:
+        {{- if $root.Values.nixBuilders.enabled }}
         {{- if $root.Values.nixBuilders.knownHosts.pinned }}
         - name: nix-builder-known-hosts
           secret:
@@ -355,6 +433,34 @@ spec:
           emptyDir: {}
         - name: nix-builders
           emptyDir: {}
+        {{- end }}
+        {{- if $root.Values.awsConfig.enabled }}
+        - name: aws-config
+          configMap:
+            name: runner-aws-config
+        {{- end }}
+        {{- if $root.Values.projectedServiceAccountTokens }}
+        # 0444: read by whatever job-side code the estate points at this
+        # path, not only root — same reasoning as nix-builder-openbao-token
+        # above. ONE volume, several sources: the kubelet projects every
+        # source of one projected volume into the same directory, which is
+        # exactly why two entries may not share a `path` (refused above).
+        - name: extra-tokens
+          projected:
+            defaultMode: 0444
+            sources:
+              {{- range $t := $root.Values.projectedServiceAccountTokens }}
+              - serviceAccountToken:
+                  audience: {{ $t.audience | quote }}
+                  path: {{ $t.path | quote }}
+                  {{- if $t.expirationSeconds }}
+                  expirationSeconds: {{ $t.expirationSeconds }}
+                  {{- end }}
+              {{- end }}
+        {{- end }}
+        {{- with $root.Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
 ---
 # The controller's per-scale-set manager Role — mirrors the upstream
