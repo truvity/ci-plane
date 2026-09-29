@@ -1,0 +1,30 @@
+# v3.1.0: the same sandboxed scale set as the nix-sandbox case, with
+# nixSandbox.fence.enabled on -- proves the ValidatingAdmissionPolicy
+# renders and names exactly the one sandboxed set's profile.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nixSandbox:
+  fence:
+    enabled: true
+scaleSets:
+  preview-large: null
+  preview-medium: null
+  preview-small: null
+  nix-builder-arm64:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "4"
+        memory: 16Gi
+      limits:
+        cpu: "8"
+        memory: 16Gi
+        ephemeral-storage: 80Gi
+    nodeSelector:
+      kubernetes.io/hostname: hive-8
+    minRunners: 0
+    maxRunners: 1
+    nixSandbox:
+      enabled: true
+      seccompProfile: profiles/nix-sandbox.json

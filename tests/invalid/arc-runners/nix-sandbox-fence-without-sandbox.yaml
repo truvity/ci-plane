@@ -1,0 +1,11 @@
+# refuses: nixSandbox.fence.enabled is true but no scaleSets entry has nixSandbox.enabled
+# The fence protects a NAMED profile; with nothing sandboxed there is
+# nothing for it to protect, so this is refused rather than rendering a
+# ValidatingAdmissionPolicy with no validations that gave the impression
+# something was fenced.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nixSandbox:
+  fence:
+    enabled: true

@@ -1,34 +1,60 @@
-{{- $payload := include "arc-runners.nixConfig" . }}
-{{- if $payload }}
+{{- /*
+One ConfigMap per DISTINCT effective payload, not one per release and
+not one per scale set. Every scale set without extraNixConfig or
+nixSandbox.enabled shares the SAME object — arc-runners.nixConfigName,
+computed from the base nixConfig/nixBuilders alone — so a release that
+uses neither v3.1.0 knob renders exactly the one ConfigMap it always
+did, same name, same bytes. A scale set that sets either gets its own
+content-addressed ConfigMap, keyed so that changing one set's extra
+config, or turning its sandbox on, never touches another set's object
+or forces its listener to recycle (arc-runners.nixConfigNameFor in
+_helpers.tpl carries the full reasoning).
+*/ -}}
+{{- $root := . -}}
+{{- $base := include "arc-runners.nixConfig" $root -}}
+{{- $baseName := include "arc-runners.nixConfigName" $root -}}
+{{- $configs := dict -}}
+{{- if $base -}}
+{{- $_ := set $configs $baseName $base -}}
+{{- end -}}
+{{- range $setName, $p := $root.Values.scaleSets -}}
+{{- if $p -}}
+{{- $name := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) -}}
+{{- if and (ne $name $baseName) (not (hasKey $configs $name)) -}}
+{{- $_ := set $configs $name (include "arc-runners.nixConfigFor" (dict "root" $root "p" $p)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $name, $payload := $configs }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "arc-runners.nixConfigName" . }}
+  name: {{ $name }}
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
 data:
   nix.conf: |
     {{- $payload | nindent 4 }}
-  {{- if .Values.nixBuilders.enabled }}
+  {{- if $root.Values.nixBuilders.enabled }}
   machines.template: |-
-    {{- include "arc-runners.nixMachines" . | nindent 4 }}
+    {{- include "arc-runners.nixMachines" $root | nindent 4 }}
   ssh_config: |-
-    {{- include "arc-runners.nixSSHConfig" . | nindent 4 }}
+    {{- include "arc-runners.nixSSHConfig" $root | nindent 4 }}
   openbao-ca.crt: |-
-    {{- .Values.nixBuilders.openbao.caBundle | b64dec | nindent 4 }}
+    {{- $root.Values.nixBuilders.openbao.caBundle | b64dec | nindent 4 }}
   ssh-user-ca.pub: |-
-    {{- join "\n" .Values.nixBuilders.openbao.sshCAPublicKeys | nindent 4 }}
+    {{- join "\n" $root.Values.nixBuilders.openbao.sshCAPublicKeys | nindent 4 }}
   job-started.sh: |-
-    {{- include "arc-runners.nixJobStartedHook" . | nindent 4 }}
+    {{- include "arc-runners.nixJobStartedHook" $root | nindent 4 }}
   # A quoted FLOW scalar, not a `|-` block: a block scalar still emits an
   # indent-only line when certAuthorities is empty, and the setup
   # binary's "is this file non-empty" check would then see whitespace
   # instead of "nothing to append" -- the same trap ci-builders' worker
   # principals ConfigMap documents. Default empty renders "", a
   # genuinely zero-byte file, so an unmigrated install appends nothing.
-  known-hosts-cert-authorities: {{ include "arc-runners.nixKnownHostsCertAuthorities" . | quote }}
+  known-hosts-cert-authorities: {{ include "arc-runners.nixKnownHostsCertAuthorities" $root | quote }}
   {{- end }}
 immutable: true
 {{- end }}
