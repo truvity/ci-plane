@@ -99,22 +99,23 @@ nixConfig: |
 # When set, renders `substituters = <url> https://cache.nixos.org/` into
 # the release-wide nixConfig above (so it still beats the image's own
 # nix.conf, and upstream stays the automatic fallback). Empty by
-# default: the published image now bakes ONLY https://cache.nixos.org/
-# (v3.1.0 -- earlier images baked one estate's in-cluster `nix-cache`
-# Service, in the namespace the maintainers happened to install
-# ci-builders into, which is cluster-shaped and has been STALE since
-# ci-builders 2.x moved that Service to whatever namespace YOUR estate
-# installs it into; see CHANGELOG.md).
-# An estate running ci-builders' Nix read-through cache sets this to
-# that Service's in-cluster DNS name, e.g.:
+# default (v3.1.0), which changes NOTHING: the published image still
+# bakes its own `nix-cache` Service, in the maintainers' `ci-cache`
+# namespace, as its nix.conf default, as it always has (see
+# image/runner/Dockerfile's own ARG NIX_SUBSTITUTERS for the exact
+# string). That baked default names the maintainers' own namespace and
+# has been STALE for any OTHER estate since ci-builders 2.x stopped
+# requiring a fixed namespace -- this key is the fix for THAT estate,
+# not a change for one that already resolves it:
 #
 #   nixCache:
 #     url: http://nix-cache.<namespace>.svc.cluster.local
 #
-# Leaving it empty on an estate that used to rely on the baked default
-# degrades every Nix call to upstream directly -- slower (nix retries a
-# name that resolves fine now, cache.nixos.org, so there is no retry
-# storm; it is simply not local), never broken.
+# Un-baking the image's own default is a SEPARATE, coordinated change
+# for a later release: every consumer that currently relies on it
+# (including the maintainers' own estate) has to set this key first, or
+# it silently loses its in-cluster cache and falls back to pulling
+# every Nix path straight from upstream. See CHANGELOG.md.
 nixCache:
   url: ""
 
