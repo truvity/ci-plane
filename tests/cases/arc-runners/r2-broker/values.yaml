@@ -1,0 +1,31 @@
+# v4.2.0: the generic pod-template hooks, and the one they exist for --
+# a runner pod whose Go cache reaches Cloudflare R2 through accessctl r2
+# / r2broker rather than a static key. Exercises every new key in one
+# render: awsConfig (a ConfigMap + AWS_CONFIG_FILE/AWS_PROFILE),
+# projectedServiceAccountTokens (a second identity, a different
+# audience), and extraVolumes/extraVolumeMounts/extraInitContainers (the
+# fully generic escape hatch, proven with an unrelated example so it
+# reads as generic and not as more R2 plumbing).
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+awsConfig:
+  enabled: true
+  profile: ci-cache
+  credentialProcess: >-
+    accessctl r2 --service-url https://r2-broker.example.com --
+    credentials --bucket example-ci-cache --prefix go/
+projectedServiceAccountTokens:
+  - audience: r2-broker
+    path: r2-broker-token
+    expirationSeconds: 3600
+extraVolumes:
+  - name: scratch
+    emptyDir: {}
+extraVolumeMounts:
+  - name: scratch
+    mountPath: /var/run/scratch
+extraInitContainers:
+  - name: warm-something
+    image: busybox
+    command: ["true"]

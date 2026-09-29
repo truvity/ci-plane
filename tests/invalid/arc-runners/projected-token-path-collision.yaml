@@ -1,0 +1,13 @@
+# refuses: already used by another entry
+# Two projectedServiceAccountTokens entries naming the same path: the
+# kubelet projects every source of ONE projected volume into the SAME
+# directory, so the second entry would silently replace the first at
+# apply time rather than mounting two tokens.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+projectedServiceAccountTokens:
+  - audience: r2-broker
+    path: token
+  - audience: some-other-service
+    path: token

@@ -92,6 +92,51 @@ image bakes.
   substituter stays, unchanged — both Dockerfiles' defaults are
   unchanged too.
 
+**arc-runners: the runner pod template gains generic hooks
+(`extraVolumes`, `extraVolumeMounts`, `extraInitContainers`), one
+convenience for the common case of a second identity
+(`projectedServiceAccountTokens`), and an `awsConfig` block for a
+`credential_process` profile.** THE CASE THIS EXISTS FOR: the Go build
+cache's S3-compatible client (`GOCACHEPROG`) had no way to reach a
+short-lived, prefix-scoped credential on a store with no pod identity
+(Cloudflare R2, MinIO, Ceph) — only a static key in a Secret
+(`extraEnvFrom`, unchanged). `awsConfig` renders a ConfigMap holding one
+AWS config profile and mounts it read-only on the runner container
+alone, wired through `AWS_CONFIG_FILE`/`AWS_PROFILE` — the shape
+`accessctl r2` (access-roster v1.39+), fronting `truvity/cloudflare`'s
+r2broker, needs as a `credential_process` line. See
+[docs/architecture.md#an-aws-profile-for-a-broker](docs/architecture.md#an-aws-profile-for-a-broker)
+for the worked example, including why nothing extra is needed to run
+the helper (a job's own GitHub OIDC token, already read by `accessctl`
+when `id-token: write` is granted).
+
+- Refused at render time, never silently ignored:
+  `awsConfig.enabled` alongside an `extraEnv` entry named
+  `AWS_ACCESS_KEY_ID` (the AWS SDK's credential chain checks
+  environment variables before `credential_process`, so the static key
+  would keep winning and the broker would never be consulted), and two
+  `projectedServiceAccountTokens` entries naming the same `path` (the
+  kubelet projects every source of one volume into one directory, so
+  the second would silently replace the first at apply time).
+- All five keys are additive and release-wide only (no per-scale-set
+  override, unlike `extraEnv`/`extraEnvFrom`); empty/disabled by
+  default renders no new ConfigMap, volume, mount, init container or
+  environment variable — byte-identical to v4.1.0 without this change,
+  proved by the unchanged `minimal`/`nix-builders`/`aws-karpenter`
+  goldens plus a new `r2-broker` case exercising every key at once.
+  `values.schema.json` gained matching types and an `awsConfig`
+  enabled/then block, the same shape `nixBuilders` already uses.
+- `image/runner/Dockerfile` bakes `accessctl` (truvity/access-roster)
+  and `r2broker` (truvity/cloudflare), pinned and verified against that
+  release's own `checksums.txt` (downloaded at build time, so a
+  Renovate version bump can never desync a pin from a hand-maintained
+  digest the way two separately hand-pinned values could), each with a
+  `# renovate:` annotation `hack/renovate-covers-dockerfiles.sh` already
+  covers via the existing `image/**/Dockerfile` glob. Both run on
+  amd64 and arm64 (verified with a native build and a QEMU-emulated
+  one). Neither is required by a job that never names `accessctl r2` in
+  a `credential_process` line.
+
 ## v4.0.0
 
 **Breaking values: another major.** More estate facts are no longer

@@ -441,8 +441,103 @@ exactly the kind of thing devbox cannot deliver in time. What it talks
 to, and everything about the cache itself, belongs to that repository
 and is not described here.
 
+**`accessctl` and `r2broker` ship for the same reason (v4.2.0).** On a
+store with no pod identity (Cloudflare R2, MinIO, Ceph), the Go cache
+client above reads its credential through the ordinary AWS SDK chain —
+an `AWS_CONFIG_FILE` naming a profile whose `credential_process` is
+`accessctl r2 -- credentials ...` (`arc-runners`' new `awsConfig` value,
+below). That credential_process is invoked BY the cache client, and the
+cache client already has to pre-exist the first `go` invocation of a
+job — so whatever it in turn execs has to pre-exist it too, by the same
+ordering rule. `accessctl` (truvity/access-roster) authenticates against
+the estate's issuer and execs the real `r2broker` (truvity/cloudflare)
+binary unchanged; neither is required by a job that never names
+`accessctl r2` in a credential_process line — idle binaries on PATH,
+invoked by nothing. Both are pinned and verified against that release's
+own `checksums.txt`, downloaded at build time rather than hand-pinned
+per architecture — see `image/runner/Dockerfile`'s own comment for why
+that is safer under a Renovate-driven version bump, not just shorter.
+
 Every version pin in the Dockerfile carries a `# renovate:` annotation
 — a pin without one is invisible, and invisible is indistinguishable
 from current. That includes the upstream runner base: `latest` was
 replaced with an annotated pin precisely so CVE pickups become renovate
 PRs instead of side effects.
+
+## An AWS profile for a broker (v4.2.0)
+
+The shape from ["Runner pod expectations"](day-1-install.md) upward,
+worked through for one store: Cloudflare R2, reached through
+`truvity/cloudflare`'s r2broker, fronted by `accessctl r2`
+(access-roster v1.39+) so the estate's own issuer — not a static key —
+decides who gets a credential and for how long
+(access-roster's docs/connect/r2-storage.md has the full authentication
+shape).
+
+**Nothing extra runs the credential helper.** A GitHub Actions job
+granted `permissions: id-token: write` already has
+`ACTIONS_ID_TOKEN_REQUEST_URL`/`ACTIONS_ID_TOKEN_REQUEST_TOKEN` in its
+environment — the Actions Runner process sets them per job, self-hosted
+or not — and `accessctl` reads them on its own
+(access-roster's docs/reference/accessctl.md#in-a-job). So the workflow
+side of this is one line in the caller's own `permissions:` block; this
+chart's `awsConfig` value only has to get the credential_process line
+onto `PATH`, in a place `AWS_CONFIG_FILE` names.
+
+```yaml
+# values.yaml for one arc-runners release
+awsConfig:
+  enabled: true
+  profile: ci-cache
+  credentialProcess: >-
+    accessctl r2 --service-url https://r2-broker.<estate>.example --
+    credentials --bucket <bucket> --prefix go/
+```
+
+```yaml
+# the calling workflow, unchanged apart from the permission
+permissions:
+  id-token: write
+env:
+  GOCACHEPROG: go-cache-plugin
+  AWS_ENDPOINT_URL_S3: https://<account>.r2.cloudflarestorage.com
+```
+
+That renders a `runner-aws-config` ConfigMap (`templates/aws-config.yaml`)
+holding one INI profile, mounted read-only on the runner container at
+`/var/run/aws-config/config`, with `AWS_CONFIG_FILE` pointed at it and
+`AWS_PROFILE` set to `ci-cache` — both on the runner container alone,
+never `envFrom`, never the pod. `go-cache-plugin` (or any other AWS
+SDK/CLI call in the same job) then resolves credentials the ordinary
+way: no profile named explicitly falls through to this one, which execs
+`accessctl r2`, which exchanges the job's own GitHub identity token at
+the issuer and hands `r2broker` the result — a credential scoped to one
+bucket, one prefix, minutes long, never written to a Secret.
+
+**This is JOB-scoped, not CLIENT-scoped.** An ephemeral runner's
+`runner` container is the one place every step of one job runs, so
+`AWS_PROFILE` here is the *default* for any AWS call that job makes —
+not narrowed to the Go cache client alone. A step in the same job that
+needs a genuinely different AWS identity (a real AWS account through
+pod identity, say) sets its own `AWS_PROFILE` or `--profile` for that
+call, the same way it would override any other inherited default.
+
+**Refused, never silently ignored, the other direction.** Setting
+`awsConfig.enabled` alongside an `extraEnv` entry named
+`AWS_ACCESS_KEY_ID` fails to render: the AWS SDK's credential chain
+checks environment variables *before* a config file's
+`credential_process`, so a static key left over from the old
+`extraEnvFrom` Secret pattern would keep winning and the broker would
+never be consulted — exactly the migration this feature exists for, not
+happening, with nothing in a job log to say so. Drop the static key (and
+its Secret) first.
+
+**`projectedServiceAccountTokens` is a separate, more general hook**,
+not required for the shape above — GitHub's own job OIDC token is
+already what `accessctl` in a job reads. It exists for a workload that
+calls a SAME-CLUSTER service by presenting a ServiceAccount token
+projected for that service's own audience instead
+(access-roster's docs/connect/service-to-service.md), which is a
+different identity path than a GitHub Actions job's own token. Use it
+when something in the pod needs that shape; the R2-via-r2broker path
+above needs only `awsConfig` and the workflow's own `id-token: write`.

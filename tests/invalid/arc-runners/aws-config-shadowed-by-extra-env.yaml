@@ -1,0 +1,16 @@
+# refuses: silently keep winning over the broker-minted one
+# awsConfig on, and extraEnv also names AWS_ACCESS_KEY_ID: the AWS SDK's
+# credential chain checks environment variables before a config file's
+# credential_process, so the static key would win over the broker-minted
+# one and the new profile would never be consulted -- exactly the
+# migration this feature exists for, silently not happening.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+extraEnv:
+  - name: AWS_ACCESS_KEY_ID
+    value: AKIAEXAMPLE
+awsConfig:
+  enabled: true
+  profile: ci-cache
+  credentialProcess: "accessctl r2 -- credentials --bucket example --prefix go/"

@@ -296,6 +296,86 @@ extraEnvFrom: []
 #       value: https://<account>.r2.cloudflarestorage.com
 extraEnv: []
 
+# Generic pod-template hooks for whatever an estate's own client needs
+# that this chart cannot know in advance: a credential helper's config
+# file, a second identity for a different audience, a setup step that
+# has to run before the runner container starts. Rendered verbatim,
+# APPENDED after this chart's own volumes/volumeMounts/initContainers
+# (nixBuilders' own, when enabled; awsConfig's own, below) — a name
+# collision with one of those is a list with two entries of the same
+# `name`, which Kubernetes itself refuses at apply time, not something
+# this chart tries to catch first. Empty by default (renders nothing new).
+extraVolumes: []
+extraVolumeMounts: []
+# APPENDED after nixBuilders' own init container (if enabled). For a
+# setup step that has to complete before the runner container starts —
+# warming a cache, minting a credential file the runner container only
+# reads.
+extraInitContainers: []
+
+# projectedServiceAccountTokens: the common case of extraVolumes above —
+# one or more projected ServiceAccount tokens, each for its OWN
+# audience, mounted read-only at /var/run/secrets/tokens/<path>. THE
+# CASE THIS EXISTS FOR: a workload calling a service in the SAME cluster
+# presents a ServiceAccount token projected for that service's OWN
+# audience (access-roster's docs/connect/service-to-service.md) rather
+# than exchanging anything first — the runner's default ServiceAccount
+# token (audience: the API server) proves nothing to a service that
+# names a different one. Every entry shares ONE mount point: the
+# kubelet projects every source of a projected volume into the SAME
+# directory, so two entries naming the same `path` is a render-time
+# refusal (templates/runnersets.yaml), not a silent overwrite at apply
+# time. `expirationSeconds` follows the Kubernetes TokenRequest API's own
+# floor (>= 600); the kubelet refreshes the file on its own before it
+# expires, so a caller reads it fresh on every use rather than once.
+#
+#   projectedServiceAccountTokens:
+#     - audience: r2-broker
+#       path: r2-broker-token
+#       expirationSeconds: 3600
+projectedServiceAccountTokens: []
+
+# awsConfig: an optional AWS config PROFILE this chart renders into a
+# ConfigMap and mounts read-only on the runner container ALONE, wired
+# through AWS_CONFIG_FILE/AWS_PROFILE — for a `credential_process` line
+# naming a short-lived-credential broker. THE CASE THIS EXISTS FOR: the
+# Go build cache's S3-compatible client (setup-devbox's GOCACHEPROG,
+# go-cache-plugin in this image) reads the ordinary AWS SDK credential
+# chain, and on a store with no pod identity (Cloudflare R2, MinIO,
+# Ceph) that chain previously had no way to reach a credential shorter-
+# lived than a static key in a Secret (extraEnvFrom, above). `accessctl
+# r2` (access-roster v1.39+), fronting truvity/cloudflare's r2broker, is
+# the broker this image ships the client pair for
+# (image/runner/Dockerfile); see docs/architecture.md for the worked
+# example.
+#
+# EMPTY BY DEFAULT: renders no ConfigMap, mounts nothing, sets neither
+# variable — byte-identical to a chart without this key.
+#
+# REFUSED AT RENDER TIME (templates/runnersets.yaml) alongside an
+# `extraEnv` entry named AWS_ACCESS_KEY_ID: the AWS SDK's own credential
+# chain checks environment variables BEFORE a config file's
+# `credential_process`, so a static key left in `extraEnv` would
+# silently keep winning over the broker-minted one below it — the exact
+# credential the estate is migrating away from, invoked instead of the
+# new one, with no error to say so. Move the static key (and its
+# extraEnvFrom Secret, if that is where it comes from) out before
+# turning this on: the two are alternatives for the SAME job-scoped
+# credential, never both at once.
+awsConfig:
+  enabled: false
+  # AWS_PROFILE's value; also the section header in the rendered file
+  # (`[profile <name>]`).
+  profile: ci-cache
+  # The full `credential_process` command line, exactly as it would be
+  # typed at a shell — this chart does not parse it, only writes it
+  # after the `=`. `accessctl r2 --service-url <broker> -- credentials
+  # --bucket <bucket> --prefix <prefix>` is the shape
+  # access-roster/docs/connect/r2-storage.md documents; both `accessctl`
+  # and `r2broker` are baked into this image so nothing further needs to
+  # arrive per job.
+  credentialProcess: ""
+
 nodeSelector: {}
 tolerations: []
 # A runner mid-job is not migratable state: node-consolidation eviction

@@ -1,0 +1,28 @@
+{{- if .Values.awsConfig.enabled }}
+---
+# The AWS config PROFILE a `credential_process` line lives in — see
+# values.yaml's awsConfig comment for what this exists for and the
+# shadowing refusal it pairs with. Named, not content-addressed like
+# runner-nix-config: unlike the nix machines file, a stale mount here
+# costs a job one re-mint of a short-lived credential, not a build that
+# silently used the wrong store, so a plain ConfigMap the kubelet
+# refreshes in place is enough. A change still recycles every scale
+# set's listener — templates/runnersets.yaml folds awsConfig into each
+# set's values-hash — so a rotated `credentialProcess` line reaches warm
+# runners the same way any other v4.2.0 hook does.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-aws-config
+  labels:
+    app.kubernetes.io/name: runner-aws-config
+    app.kubernetes.io/part-of: gha-rs
+data:
+  # AWS_CONFIG_FILE points here; AWS_PROFILE names the one profile inside
+  # it (templates/runnersets.yaml, the runner container's env). The AWS
+  # SDKs/CLI parse this as an ordinary INI file — this chart writes the
+  # credentialProcess value after the `=` verbatim and does not parse it.
+  config: |
+    [profile {{ .Values.awsConfig.profile }}]
+    credential_process = {{ .Values.awsConfig.credentialProcess }}
+{{- end }}
