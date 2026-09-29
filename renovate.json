@@ -3,6 +3,7 @@
   "extends": [
     "github>truvity/ci-workflows"
   ],
+  "description": "Overrides beyond the shared preset: automerge and vulnerability-alert defaults common to every repository built from this component template. The customManagers document their own reasons for existing.",
   "osvVulnerabilityAlerts": true,
   "automerge": true,
   "automergeType": "pr",
