@@ -5,7 +5,9 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
-## v4.2.0 (unreleased)
+## v4.2.0
+
+Released 2026-09-29.
 
 **arc-runners: the runner pod template gains generic hooks
 (`extraVolumes`, `extraVolumeMounts`, `extraInitContainers`), one
