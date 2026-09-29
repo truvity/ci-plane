@@ -26,7 +26,7 @@ Order matters: caches before runners, controller before both charts.
    - the published runner and nix-worker images bake the Service
      `nix-cache` in namespace `ci-cache` as their first Nix substituter.
      Anywhere else, override it without rebuilding through arc-runners'
-     `nixCache.url` (v3.1.0), e.g.
+     `nixCache.url` (v4.1.0), e.g.
      `nixCache.url: http://nix-cache.<namespace>.svc.cluster.local`
      (renders a full `substituters = <url> https://cache.nixos.org/`
      line into `NIX_CONFIG`, which beats the image's own nix.conf), or
@@ -183,7 +183,7 @@ queued jobs.
 
 `scaleSets.<name>.{nodeSelector,tolerations,affinity,minRunners,
 podAnnotations,extraEnv,extraEnvFrom,extraNixConfig,nixSandbox}`
-(v3.1.0) override the release-wide value of the same name for ONE scale
+(v4.1.0) override the release-wide value of the same name for ONE scale
 set, falling back to it otherwise — no second release needed for a
 differently-scheduled or differently-sandboxed set any more. See the
 comments beside each release-wide value in `values.yaml`, and

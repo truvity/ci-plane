@@ -26,7 +26,7 @@
 #
 # Minutes per job, on every nix invocation. Consumers of the PUBLISHED
 # image override it without rebuilding: arc-runners delivers nixConfig
-# as NIX_CONFIG, which beats this file. v3.1.0 adds a dedicated chart
+# as NIX_CONFIG, which beats this file. v4.1.0 adds a dedicated chart
 # value for exactly that override, `nixCache.url` -- unset by default,
 # so this baked default (and every existing consumer's behaviour) is
 # unchanged; see CHANGELOG.md and docs/day-1-install.md. Un-baking this
@@ -60,7 +60,7 @@ ARG RUNNER_VERSION=2.337.0
 # The nix substituter list baked into the image. Default unchanged, so a
 # rebuild produces what it always did; a fleet whose cache lives
 # elsewhere overrides it here rather than patching the file, OR, without
-# a rebuild, through arc-runners' `nixCache.url` (v3.1.0). Name the
+# a rebuild, through arc-runners' `nixCache.url` (v4.1.0). Name the
 # FULL list -- the `extra-` form appends to nix's default and the cache
 # is then never chosen (155 GB/day from upstream, measured).
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"

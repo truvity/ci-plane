@@ -43,7 +43,7 @@ allows=(
   # A templated or placeholder namespace is how the charts NAME a Service,
   # not which one; kube-dns in kube-system is Kubernetes' own, not an
   # estate's. The two image ARGs are known debt: the images still bake one
-  # estate's in-cluster Nix substituter by default. v3.1.0 adds a chart
+  # estate's in-cluster Nix substituter by default. v4.1.0 adds a chart
   # value (arc-runners' nixCache.url) that overrides it without a rebuild,
   # but un-baking the DEFAULT itself is a separate, coordinated change for
   # a later release, once every consumer has set nixCache.url explicitly.

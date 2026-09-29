@@ -1,4 +1,4 @@
-# Nix's build sandbox on a scale set (v3.1.0)
+# Nix's build sandbox on a scale set (v4.1.0)
 
 ## Why this exists
 
@@ -152,7 +152,7 @@ lands there, beyond what Nix's own sandbox isolates per build.
 3. Set `scaleSets.<name>.nixSandbox.enabled: true` and
    `seccompProfile:` to the installed path, and pin that set to those
    nodes (`nodeSelector`/`tolerations`/`affinity`, all overridable per
-   set since v3.1.0 — see `values.yaml`).
+   set since v4.1.0 — see `values.yaml`).
 4. Turn on `nixSandbox.fence.enabled` once step 3 is live, so the
    profile file protects only this set's own pods.
 5. Regenerate the profile on a containerd minor bump on those nodes.

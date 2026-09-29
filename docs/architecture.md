@@ -59,7 +59,7 @@ and paid for the difference with a whole second release of `arc-runners`
 sharing the same GitHub App secret (opwerm's `arc-runners-nix` release is
 exactly this shape).
 
-v3.1.0 adds `scaleSets.<name>.<key>` overrides for each of those keys,
+v4.1.0 adds `scaleSets.<name>.<key>` overrides for each of those keys,
 each REPLACING the release-wide value when set on that one scale set
 (never merging into it — a deep merge would leave no way to ask for an
 explicitly empty map or list on one set while the release default is
@@ -76,7 +76,7 @@ scalar key when it reads its config top-to-bottom.
 
 ## The Nix sandbox is per scale set, and the chart cannot install its half
 
-`scaleSets.<name>.nixSandbox` (v3.1.0) is the chart-rendered half of
+`scaleSets.<name>.nixSandbox` (v4.1.0) is the chart-rendered half of
 running Nix's own build sandbox in a pod at all: `hostUsers: false`,
 `procMount: Unmasked` and a `Localhost` seccomp profile on that set's
 pods, plus `sandbox = true`/`sandbox-fallback = false` in its

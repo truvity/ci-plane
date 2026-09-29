@@ -54,7 +54,7 @@ ARG OPKSSH_VERSION=0.16.0
 # default upstream as automatic fallback: cache down = slower, never
 # broken. `substituters`, NOT `extra-substituters` -- the extra- form
 # APPENDS to nix's default, so the list reads upstream-first and the
-# cache is never chosen. arc-runners' `nixCache.url` (v3.1.0) overrides
+# cache is never chosen. arc-runners' `nixCache.url` (v4.1.0) overrides
 # this without a rebuild, same as image/runner/Dockerfile.
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 

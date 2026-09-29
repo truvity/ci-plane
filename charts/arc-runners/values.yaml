@@ -79,7 +79,7 @@ nixConfig: |
   connect-timeout = 30
   stalled-download-timeout = 300
 
-# scaleSets.<name>.extraNixConfig (v3.1.0): text APPENDED after the block
+# scaleSets.<name>.extraNixConfig (v4.1.0): text APPENDED after the block
 # above, for ONE scale set only. Nix reads its config top-to-bottom and
 # keeps the LAST occurrence of a scalar key, so appending -- not
 # replacing -- is what lets a later key win while every other set keeps
@@ -99,7 +99,7 @@ nixConfig: |
 # When set, renders `substituters = <url> https://cache.nixos.org/` into
 # the release-wide nixConfig above (so it still beats the image's own
 # nix.conf, and upstream stays the automatic fallback). Empty by
-# default (v3.1.0), which changes NOTHING: the published image still
+# default (v4.1.0), which changes NOTHING: the published image still
 # bakes its own `nix-cache` Service, in the maintainers' `ci-cache`
 # namespace, as its nix.conf default, as it always has (see
 # image/runner/Dockerfile's own ARG NIX_SUBSTITUTERS for the exact
@@ -248,7 +248,7 @@ nixBuilders:
 # environment for the RUNNER container, both empty by default so an
 # existing installation renders byte-identically.
 #
-# v3.1.0: nodeSelector, tolerations, affinity, minRunners, podAnnotations,
+# v4.1.0: nodeSelector, tolerations, affinity, minRunners, podAnnotations,
 # extraEnv and extraEnvFrom can all be set PER SCALE SET too
 # (scaleSets.<name>.<key>), falling back to the release-wide value above
 # when the key is absent from that scale set. Each one REPLACES the
@@ -348,7 +348,7 @@ packing:
 # The runner pod's affinity, rendered as given, with the packing term
 # above APPENDED to podAffinity.preferredDuringSchedulingIgnoredDuringExecution
 # when packing is enabled. Setting it does not switch packing off; set
-# packing.enabled: false for that. scaleSets.<name>.affinity (v3.1.0)
+# packing.enabled: false for that. scaleSets.<name>.affinity (v4.1.0)
 # REPLACES this release-wide value for one set; the packing term is still
 # appended to whichever affinity is in effect.
 #
@@ -406,7 +406,7 @@ listenerTolerations: []
 # consumer estate hit this independently, which is why it is written down
 # rather than left to be rediscovered.
 #
-# scaleSets.<name>.nixSandbox (v3.1.0), off by default, turns Nix's own
+# scaleSets.<name>.nixSandbox (v4.1.0), off by default, turns Nix's own
 # build sandbox on for THIS set's runner pods. See docs/nix-sandbox.md
 # for the full why; short version: the image's Nix is single-user, so
 # with the sandbox off one derivation's builder can write into another

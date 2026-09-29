@@ -1,4 +1,4 @@
-# v3.1.0: one dedicated, sandboxed scale set (a big single-node Nix
+# v4.1.0: one dedicated, sandboxed scale set (a big single-node Nix
 # builder) alongside the default profile matrix, which stays
 # unsandboxed. Fence off here -- see the nix-sandbox-fence case for that.
 githubConfigUrl: https://github.com/example
