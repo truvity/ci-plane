@@ -93,7 +93,7 @@ the Nix workers, per-architecture pools and every required value.
 
 - **truvity/gitops** — `ci-builders` and `arc-runners`, one version
   pinned for both and promoted by its own renovate.
-- **opwerm/nexus** — `ci-builders` and `arc-runners`.
+- **A second, non-AWS estate** — `ci-builders` and `arc-runners`.
 - **truvity/ci-workflows** — its `node-cache: true` option probes
   `ci-builders`' npm cache by a fixed Service name in namespace
   `ci-cache`.
