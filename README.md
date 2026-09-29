@@ -92,7 +92,8 @@ the Nix workers, per-architecture pools and every required value.
 ## Consumers
 
 - **truvity/gitops** — `ci-builders` and `arc-runners`, one version
-  pinned for both and promoted by its own renovate.
+  pinned for both: a Kargo Warehouse promotes it on devel and kernel,
+  and stage/prod bump the pin by hand.
 - **A second, non-AWS estate** — `ci-builders` and `arc-runners`.
 - **truvity/ci-workflows** — its `node-cache: true` option probes
   `ci-builders`' npm cache by a fixed Service name in namespace
@@ -142,8 +143,9 @@ This repository follows the shared
 ## Status
 
 Used in production by its maintainers, on 2.x. Every tag publishes
-the images and the charts; there are no GitHub Releases for the tags,
-so [CHANGELOG.md](CHANGELOG.md) and the
+the images and the charts; the release workflow itself creates no
+GitHub Release (an occasional tag may carry one made by hand), so
+[CHANGELOG.md](CHANGELOG.md) and the
 [tags](https://github.com/truvity/ci-plane/tags) are the record.
 
 ## Development
