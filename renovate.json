@@ -30,11 +30,5 @@
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s+go install [^@\\s]+@(?<currentValue>v[^\\s\\\\]+)"
       ]
     }
-  ],
-  "vulnerabilityAlerts": {
-    "labels": [
-      "security"
-    ],
-    "automerge": true
-  }
+  ]
 }
