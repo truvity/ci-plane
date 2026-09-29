@@ -1,5 +1,5 @@
 {{- /*
-v3.1.0. A Localhost seccomp profile on a node is usable by ANY pod the
+v4.1.0. A Localhost seccomp profile on a node is usable by ANY pod the
 scheduler puts on that node -- baseline pod security admits every
 Localhost profile, whatever it contains -- and nixSandbox's profile is a
 RELAXED one: it lets a container create namespaces and mount, which is

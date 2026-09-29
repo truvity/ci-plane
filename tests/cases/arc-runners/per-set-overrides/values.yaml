@@ -1,4 +1,4 @@
-# v3.1.0: one scale set (preview-small) overriding the release-wide
+# v4.1.0: one scale set (preview-small) overriding the release-wide
 # scheduling/env defaults, and appending to nixConfig, while
 # preview-large and preview-medium keep inheriting the release-wide
 # values unchanged -- proving the fallback goes both ways in one render.

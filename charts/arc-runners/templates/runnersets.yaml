@@ -62,7 +62,7 @@ controller to recycle the listener — same mechanism as upstream.
 {{- $min := $root.Values.minRunners }}
 {{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
 {{- /*
-v3.1.0: per-scale-set overrides, each REPLACING the release-wide value
+v4.1.0: per-scale-set overrides, each REPLACING the release-wide value
 (not merging into it — a map or list has one obvious "unset" state,
 empty, and a deep merge would leave no way to ask for that) when the
 key is present on this scale set at all. hasKey again, not `default`:
@@ -97,7 +97,7 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- $nixConfigName := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) }}
 {{- /* Disabled, the hash input is exactly the pre-nixBuilders one, so a
      release that only carries the (off) feature recycles no listener.
-     The new v3.1.0 keys enter the hash ONLY when this set actually sets
+     The new v4.1.0 keys enter the hash ONLY when this set actually sets
      them (hasKey / non-empty checks below) — never unconditionally — so
      a release that uses none of them hashes byte-identically to before
      this feature existed; that identity is the golden proof for the
@@ -173,7 +173,7 @@ spec:
       hostUsers: false is the pod-level half of nixSandbox (the other
       half is the runner container's procMount/seccompProfile below).
       Only rendered when THIS set asks for it — an unsandboxed set's pod
-      spec carries no hostUsers key at all, exactly as before v3.1.0.
+      spec carries no hostUsers key at all, exactly as before v4.1.0.
       Nix's own build sandbox creates a NESTED user namespace per
       derivation; the pod needs its own first, or the nested one has
       nowhere to live. See docs/nix-sandbox.md.

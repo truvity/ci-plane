@@ -1,4 +1,4 @@
-# v3.1.0: the same sandboxed scale set as the nix-sandbox case, with
+# v4.1.0: the same sandboxed scale set as the nix-sandbox case, with
 # nixSandbox.fence.enabled on -- proves the ValidatingAdmissionPolicy
 # renders and names exactly the one sandboxed set's profile.
 githubConfigUrl: https://github.com/example

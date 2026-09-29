@@ -34,7 +34,7 @@ leaves Nix's ordinary local builder in charge.
 {{- define "arc-runners.nixConfig" -}}
 {{- $conf := .Values.nixConfig | default "" -}}
 {{- /*
-v3.1.0: nixCache.url, when set, names a full substituter list (the
+v4.1.0: nixCache.url, when set, names a full substituter list (the
 estate's cache first, upstream as the automatic fallback) -- the same
 "name the FULL list, not `extra-`" rule image/runner/Dockerfile's own
 nix.conf follows, for the same reason: the `extra-` form APPENDS to
@@ -224,7 +224,7 @@ runner-nix-config-{{ .Values.nixConfig | sha256sum | trunc 12 }}
 {{- end -}}
 
 {{- /*
-v3.1.0: a scale set's effective NIX_CONFIG payload — the release-wide
+v4.1.0: a scale set's effective NIX_CONFIG payload — the release-wide
 base (arc-runners.nixConfig) above, with THIS set's extraNixConfig
 APPENDED (Nix reads its config top-to-bottom and keeps the LAST
 occurrence of a scalar key, so appending is how a later key wins), and,
@@ -299,7 +299,7 @@ ci-plane.io/packing-group: runners
 
 {{- /*
 The runner pod's affinity: this scale set's own `affinity` if it set
-one (v3.1.0, REPLACING the release-wide value, same hasKey rule as the
+one (v4.1.0, REPLACING the release-wide value, same hasKey rule as the
 other per-set overrides), else the release-wide `affinity`, with the
 packing term APPENDED to podAffinity's preferred list, so either way a
 caller's own node or pod affinity keeps working. Built on a deep copy:
