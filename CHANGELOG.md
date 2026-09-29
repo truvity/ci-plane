@@ -52,38 +52,35 @@ left `true`, from naming a sandboxed set's profile — PodSecurity
 without ever inspecting what it contains, so the profile file alone
 protects nothing on a shared node pool.
 
-**Both images now bake ONLY `https://cache.nixos.org/` as their Nix
-substituter, not one estate's in-cluster Service.**
-`image/runner/Dockerfile` and `image/nix-worker/Dockerfile` previously
-defaulted `NIX_SUBSTITUTERS` to a fixed in-cluster hostname in a fixed
-namespace — cluster-specific content baked into a public image, and
-stale since ci-builders 2.x stopped requiring that fixed namespace: the
-Nix cache Service now lives in whatever namespace an estate installs
-ci-builders into. arc-runners gains `nixCache.url`, which, when set,
-renders a full `substituters = <url> https://cache.nixos.org/` line into
-the chart's own `NIX_CONFIG` overlay (which already beat the image's
-baked nix.conf) — no rebuilt image needed to point at a different cache,
-ever again.
+**arc-runners gains `nixCache.url`** — an override for the Nix
+substituter list, without a rebuilt image. Both `image/runner/Dockerfile`
+and `image/nix-worker/Dockerfile` still bake the maintainers' own
+in-cluster Service (`nix-cache` in namespace `ci-cache`) as their
+default `NIX_SUBSTITUTERS`, unchanged, exactly as every release before
+this one. That default has been STALE for any OTHER estate since
+ci-builders 2.x stopped requiring that fixed namespace — the Nix cache
+Service now lives in whatever namespace an estate installs ci-builders
+into, so a consumer whose cache lives elsewhere previously had no way to
+say so short of rebuilding the image. `nixCache.url`, when set, renders
+a full `substituters = <url> https://cache.nixos.org/` line into the
+chart's own `NIX_CONFIG` overlay (which already beat the image's baked
+nix.conf) — an estate that needs it sets it; every other estate,
+including the maintainers' own, sets nothing and sees no change at all.
+Empty by default, so this is fully additive.
 
-**This is NOT byte-identical for every existing consumer**, and it
-cannot be: the old default resolved to a real, working cache on at least
-one estate (ours — Truvity's own `ci-cache` namespace), so removing it
-changes behaviour the moment a release picks up the new image.
-Concretely: **before upgrading to an image built from this release, set
-`nixCache.url` to whatever your estate's Nix-cache Service resolves to
-today** (the exact in-cluster DNS name the OLD image baked, which this
-same diff removes from both Dockerfiles — check your own fleet's
-history, or day-1-install.md's install steps, before assuming it matches
-another estate's). Skipping this degrades every Nix
-call on affected runners to fetching straight from cache.nixos.org
-instead of the in-cluster cache — slower (a cold, unwarmed cache pays
-the full upstream transfer instead of a same-cluster hop), never
-broken, and never the retry storm a non-resolving name used to cause
-(architecture.md's "Could not resolve host" measurement): that failure
-mode required the OLD default's name to be absent, and the new default,
-cache.nixos.org, always resolves. Pinned digests on existing chart
-releases are unaffected: only a release that adopts a NEW image build
-after this change needs `nixCache.url` set.
+**Un-baking the image's own default is intentionally NOT part of this
+release.** The old default resolves to a real, working cache on at
+least one estate (Truvity's own `ci-cache` namespace), so removing it
+would silently degrade that estate's runners the moment a release
+picked up a rebuilt image — every Nix call falling back to fetching
+straight from cache.nixos.org instead of the in-cluster cache (the
+~155 GB/day from upstream measured the last time this cache was
+bypassed, `image/runner/Dockerfile`'s own history). Moving the default
+is a separate, coordinated change for a LATER release: every consumer
+that relies on the baked default — the maintainers' own estate
+included — sets `nixCache.url` explicitly first, in its own time, and
+only once that is done everywhere does a later release change what the
+image bakes.
 
 - `charts/arc-runners`, `values.schema.json`: `nixCache` and
   `nixSandbox.fence` added (types only, open schema, matching the
@@ -91,9 +88,9 @@ after this change needs `nixCache.url` set.
 - New golden cases: `per-set-overrides`, `nix-sandbox`,
   `nix-sandbox-fence`, `nix-cache`. New invalid fixtures:
   `nix-sandbox-without-profile`, `nix-sandbox-fence-without-sandbox`.
-- `hack/leak-canary.sh`: the Dockerfile-specific allowance for the old
-  baked substituter is removed — the pattern it excused no longer
-  appears in either Dockerfile's default.
+- `hack/leak-canary.sh`'s Dockerfile-specific allowance for the baked
+  substituter stays, unchanged — both Dockerfiles' defaults are
+  unchanged too.
 
 ## v4.0.0
 

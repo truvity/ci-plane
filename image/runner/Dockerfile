@@ -10,32 +10,29 @@
 # ships). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
 # per job from the repo's own devbox.json through the nix cache.
 # Repo-specific OR cluster-specific content in this image is a bug
-# (builder registration lives in workflows, not here).
+# (builder registration lives in workflows, not here). The one known
+# debt to that rule is the substituters line near the bottom: it names
+# an in-cluster nix cache, which is cluster-shaped. It is a build ARG
+# (NIX_SUBSTITUTERS) so a fleet building its own image sets its own; the
+# default is unchanged.
 #
-# v3.1.0: the substituters line near the bottom no longer bakes any
-# cluster's own cache. It used to default to one estate's in-cluster
-# Service, which is exactly the cluster-specific content this doctrine
-# forbids, and had been STALE since ci-builders 2.x moved that Service
-# out of a fixed namespace — every OTHER estate paid for it in retries
-# (see below) on every Nix call, and even the maintainers' own estate
-# now has to say where it lives instead of relying on this default. The
-# default is now cache.nixos.org alone; an estate names its own cache
-# through the chart's `nixCache.url` (arc-runners' NIX_CONFIG overlay
-# beats this file, same as before), never a rebuild of this image. It
-# remains a build ARG (NIX_SUBSTITUTERS) for a fleet that builds its own
-# image and wants a different baked default.
-#
-# IT IS NOT FREE ON A CLUSTER WITHOUT A CACHE NAMED HERE, which an
-# earlier version of this comment claimed ("harmless elsewhere") about
-# the old default. If a substituter's name does not resolve, nix
-# retries before falling through -- measured on a consumer cluster,
-# eight attempts with the runners chart's backoff:
+# IT IS NOT FREE ON A CLUSTER WITHOUT THAT CACHE, which an earlier
+# version of this comment claimed ("harmless elsewhere"). If the name
+# does not resolve, nix retries before falling through -- measured on a
+# consumer cluster, eight attempts with the runners chart's backoff:
 #
 #   Could not resolve host: nix-cache.<namespace>.svc.cluster.local;
 #   retrying in 4281 ms (attempt 1/8) ... 11382 ... 36723 ... 58570
 #
-# Minutes per job, on every nix invocation -- which is why the default
-# below names only cache.nixos.org, a host that always resolves.
+# Minutes per job, on every nix invocation. Consumers of the PUBLISHED
+# image override it without rebuilding: arc-runners delivers nixConfig
+# as NIX_CONFIG, which beats this file. v3.1.0 adds a dedicated chart
+# value for exactly that override, `nixCache.url` -- unset by default,
+# so this baked default (and every existing consumer's behaviour) is
+# unchanged; see CHANGELOG.md and docs/day-1-install.md. Un-baking this
+# default itself is a SEPARATE, coordinated change for a later release,
+# once every consumer that relies on it (the maintainers' own estate
+# included) has set `nixCache.url` explicitly first.
 #
 # Multi-arch: built as a manifest list (amd64 + arm64) by
 # .github/workflows/release.yaml on a v* tag; consumers pin by DIGEST
@@ -60,16 +57,13 @@
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
 ARG RUNNER_VERSION=2.337.0
 
-# The nix substituter list baked into the image. v3.1.0: upstream only
-# -- no cluster's cache is cluster-INDEPENDENT content, so none belongs
-# baked into a public image (see the doctrine note above). A fleet that
-# wants its own cache baked in overrides this ARG at build time; every
-# other estate names one at runtime instead, through the chart's
-# `nixCache.url` (arc-runners' NIX_CONFIG beats this file). Name the
-# FULL list, whichever ARG value is in effect -- the `extra-` form
-# appends to nix's default and the cache is then never chosen (155
-# GB/day from upstream, measured, back when this line baked one).
-ARG NIX_SUBSTITUTERS="https://cache.nixos.org/"
+# The nix substituter list baked into the image. Default unchanged, so a
+# rebuild produces what it always did; a fleet whose cache lives
+# elsewhere overrides it here rather than patching the file, OR, without
+# a rebuild, through arc-runners' `nixCache.url` (v3.1.0). Name the
+# FULL list -- the `extra-` form appends to nix's default and the cache
+# is then never chosen (155 GB/day from upstream, measured).
+ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
 # PINNED, and it must MATCH image/nix-worker/Dockerfile exactly.
 #

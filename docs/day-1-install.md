@@ -23,20 +23,18 @@ Order matters: caches before runners, controller before both charts.
    AutoscalingRunnerSet. The charts take the namespace from the release;
    two things outside them still assume the maintainers' name,
    `ci-cache`:
-   - **v3.1.0: the published runner and nix-worker images bake ONLY
-     `https://cache.nixos.org/` as their substituter** — earlier images
-     baked one estate's in-cluster `nix-cache` Service by a fixed
-     namespace, which had been stale since ci-builders 2.x moved that
-     Service to whatever namespace YOUR estate installs it into (see
-     CHANGELOG.md if you are upgrading from an older image). Point every
-     runner pod at your own cache with arc-runners'
+   - the published runner and nix-worker images bake the Service
+     `nix-cache` in namespace `ci-cache` as their first Nix substituter.
+     Anywhere else, override it without rebuilding through arc-runners'
+     `nixCache.url` (v3.1.0), e.g.
      `nixCache.url: http://nix-cache.<namespace>.svc.cluster.local`
      (renders a full `substituters = <url> https://cache.nixos.org/`
-     line into `NIX_CONFIG`, which beats the image's own nix.conf either
-     way). Skipping this on an estate that used to rely on the old baked
-     default only degrades — every Nix call goes straight to
-     cache.nixos.org, which resolves fine, so there is no retry storm,
-     just a slower cold cache — never breaks;
+     line into `NIX_CONFIG`, which beats the image's own nix.conf), or
+     every Nix call retries a name that does not resolve. Empty by
+     default, so an estate that already resolves the baked name (or
+     already overrides it through the general-purpose `nixConfig`) sees
+     no change from setting nothing. Un-baking the image's own default
+     is a separate, later, coordinated change — see CHANGELOG.md;
    - truvity/ci-workflows' `node-cache: true` probes
      `npm-cache.ci-cache.svc` by that fixed name.
 4. Optional but recommended: a **registry pull-through cache** per
