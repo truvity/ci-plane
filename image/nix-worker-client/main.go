@@ -1,3 +1,10 @@
+// nix-worker-client signs an ephemeral SSH USER key for a runner pod with an
+// OpenBao SSH secrets engine, so the pod can reach the shared nix workers as
+// principal "nixremote" without a long-lived credential.
+//
+// A SIBLING BINARY to nix-worker-host-cert (image/nix-worker-host-cert), not
+// a mode flag on it: see that binary's package comment for why the two stay
+// separate.
 package main
 
 import (
@@ -335,7 +342,7 @@ func configureRemote(cfg config) error {
 	if err != nil {
 		return fmt.Errorf("create credential staging directory: %w", err)
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 	if err := os.Chmod(staging, 0o700); err != nil {
 		return fmt.Errorf("secure credential staging directory: %w", err)
 	}
@@ -578,7 +585,7 @@ func postJSON(ctx context.Context, client *http.Client, cfg config, endpoint, to
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
 	responseBody, err := io.ReadAll(limited)
@@ -604,22 +611,22 @@ func atomicWrite(path string, data []byte, mode os.FileMode, uid, gid int) error
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Chown(uid, gid); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -631,7 +638,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode, uid, gid int) error
 
 	d, err := os.Open(dir)
 	if err == nil {
-		defer d.Close()
+		defer func() { _ = d.Close() }()
 		if err := d.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) {
 			return err
 		}
@@ -660,7 +667,7 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {

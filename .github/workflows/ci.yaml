@@ -568,6 +568,17 @@ jobs:
         with:
           go-version-file: image/${{ matrix.module }}/go.mod
           cache-dependency-path: image/${{ matrix.module }}/go.sum
+      # One .golangci.yaml at the repo root covers both modules: there is
+      # no root go.mod (and no go.work) to let one invocation see both, so
+      # golangci-lint still runs once per module here, in this matrix, but
+      # each run points `--config` back at the single shared file rather
+      # than keeping a duplicate per module directory.
+      - name: Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          working-directory: image/${{ matrix.module }}
+          args: --config=../../.golangci.yaml
       - name: Vet and test
         working-directory: image/${{ matrix.module }}
         run: |
