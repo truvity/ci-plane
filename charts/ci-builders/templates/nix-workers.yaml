@@ -27,7 +27,7 @@
 {{- if not $n.opkssh.issuer }}{{ fail "nixWorkers.opkssh.issuer is required when nixWorkers.opkssh.archs is non-empty" }}{{ end }}
 {{- if not $n.opkssh.clientId }}{{ fail "nixWorkers.opkssh.clientId is required when nixWorkers.opkssh.archs is non-empty" }}{{ end }}
 {{- end }}
-{{- /* INF host-certificates phase 1. Validated the same way as
+{{- /* Host certificates, phase 1. Validated the same way as
      arc-runners' nixBuilders.openbao.certificateTTL: a whole number of
      s/m/h, converted to seconds so renewEvery can be compared against it
      -- a renewal at or after the certificate's own TTL is a worker that

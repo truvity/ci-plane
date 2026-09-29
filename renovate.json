@@ -11,7 +11,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Version ARGs in the image Dockerfiles, each annotated with a `# renovate:` line directly above it \u2014 a pin without one is invisible. The glob covers every image/<name>/Dockerfile: it was `image/Dockerfile` until the runner and nix-worker images split (INF-964 found it), and a literal path silently stops matching the day a file moves. hack/renovate-covers-dockerfiles.sh is the guard.",
+      "description": "Version ARGs in the image Dockerfiles, each annotated with a `# renovate:` line directly above it \u2014 a pin without one is invisible. The glob covers every image/<name>/Dockerfile: it was `image/Dockerfile` until the runner and nix-worker images split, and a literal path silently stops matching the day a file moves. hack/renovate-covers-dockerfiles.sh is the guard.",
       "managerFilePatterns": [
         "image/**/Dockerfile"
       ],

@@ -180,11 +180,13 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           for c in charts/*; do
-            helm lint "$c"
+            # Neither chart lints bare: each refuses to guess the estate
+            # facts it needs, so lint starts from the CI base values.
+            helm lint "$c" -f "tests/ci/$(basename "$c").yaml"
             helm package "$c" -d dist
           done
           for pkg in dist/*.tgz; do
             helm push "$pkg" "oci://${CHARTS#ghcr.io/}" 2>/dev/null || helm push "$pkg" "oci://$CHARTS"
           done
           echo "charts published at ${GITHUB_REF_NAME#v}: $(ls dist)" >> "$GITHUB_STEP_SUMMARY"
-          echo "gitops pin: \`ciPlane: \"${GITHUB_REF_NAME#v}\"\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "consumer pin: \`ciPlane: \"${GITHUB_REF_NAME#v}\"\`" >> "$GITHUB_STEP_SUMMARY"

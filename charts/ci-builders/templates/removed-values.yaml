@@ -13,5 +13,5 @@ The check is hasKey, not truthiness: `goModproxy.enabled: false` is
 still a caller who believes this chart owns their module proxy.
 */ -}}
 {{- if hasKey .Values "goModproxy" }}
-{{- fail "ci-builders 2.0.0 removed `goModproxy`. The Go module proxy is now its own product: truvity/ci-cache, chart oci://ghcr.io/truvity/charts/ci-cache, which caches the Go BUILD cache as well as modules and is not AWS-only. Delete the goModproxy block from your values and install that chart instead." }}
+{{- fail "ci-builders 2.0.0 removed `goModproxy`. The Go module proxy is now its own product: truvity/ci-cache, chart oci://ghcr.io/truvity/charts/ci-cache-server, which caches the Go BUILD cache as well as modules and is not AWS-only. Delete the goModproxy block from your values and install that chart instead." }}
 {{- end }}

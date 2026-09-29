@@ -1,0 +1,19 @@
+# refuses: /nixBuilders/builders
+# Remote builders on, with no builder named. The worker hosts depend on
+# the namespace ci-builders was installed into, so there is no default.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+nixBuilders:
+  enabled: true
+  knownHosts:
+    revision: test-v1
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: runner-example

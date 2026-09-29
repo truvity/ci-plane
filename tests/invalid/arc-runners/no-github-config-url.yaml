@@ -1,0 +1,4 @@
+# refuses: /githubConfigUrl
+# A scale set registers against exactly one organization, named here.
+controllerServiceAccount:
+  namespace: arc-system

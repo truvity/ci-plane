@@ -25,6 +25,7 @@ trap 'rm -rf "$work"' EXIT
 
 helm template t "$here/charts/arc-runners" \
   --set githubConfigUrl=https://github.com/example \
+  --set controllerServiceAccount.namespace=arc-system \
   --set janitor.enabled=true > "$work/rendered.yaml" || {
     echo "::error::the chart did not render" >&2; exit 1; }
 
@@ -51,10 +52,10 @@ recent=$(date -u -d "@$((now - 10))" +%Y-%m-%dT%H:%M:%SZ)
 # against each other rather than in isolation.
 cat > "$work/items.json" <<JSON
 {"items":[
- {"metadata":{"name":"wedged-old","creationTimestamp":"$old","deletionTimestamp":"$old","finalizers":["ephemeralrunner.actions.github.com/finalizer","ephemeralrunner.actions.github.com/runner-registration-finalizer"]},"status":{"jobRepositoryName":"truvity/gitops"}},
- {"metadata":{"name":"deleting-recent","creationTimestamp":"$old","deletionTimestamp":"$recent","finalizers":["ephemeralrunner.actions.github.com/finalizer"]},"status":{"jobRepositoryName":"truvity/gitops"}},
- {"metadata":{"name":"deleting-nofinalizer","creationTimestamp":"$old","deletionTimestamp":"$old"},"status":{"jobRepositoryName":"truvity/gitops"}},
- {"metadata":{"name":"healthy-busy","creationTimestamp":"$old"},"status":{"jobRepositoryName":"truvity/gitops"}},
+ {"metadata":{"name":"wedged-old","creationTimestamp":"$old","deletionTimestamp":"$old","finalizers":["ephemeralrunner.actions.github.com/finalizer","ephemeralrunner.actions.github.com/runner-registration-finalizer"]},"status":{"jobRepositoryName":"example/repo"}},
+ {"metadata":{"name":"deleting-recent","creationTimestamp":"$old","deletionTimestamp":"$recent","finalizers":["ephemeralrunner.actions.github.com/finalizer"]},"status":{"jobRepositoryName":"example/repo"}},
+ {"metadata":{"name":"deleting-nofinalizer","creationTimestamp":"$old","deletionTimestamp":"$old"},"status":{"jobRepositoryName":"example/repo"}},
+ {"metadata":{"name":"healthy-busy","creationTimestamp":"$old"},"status":{"jobRepositoryName":"example/repo"}},
  {"metadata":{"name":"idle-old","creationTimestamp":"$old"},"status":{}}
 ]}
 JSON

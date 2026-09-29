@@ -12,7 +12,7 @@ cores=${NIX_WORKER_CORES:-4}
 min_free=${NIX_WORKER_MIN_FREE_BYTES:-10737418240}
 max_free=${NIX_WORKER_MAX_FREE_BYTES:-21474836480}
 
-# INF host-certificates phase 1. Both features are ADDITIVE and default
+# Host certificates, phase 1. Both features are ADDITIVE and default
 # to their pre-existing behaviour: an install that sets neither renders
 # and runs exactly as before.
 #

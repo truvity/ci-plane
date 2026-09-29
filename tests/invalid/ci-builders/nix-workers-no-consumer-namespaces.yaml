@@ -1,0 +1,13 @@
+# refuses: /nixWorkers/networkPolicy/consumerNamespaces
+# Workers enabled with their policy on and nobody admitted.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST

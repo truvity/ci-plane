@@ -1,0 +1,5 @@
+# The smallest install that works: the organization and the controller's
+# namespace, neither of which the chart can guess.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system

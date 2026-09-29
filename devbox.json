@@ -1,0 +1,15 @@
+{
+  "packages": {
+    "go": "1.27.0",
+    "govulncheck": "1.7.0",
+    "just": "1.58.0",
+    "kubernetes-helm": "4.2.4"
+  },
+  "env": {
+    "CGO_ENABLED": "0"
+  },
+  "shell": {
+    "init_hook": [],
+    "scripts": {}
+  }
+}

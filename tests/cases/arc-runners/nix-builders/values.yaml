@@ -1,0 +1,42 @@
+# Remote Nix builders over ssh-ng, with the worker hosts named explicitly
+# and known_hosts built from a certificate authority alone.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+runnerImage:
+  registry: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+nixBuilders:
+  enabled: true
+  login:
+    user: nix
+    principal: ci-nix
+    protocol: ssh-ng
+  knownHosts:
+    pinned: false
+    certAuthorities:
+      - hosts: ["*.example.svc.cluster.local"]
+        key: ssh-ed25519 AAAACA
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: ci-nix
+    sshRole: ci-nix
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []
+    - host: nix-worker-arm64.example.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []

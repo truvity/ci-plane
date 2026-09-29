@@ -1,9 +1,9 @@
 # ci-builders — the in-cluster CI builder and cache plane.
 #
 # Named for where it is going, not only for what it holds today: the
-# Go module proxy left in 2.0.0 and the nix, npm and Bazel caches
-# follow as truvity/ci-cache grows a front end for each. What cannot
-# leave is the pair that builds — buildkitd and the nix workers.
+# Go module proxy left in 2.0.0, and moving the nix, npm and Bazel
+# caches to truvity/ci-cache is tracked separately. What cannot leave
+# is the pair that builds — buildkitd and the nix workers.
 #
 # Image references are split {registry}/{repository}:{tag} so an estate
 # with an ECR pull-through cache overrides ONLY `registry` per
@@ -13,8 +13,9 @@
 # The runner image. The nix workers run it, so its nix and its SSH
 # surface are the ones a remote build lands on.
 # `digest` is stamped by the release workflow; consumers override
-# `registry` (e.g. "712….dkr.ecr.…amazonaws.com/github") and inherit
-# the digest, staying transitively digest-pinned by the chart version.
+# `registry` (e.g. "123456789012.dkr.ecr.eu-example-1.amazonaws.com/github")
+# and inherit the digest, staying transitively digest-pinned by the
+# chart version.
 runnerImage:
   registry: ghcr.io
   repository: truvity/ci-plane/runner
@@ -86,7 +87,7 @@ buildkitd:
     # through a JS image build, every time. A dead server reaches the
     # client as "rpc error: code = Unavailable ... EOF", so the symptom
     # names the connection and not the memory -- it read as a network
-    # fault for a day (2026-09-05, dms#7).
+    # fault for a day (2026-09-05).
     #
     # 4Gi of request moves the pod onto a .large (8Gi raw, ~7.1Gi
     # allocatable) with no change to the estate's pool categories, and
@@ -99,11 +100,14 @@ buildkitd:
       memory: 6Gi
       ephemeral-storage: 10Gi
   networkPolicy:
-    # Only listed namespaces may reach the builders. Restrictive by
-    # default: an empty list renders a policy admitting nothing.
+    # Only listed namespaces may reach the builders: your runner
+    # namespaces, one per arc-runners release. REQUIRED while the policy
+    # is on, and empty by default -- a builder that admits nobody cannot
+    # work, so values.schema.json refuses the empty list rather than
+    # rendering a policy that silently locks every runner out. Set
+    # `enabled: false` to run without a policy.
     enabled: true
-    consumerNamespaces:
-      - arc-runners-truvity
+    consumerNamespaces: []
   # Annotations for the builder pods. Karpenter estates keep the
   # default: a builder mid-build is not migratable state.
   podAnnotations:
@@ -131,7 +135,7 @@ nixWorkers:
     hostPrivateKeyKey: ssh_host_ed25519_key
     trustedUserCAKeys: []
 
-  # ServiceAccount + projected OpenBao token (INF host-certificates phase
+  # ServiceAccount + projected OpenBao token (host certificates, phase
   # 1). Created and bound to the pod ONLY when hostCertificate.enabled
   # below: an install that leaves it off keeps the worker's current
   # identity posture exactly (automountServiceAccountToken: false, no
@@ -185,7 +189,7 @@ nixWorkers:
     hostSshRole: host   # its host-signing role; must allow cert_type=host
     requestTimeout: 15s
 
-  # A second SSH login (INF host-certificates phase 1), alongside
+  # A second SSH login (host certificates, phase 1), alongside
   # `nixremote`'s legacy `nix-store --serve`: the modern ssh-ng protocol
   # via `nix-daemon --stdio`. The account always exists in the image;
   # whether it can ever be reached is decided entirely by `principals`.
@@ -246,9 +250,8 @@ nixWorkers:
     expiration: 24h
     # /etc/opk/auth_id identity values, already dot-rewritten for
     # opkssh's own colon-splitting parser (access-roster's per-audience
-    # `groups_delimiter`, ADR 0015; see cfg/access.yaml's `opkssh` client
-    # row) -- e.g. "devel.nix-workers.user" /
-    # "devel.nix-workers.admin", never the colon form. Empty (the
+    # `groups_delimiter`) -- e.g. "<env>.nix-workers.user" /
+    # "<env>.nix-workers.admin", never the colon form. Empty (the
     # default) admits nobody through that account even when archs above
     # is non-empty: the account exists and is reachable, but no token
     # matches.
@@ -273,9 +276,10 @@ nixWorkers:
       memory: 16Gi
       ephemeral-storage: 50Gi
   networkPolicy:
+    # REQUIRED while nixWorkers and the policy are on: the runner
+    # namespaces that may reach the workers (see buildkitd.networkPolicy).
     enabled: true
-    consumerNamespaces:
-      - arc-runners-truvity
+    consumerNamespaces: []
   podAnnotations:
     karpenter.sh/do-not-disrupt: "true"
   scheduling:
@@ -359,7 +363,7 @@ bazelRemote:
       memory: 1Gi
 
 npmCache:
-  # verdaccio: a read-through npm registry proxy (INF-581). NOT the
+  # verdaccio: a read-through npm registry proxy. NOT the
   # nginx pattern — npm tarballs are immutable but metadata documents
   # mutate on publish, and tarball URLs are embedded inside metadata,
   # so a dumb proxy caches stale metadata or nothing useful. verdaccio
@@ -382,9 +386,8 @@ npmCache:
     limits:
       memory: 2Gi
   networkPolicy:
-    # Only listed namespaces may consume the cache. Restrictive by
-    # default: an empty list renders a policy admitting nothing.
+    # Only listed namespaces may consume the cache. REQUIRED while the
+    # cache and the policy are on (see buildkitd.networkPolicy).
     enabled: true
-    consumerNamespaces:
-      - arc-runners-truvity
+    consumerNamespaces: []
 

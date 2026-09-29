@@ -1,7 +1,7 @@
-# The Truvity ARC runner image (extracted from truvity/gitops
-# ci/runners/default, 2026-08-25 — INF/see the extraction ticket).
+# The ARC runner image (extracted from a private estate repository,
+# 2026-08-25).
 #
-# Doctrine (Oleg, 2026-08-13): the image contains ONLY what devbox
+# Doctrine (2026-08-13): the image contains ONLY what devbox
 # cannot deliver — the bootstrap (nix + devbox), pre-devbox shell
 # semantics (bash as sh), binaries outside nixpkgs (runner,
 # license-gated; the Go cache agent: must pre-exist before any go
@@ -21,7 +21,7 @@
 # does not resolve, nix retries before falling through -- measured on a
 # consumer cluster, eight attempts with the runners chart's backoff:
 #
-#   Could not resolve host: nix-cache.ci-cache.svc.cluster.local;
+#   Could not resolve host: nix-cache.<namespace>.svc.cluster.local;
 #   retrying in 4281 ms (attempt 1/8) ... 11382 ... 36723 ... 58570
 #
 # Minutes per job, on every nix invocation. Consumers of the PUBLISHED
@@ -30,8 +30,8 @@
 #
 # Multi-arch: built as a manifest list (amd64 + arm64) by
 # .github/workflows/release.yaml on a v* tag; consumers pin by DIGEST
-# (Truvity's fleet pins in gitops cfg/versions.yaml and pulls through
-# each account's ECR pull-through cache, github/ prefix -> ghcr.io).
+# (the maintainers' fleet pins it in its own estate repository and pulls
+# through each account's ECR pull-through cache, github/ -> ghcr.io).
 #
 # Releases are TAG-GATED: renovate keeps the pins below current and
 # automerges, but nothing publishes until a v* tag (creation restricted
@@ -40,8 +40,8 @@
 # here needs a `# renovate:` line directly above it; a pin without one
 # is invisible, and invisible is indistinguishable from current.
 
-# PINNED, annotated — the automatic-chain decision (INF-573 follow-up,
-# 2026-08-25) that replaced the old `latest` exception: `latest` was
+# PINNED, annotated — the automatic-chain decision (2026-08-25) that
+# replaced the old `latest` exception: `latest` was
 # invisible to renovate, so upstream runner (and its CVE) pickups
 # happened only as a side effect of some OTHER image change. Pinned +
 # annotated, renovate bumps it, automerge lands it, and the next tag
@@ -55,7 +55,7 @@ ARG RUNNER_VERSION=2.337.0
 # rebuild produces what it always did; a fleet whose cache lives
 # elsewhere overrides it here rather than patching the file. Name the
 # FULL list -- the `extra-` form appends to nix's default and the cache
-# is then never chosen (INF-621, 155 GB/day from upstream).
+# is then never chosen (155 GB/day from upstream, measured).
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
 # PINNED, and it must MATCH image/nix-worker/Dockerfile exactly.
@@ -114,20 +114,20 @@ RUN ln -sf /bin/bash /bin/sh \
  && apt-get install -y -qq --no-install-recommends openssh-server tini xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# goreleaser-pro is deliberately ABSENT (INF-572): the Pro EULA's
-# no-distribution clause covers the binary even without the key, and
-# this image is public. Consumers install it job-time on their own
-# runners — bar via its proto pin (.prototools), release-private
-# callers via the install-goreleaser-pro input (ci-workflows v2.13.1).
+# goreleaser-pro is deliberately ABSENT: the Pro EULA's no-distribution
+# clause covers the binary even without the key, and this image is
+# public. Consumers install it job-time on their own runners — through
+# their own tool pins, or release-private's install-goreleaser-pro
+# input (ci-workflows v2.13.1).
 
 # The ci-cache agent used to be copied in here beside the plugin, and is
-# gone as of INF-964. The image carried two Go cache clients while the
-# estate decided between them; INF-958 decided, and it decided against
-# the agent: it costs about a second over Go's own GOCACHE, and what
-# actually caps a build's fetch rate is `-p` -- how many packages
-# compile at once, hence how many lookups are in flight -- at roughly
-# 16 MB/s per CPU. No cache client moves that number. The server it
-# talked to is retired too (gitops, INF-963).
+# gone. The image carried two Go cache clients while the estate decided
+# between them, and measurement decided against the agent: it costs
+# about a second over Go's own GOCACHE, and what actually caps a build's
+# fetch rate is `-p` -- how many packages compile at once, hence how many
+# lookups are in flight -- at roughly 16 MB/s per CPU. No cache client
+# moves that number. The maintainers' estate retired the server it
+# talked to as well.
 #
 # Dropping it is worth more than the ~39MB: every agent bump cost a
 # ci-plane release and an ARC rollout of the whole fleet (v2.3.0 and
@@ -135,14 +135,14 @@ RUN ln -sf /bin/bash /bin/sh \
 #
 # Safe because the refusal that used to greet a missing binary is gone.
 # ci-actions' setup-devbox now WARNS on `go-cache-server` and falls
-# through to the bucket (INF-962, released before this) rather than
+# through to the bucket (released before this) rather than
 # failing with "ci-cache not on PATH -- runner image too old". That
 # ordering is the whole risk here: pins move on their own schedule, not
 # this repository's, so a caller on an old pin has to degrade, not break.
 #
 # go-cache-plugin below is now the only Go cache client in the image,
-# and it stays until INF-957 moves the fetch into setup-devbox from the
-# bundle release -- after which the image carries no cache client at all.
+# and it stays until setup-devbox fetches it from the ci-cache release
+# -- after which the image carries no cache client at all.
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
 
@@ -215,18 +215,18 @@ ENV USER=runner \
 # Single-user nix owned by the runner user (no daemon — containers have
 # no systemd; the official installer's --no-daemon mode is the proven
 # in-image shape). Substituters: the in-cluster read-through cache of
-# cache.nixos.org first (nginx, ci-cache namespace — see gitops
-# arc-nix-cache.yaml), then nix's default upstream as automatic
+# cache.nixos.org first (nginx, ci-builders' nixCache), then nix's
+# default upstream as automatic
 # fallback: cache down = slower, never broken.
 #
 # `substituters`, NOT `extra-substituters`: the extra- form APPENDS to
 # nix's default (cache.nixos.org), so the list read upstream-first and
 # the cache was never chosen — runners pulled ~155 GB/day straight
-# from Fastly while the nginx cache sat idle (INF-621). Naming the
+# from Fastly while the nginx cache sat idle. Naming the
 # full list is what puts the cache first. Order alone is not enough
 # either: nix ranks substituters by the Priority in each
 # nix-cache-info, so the proxy also advertises Priority 10 against
-# upstream's 40 (ci-cache chart).
+# upstream's 40 (ci-builders chart).
 #
 # The S3 push cache is retired with this — and with it the
 # require-sigs=false it forced: everything now originates upstream,

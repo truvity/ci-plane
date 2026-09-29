@@ -43,7 +43,7 @@ LogLevel VERBOSE
 AuthorizedKeysCommand /usr/local/bin/opkssh verify %u %k %t
 AuthorizedKeysCommandUser opksshuser
 
-# A SECOND login (INF host-certificates phase 1): the modern ssh-ng
+# A SECOND login (host certificates, phase 1): the modern ssh-ng
 # protocol via `nix-daemon --stdio`, gated independently of `nixremote`
 # above. AuthorizedPrincipalsFile, not a fixed principal: the chart
 # renders the content of nixWorkers.accounts.nix.principals into a

@@ -11,10 +11,13 @@ already moved the pins on master).
 git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
 ```
 
-The Release workflow does the rest: image-if-changed (else digest
-reuse), digest stamped into charts, charts published. Semver intent:
-patch = refresh/mechanics, minor = chart features or new tools in the
-image, major = breaking values.
+The Release workflow does the rest: both images built natively per
+architecture and merged into manifest lists, each digest stamped into
+the chart defaults by key, both charts stamped with the tag's version
+and published. Semver intent: patch = refresh/mechanics, minor = chart
+features or new tools in the image, major = breaking values. Add the
+version's `## vX.Y.Z` heading to [CHANGELOG.md](../CHANGELOG.md) before
+tagging.
 
 ## The automatic chain (optional, two switches)
 
@@ -47,14 +50,14 @@ minted per run and narrowed to this repository, so there is nothing
 stored to rotate or leak, and taking the privilege away is a grant edit
 at the issuer rather than a secret deletion in every repo that tags.
 
-## Consumer-side promotion (the Truvity wiring, reusable anywhere)
+## Consumer-side promotion
 
-The producer releases and stops. In the consuming gitops repo:
+The producer releases and stops. In the consuming estate's repository:
 
 1. Annotate the pin —
    ```yaml
    # renovate: datasource=docker depName=ghcr.io/truvity/charts/ci-builders
-   ciPlane: "1.0.3"
+   ciPlane: "X.Y.Z"
    ```
    One chart is the sentinel; both always share a version.
 2. A renovate custom regex manager over that file, plus a packageRule
@@ -99,7 +102,7 @@ its cgroup limit uploads no log and reads as a hang — err high.
 Every cache is disposable: delete the PVC, it re-warms. buildkitd's
 warm layer lives in the registry (`cache-to type=registry`) and
 survives builder replacement — expect one slower build cycle after a
-PVC reset, not breakage. The nix cache and module proxy degrade to
+PVC reset, not breakage. The nix, npm and Bazel caches degrade to
 upstream when down.
 
 ## Persistent Nix worker operations
@@ -195,18 +198,19 @@ restoring the previous server key and restarting both StatefulSets.
 ## npm read-through (verdaccio)
 
 Adoption is one line: ARC-pooled repos pass `node-cache: true` to the
-shared `check.yaml` (ci-workflows ≥ v2.13.0). The job probes
-`npm-cache.ci-cache.svc/-/ping` (2s) and, when it answers, sets
-`npm_config_registry` (npm, yarn classic) and `YARN_NPM_REGISTRY_SERVER`
-(berry) for the job — a down cache degrades the job to *slow* (direct
-npmjs, one warning line), never to *broken*. Both paths proven live
-2026-08-27: override active on bar's ARC job; graceful fallback on a
-hosted job.
+shared `check.yaml` (ci-workflows ≥ v2.13.0). The job probes the fixed
+name `npm-cache.ci-cache.svc/-/ping` (2s) — so this works only where
+ci-builders is installed into a namespace called `ci-cache` — and, when
+it answers, sets `npm_config_registry` (npm, yarn classic) and
+`YARN_NPM_REGISTRY_SERVER` (berry) for the job. A down cache degrades
+the job to *slow* (direct npmjs, one warning line), never to *broken*.
+Both paths proven live 2026-08-27: override active on an ARC job;
+graceful fallback on a hosted job.
 
 Know your consumer before expecting traffic: **hosted runners cannot
 reach the service at all** (public repos ride hosted — do not opt them
-in, the warning is pure noise), and a **zero-install yarn repo (bar:
-committed `.yarn/cache`) never fetches from any registry during
+in, the warning is pure noise), and a **zero-install yarn repo
+(committed `.yarn/cache`) never fetches from any registry during
 install** — the override there only catches ad-hoc fetches (`npx`,
 `npm exec`, toolchain downloads honoring npm config). The cache earns
 its keep when a non-zero-install Node repo lands on the ARC pool.

@@ -1,0 +1,4 @@
+# refuses: /buildkitd/networkPolicy/consumerNamespaces
+# The defaults alone. A builder behind a policy that admits nobody cannot
+# work, and the old default named one estate's runner namespace.
+{}

@@ -1,0 +1,20 @@
+# The base every CI render of arc-runners starts from (-f, before any
+# --set): the estate facts the chart refuses to render without. The
+# builders are inert while nixBuilders is off.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nixBuilders:
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []
+    - host: nix-worker-arm64.example.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []

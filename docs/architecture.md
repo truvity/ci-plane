@@ -8,17 +8,22 @@ records the load-bearing decisions and why each one holds.
 
 A `v*` tag releases everything. The release workflow:
 
-1. builds the image **only if `image/` changed** since the previous
-   release — otherwise the previous digest is re-tagged (a manifest
-   copy, digest preserved);
-2. stamps the resulting digest into both charts' default values;
-3. publishes the charts at the tag's version.
+1. builds each image's heavy base **natively per architecture** (amd64
+   and arm64 runners, no QEMU) with a registry layer cache, and merges
+   the two halves into one manifest list;
+2. assembles the release images from those bases without executing
+   anything (`image/release/`), and stamps each digest into the chart
+   defaults **by key** (`hack/stamp-digests.sh`), so the runner's digest
+   can never land in `nixWorkerImage`;
+3. stamps both charts' `version` and `appVersion` from the tag — the
+   committed `0.0.0` is a placeholder — and publishes them.
 
 A consumer therefore pins **one chart version** and is transitively
-digest-pinned to the image. Chart-only patches never roll a runner
-fleet (proven: v1.0.1 and v1.0.2 carry v1.0.0's image digest,
-byte-identical). The stamp is the compatibility statement: chart X was
-released against image X.
+digest-pinned to both images. Every release builds the images: native
+builds with a layer cache made an unchanged base cheap, so the old
+skip-rebuild gate, and its "did `image/` change?" question, is gone.
+The stamp is the compatibility statement: chart X was released against
+image X.
 
 ## Direct CRs, not the upstream scale-set chart
 
@@ -90,8 +95,8 @@ This repository releases and stops. There is no cross-repo reach: the
 consumer's own renovate tracks the published chart version (one chart —
 `charts/ci-builders` — serves as the sentinel, since both charts always
 share a version), bumps its pin, regenerates any derived files inside
-the update branch, and automerges on its own CI. See the Truvity wiring
-in [day-2-operations.md](day-2-operations.md).
+the update branch, and automerges on its own CI. See the consumer-side
+wiring in [day-2-operations.md](day-2-operations.md).
 
 ## The cache doctrine
 
@@ -121,10 +126,11 @@ store protocol. `sshd` forbids passwords, forwarding, TTYs and arbitrary
 commands; its force-command accepts only `nix-store --serve` and
 `nix-store --serve --write`.
 
-The estate supplies only a stable server host key in `ci-cache`, public
-`known_hosts` in each ARC namespace, the OpenBao HTTPS CA, and one or
-more public keys of the environment's SSH user CA (exported, for
-example, as `sshUserCaPublicKeys`; the workers trust the same keys).
+The estate supplies only a stable server host key in ci-builders'
+namespace, public `known_hosts` in each ARC namespace, the OpenBao
+HTTPS CA, and one or more public keys of the environment's SSH user CA
+(exported, for example, as `sshUserCaPublicKeys`; the workers trust the
+same keys).
 Client private keys never enter Helm, OpenBao KV, ESO or Kubernetes
 Secrets: the runner generates an Ed25519 key in its pod-local
 `emptyDir`, exchanges a narrowly projected ServiceAccount JWT for an
@@ -357,22 +363,22 @@ access-control docs) — this chart does not decide it.
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
-bootstrap, bash-as-sh, the daemonless docker client + buildx, the Go
-cache agent, and the goreleaser-pro binary (its license key is a secret
-and never ships). Everything else arrives per job from each
-repository's own `devbox.json`. Repo- or cluster-specific content in
+bootstrap, bash-as-sh, the daemonless docker client + buildx, and the
+Go build cache client. goreleaser-pro is deliberately absent: its
+licence forbids redistributing the binary, and this image is public.
+Everything else arrives per job from each repository's own
+`devbox.json`. Repo- or cluster-specific content in
 the image is a bug; the one documented debt is the baked in-cluster nix
 substituter (dead elsewhere, upstream fallback).
 
-**Two Go cache binaries ship at once, on purpose.** `ci-cache` is the
-agent of [truvity/ci-cache](https://github.com/truvity/ci-cache), which
-is what a job should use; `go-cache-plugin` is the tool it replaces and
-is kept for one release beside it. `GOCACHEPROG` names a binary that
-must exist before the first `go` invocation of a job, and the shared
-workflows pin their own version of this image on their own schedule --
-so shipping the replacement and removing the original in one release
-would fail every build using a pin that had not moved yet. The plugin
-goes in the next image release.
+**One Go cache client ships: `go-cache-plugin`.** The
+[truvity/ci-cache](https://github.com/truvity/ci-cache) agent sat beside
+it while the two were measured against each other, and was removed once
+the plugin won. `GOCACHEPROG` names a binary that must exist before the
+first `go` invocation of a job, and callers pin their own version of
+this image on their own schedule, so a client leaves the image only
+after nothing can still name it. The plugin itself leaves once
+ci-cache's setup action fetches it per job.
 
 A cache binary is in the image at all only because of that ordering
 rule: it has to pre-exist the `go` invocation it caches, which is

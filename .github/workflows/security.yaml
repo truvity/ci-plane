@@ -1,0 +1,26 @@
+name: Security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * *" # daily 6am UTC
+
+permissions:
+  contents: read
+
+jobs:
+  # govulncheck over the two Go helper modules under image/
+  # (nix-worker-client, nix-worker-host-cert). The shared check workflow
+  # takes recipes, not module paths, so the Justfile's `vuln` recipe walks
+  # the modules itself.
+  #
+  # Deliberately NOT in ci.yaml and deliberately not a required context: a
+  # standard-library advisory with no released fix would otherwise wedge
+  # every pull request on a finding nobody can act on.
+  govulncheck:
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@83a33664e82b4df3764ed4b4544707320b51db92 # v3.13.1
+    with:
+      recipes: '["vuln"]'

@@ -1,0 +1,33 @@
+# Persistent Nix workers with host certificates, the ssh-ng login and the
+# opkssh pilot on one architecture: every optional path of nix-workers.yaml.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example, arc-runners-other]
+  hostCertificate:
+    enabled: true
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker
+  accounts:
+    nix:
+      principals: [ci@example]
+      trusted: true
+  opkssh:
+    archs: [amd64]
+    issuer: https://access.example
+    clientId: opkssh
+    nixGroup: example.nix-workers.user
+    adminGroup: example.nix-workers.admin

@@ -71,7 +71,7 @@ func (ca testCA) sign(t *testing.T, key ssh.PublicKey, opts certOptions) []byte 
 		Key:             key,
 		Serial:          1,
 		CertType:        opts.certType,
-		KeyId:           "nix-worker-amd64.ci-cache.svc.cluster.local",
+		KeyId:           "nix-worker-amd64.example.svc.cluster.local",
 		ValidPrincipals: opts.principals,
 		ValidAfter:      uint64(now.Add(-30 * time.Second).Unix()),
 		ValidBefore:     uint64(now.Add(opts.lifetime).Unix()),
@@ -89,7 +89,7 @@ func (ca testCA) sign(t *testing.T, key ssh.PublicKey, opts certOptions) []byte 
 func TestValidateHostCertificate(t *testing.T) {
 	ca := newTestCA(t)
 	key := newHostKey(t)
-	principals := []string{"nix-worker-amd64.ci-cache.svc.cluster.local"}
+	principals := []string{"nix-worker-amd64.example.svc.cluster.local"}
 
 	cases := []struct {
 		name    string
@@ -248,7 +248,7 @@ func writeConfig(t *testing.T, server *httptest.Server, hostKey ssh.PublicKey) c
 		sshRole:             "host",
 		certificateTTL:      "86400s",
 		certificateDuration: 24 * time.Hour,
-		principals:          []string{"nix-worker-amd64.ci-cache.svc.cluster.local"},
+		principals:          []string{"nix-worker-amd64.example.svc.cluster.local"},
 		timeout:             10 * time.Second,
 		tokenFile:           write("token", []byte("projected-jwt\n")),
 		caFile:              write("ca.crt", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})),
@@ -285,7 +285,7 @@ func TestSignRefusesAMisconfiguredRole(t *testing.T) {
 	hostKey := newHostKey(t)
 	// A role that hands back a USER certificate for a host-cert request:
 	// exactly the drift validateHostCertificate exists to catch.
-	server := fakeOpenBao(t, ca, certOptions{certType: ssh.UserCert, principals: []string{"nix-worker-amd64.ci-cache.svc.cluster.local"}})
+	server := fakeOpenBao(t, ca, certOptions{certType: ssh.UserCert, principals: []string{"nix-worker-amd64.example.svc.cluster.local"}})
 	defer server.Close()
 	cfg := writeConfig(t, server, hostKey)
 
