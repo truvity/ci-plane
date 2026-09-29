@@ -417,7 +417,7 @@ func TestSetupEnablesRemoteWithPermitPTYCertificate(t *testing.T) {
 	}
 }
 
-// INF host-certificates phase 1: a caller who has set
+// Host certificates, phase 1: a caller who has set
 // nixBuilders.knownHosts.certAuthorities gets those `@cert-authority`
 // lines APPENDED to the pinned known_hosts Secret, not in place of it.
 func TestPrepareOutputsAppendsCertAuthorities(t *testing.T) {
@@ -426,7 +426,7 @@ func TestPrepareOutputsAppendsCertAuthorities(t *testing.T) {
 	server := fakeOpenBao(t, ca, map[string]string{permitPTY: ""}, &gotTTL)
 	defer server.Close()
 	cfg := setupConfig(t, server, ca)
-	caLine := "@cert-authority *.ci-cache.svc.cluster.local ssh-ed25519 AAAACA\n"
+	caLine := "@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA\n"
 	if err := os.WriteFile(cfg.certAuthoritiesSource, []byte(caLine), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestPrepareOutputsUnpinnedKnownHostsUsesOnlyCertAuthorities(t *testing.T) {
 	// by pointing at a path that does not exist, same as the
 	// certAuthorities-file-absent idiom setupConfig already uses.
 	cfg.knownHostsSource = filepath.Join(t.TempDir(), "does-not-exist")
-	caLine := "@cert-authority *.ci-cache.svc.cluster.local ssh-ed25519 AAAACA\n"
+	caLine := "@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA\n"
 	if err := os.WriteFile(cfg.certAuthoritiesSource, []byte(caLine), 0o600); err != nil {
 		t.Fatal(err)
 	}

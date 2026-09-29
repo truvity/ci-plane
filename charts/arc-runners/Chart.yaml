@@ -10,9 +10,11 @@ description: >-
   actions/actions-runner-controller#4307. One release per GitHub
   organization, installed into that org's runner namespace.
 type: application
-# version and appVersion are stamped by the release workflow.
-version: 0.0.0-dev
-appVersion: 0.0.0-dev
+# Placeholders: the git tag is the sole version authority. The release
+# workflow (.github/workflows/release.yaml) overwrites both fields from
+# the tag before it packages the chart.
+version: 0.0.0
+appVersion: 0.0.0
 home: https://github.com/truvity/ci-plane
 sources:
   - https://github.com/truvity/ci-plane

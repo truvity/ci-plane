@@ -7,7 +7,9 @@ Order matters: caches before runners, controller before both charts.
 1. **The ARC controller**, installed from the upstream
    `gha-runner-scale-set-controller` chart (deliberately not part of
    this repo — see [architecture.md](architecture.md)). Note its
-   version and its ServiceAccount (name + namespace).
+   version and its ServiceAccount (name + namespace): arc-runners
+   requires the namespace (`controllerServiceAccount.namespace`) and has
+   no default for it.
 2. **A GitHub App per organization** for runner registration, with
    `organization_self_hosted_runners: write`. Its credentials land in a
    Secret named `arc-github-app` (keys `github_app_id`,
@@ -15,24 +17,29 @@ Order matters: caches before runners, controller before both charts.
    runner namespace — delivered however your estate delivers secrets
    (ESO, sealed-secrets, by hand).
 3. **Runner namespaces**, one per organization (e.g.
-   `arc-runners-<org>`), plus a namespace for the build plane. This
-   estate calls it `ci-cache` and every FQDN below assumes that name;
-   it predates the chart rename and is deliberately unchanged, because
-   those service names are baked into runner images and shared
-   workflows. Dedicated
-   namespaces — a general-purpose janitor that sweeps old releases will
-   eventually collect a long-lived AutoscalingRunnerSet.
+   `arc-runners-<org>`), plus a namespace for the build plane, written
+   `<namespace>` below. Dedicated namespaces — a general-purpose janitor
+   that sweeps old releases will eventually collect a long-lived
+   AutoscalingRunnerSet. The charts take the namespace from the release;
+   two things outside them still assume the maintainers' name,
+   `ci-cache`:
+   - the published runner and nix-worker images bake the Service
+     `nix-cache` in namespace `ci-cache` as their first Nix substituter.
+     Anywhere else, override it without rebuilding through arc-runners'
+     `nixConfig`, e.g.
+     `substituters = http://nix-cache.<namespace>.svc.cluster.local https://cache.nixos.org/`,
+     or every Nix call retries a name that does not resolve;
+   - truvity/ci-workflows' `node-cache: true` probes
+     `npm-cache.ci-cache.svc` by that fixed name.
 4. Optional but recommended: a **registry pull-through cache** per
    hosting account, so image pulls are same-region and unthrottled. The
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
 5. Nothing here for Go any more. The module proxy left in 2.0.0 for
-   [truvity/ci-cache](https://github.com/truvity/ci-cache), which caches
-   the Go build cache as well as modules; install that chart alongside
-   this one, into the same namespace if you like. Setting `goModproxy`
-   here now fails the render rather than being ignored.
+   [truvity/ci-cache](https://github.com/truvity/ci-cache). Setting
+   `goModproxy` here fails the render rather than being ignored.
 6. For persistent Nix workers:
-   - `ci-cache/nix-builder-server`, delivered by the estate's secret
+   - `<namespace>/nix-builder-server`, delivered by the estate's secret
      manager, containing the stable `ssh_host_ed25519_key` (and its
      public half for operations);
    - `<runner namespace>/nix-builder-known-hosts`, containing only
@@ -65,13 +72,22 @@ Order matters: caches before runners, controller before both charts.
 
 ```bash
 helm install ci-builders oci://ghcr.io/truvity/charts/ci-builders \
-  --version <X.Y.Z> -n ci-cache \
+  --version <X.Y.Z> -n <namespace> \
   --set buildkitd.networkPolicy.consumerNamespaces={arc-runners-<org>} \
+  --set npmCache.networkPolicy.consumerNamespaces={arc-runners-<org>} \
   --set nixWorkers.enabled=true \
   --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 <CA-PUBLIC-BODY>' \
   --set nixWorkers.networkPolicy.consumerNamespaces={arc-runners-<org>} \
   # per-arch dedicated pool split, storage class, sizes, registry overrides as needed
 ```
+
+**Required, with no default:** each enabled component's
+`networkPolicy.consumerNamespaces` — `buildkitd`, `npmCache`, and
+`nixWorkers` when enabled — while its `networkPolicy.enabled` is true
+(the default). A builder behind a policy that admits nobody cannot work,
+so the chart's `values.schema.json` refuses the empty list instead of
+rendering it. List your runner namespaces, or set that component's
+`networkPolicy.enabled: false`.
 
 Key values (see the chart's values.yaml for the full annotated set):
 `buildkitd.archs`, `buildkitd.scheduling.<arch>` (nodeSelector +
@@ -83,10 +99,25 @@ dedicated, tainted CI/build pool is not a supported production shape.
 
 ## Install the runner scale sets (one release per org)
 
+```yaml
+# builders.yaml -- one entry per architecture ci-builders runs
+nixBuilders:
+  builders:
+    - host: nix-worker-amd64.<namespace>.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+    - host: nix-worker-arm64.<namespace>.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+```
+
 ```bash
 helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
-  --version <X.Y.Z> -n arc-runners-<org> \
+  --version <X.Y.Z> -n arc-runners-<org> -f builders.yaml \
   --set githubConfigUrl=https://github.com/<org> \
+  --set controllerServiceAccount.namespace=<CONTROLLER NAMESPACE> \
   --set arcVersion=<INSTALLED CONTROLLER VERSION> \
   --set nixBuilders.enabled=true \
   --set nixBuilders.openbao.address=https://<OPENBAO-ENDPOINT> \
@@ -100,14 +131,21 @@ helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
   --set nodeSelector.<your CI pool label>=<value>
 ```
 
+**Required, with no default:** `githubConfigUrl`,
+`controllerServiceAccount.namespace` (wherever the controller runs), and
+`nixBuilders.builders` while `nixBuilders.enabled` — the worker hosts
+live in whatever namespace ci-builders went into, so the chart cannot
+name them. `values.schema.json` refuses a render without them.
+
 **`arcVersion` is not optional in spirit**: the controller deletes any
 scale set whose `app.kubernetes.io/version` label differs from its
 build version. Feed it from the same pin that installs the controller.
 
-The scale-set names (`preview-large`, `preview-small` by default — the
-`scaleSets` map keys) ARE the workflows' `runs-on` labels and the
-GitHub-side scale-set identities. Rename by adding alongside and
-migrating callers, never in place: a rename strands queued jobs.
+The scale-set names (`preview-large`, `preview-medium`, `preview-small`
+by default — the `scaleSets` map keys) ARE the workflows' `runs-on`
+labels and the GitHub-side scale-set identities. Rename by adding
+alongside and migrating callers, never in place: a rename strands
+queued jobs.
 
 ## Runner pod expectations
 
@@ -131,8 +169,8 @@ migrating callers, never in place: a rename strands queued jobs.
 
 Point `runs-on` at the scale-set names (via org variables so a rename
 is one change, not N). Runners reach the caches by cluster DNS:
-`buildkitd-<arch>.ci-cache.svc:1234` (buildx `--driver remote`),
-`nix-cache.ci-cache.svc` (nix extra-substituter),
-`bazel-remote.ci-cache.svc:9092` (moon remote cache),
-`npm-cache.ci-cache.svc` (yarn/npm/pnpm `npmRegistryServer`, public
+`buildkitd-<arch>.<namespace>.svc:1234` (buildx `--driver remote`),
+`nix-cache.<namespace>.svc` (nix substituter),
+`bazel-remote.<namespace>.svc:9092` (moon remote cache),
+`npm-cache.<namespace>.svc` (yarn/npm/pnpm `npmRegistryServer`, public
 packages, behind a health-probe fallback to registry.npmjs.org).

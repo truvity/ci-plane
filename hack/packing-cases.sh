@@ -18,7 +18,8 @@ trap 'rm -rf "$work"' EXIT
 
 render() {
   helm template t "$here/charts/arc-runners" \
-    --set githubConfigUrl=https://github.com/example "$@"
+    --set githubConfigUrl=https://github.com/example \
+    --set controllerServiceAccount.namespace=arc-system "$@"
 }
 
 # Checks every AutoscalingRunnerSet in the render file $2. $1 is the

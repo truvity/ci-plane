@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ci-builders chart values",
+  "description": "Open, not strict: only types, and the inputs the chart cannot work without. The estate facts -- which runner namespaces may reach each component -- have no default and are required while the component and its NetworkPolicy are on, because a builder that admits nobody cannot work.",
+  "type": "object",
+  "definitions": {
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "consumerNamespaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The runner namespaces that may reach this component. Required, and non-empty, while the component and its policy are on."
+        }
+      }
+    },
+    "requiredPolicy": {
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "consumerNamespaces"
+        ],
+        "properties": {
+          "consumerNamespaces": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "properties": {
+    "runnerImage": {
+      "$ref": "#/definitions/image"
+    },
+    "nixWorkerImage": {
+      "$ref": "#/definitions/image"
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "storageClassName": {
+      "type": "string"
+    },
+    "buildkitd": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "networkPolicy": {
+          "$ref": "#/definitions/networkPolicy"
+        },
+        "archs": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "$ref": "#/definitions/requiredPolicy"
+          }
+        }
+      },
+      "description": "Rootless BuildKit builders, one per architecture."
+    },
+    "nixWorkers": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "networkPolicy": {
+          "$ref": "#/definitions/networkPolicy"
+        },
+        "archs": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "$ref": "#/definitions/requiredPolicy"
+          }
+        }
+      },
+      "description": "Persistent remote Nix builders, one per architecture."
+    },
+    "npmCache": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "networkPolicy": {
+          "$ref": "#/definitions/networkPolicy"
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "$ref": "#/definitions/requiredPolicy"
+          }
+        }
+      },
+      "description": "The read-through npm registry cache."
+    },
+    "nixCache": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "bazelRemote": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

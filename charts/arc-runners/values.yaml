@@ -2,7 +2,7 @@
 # that organization's runner namespace.
 
 # REQUIRED: the org this release registers against, e.g.
-# https://github.com/truvity. A scale set registers against ONE
+# https://github.com/<org>. A scale set registers against ONE
 # organization; each org needs its own release, GitHub App secret and
 # namespace.
 githubConfigUrl: ""
@@ -23,9 +23,16 @@ arcVersion: "0.14.2"
 # The ARC controller's ServiceAccount — this chart grants it the
 # per-scale-set manager Role in the release namespace, exactly as the
 # upstream gha-runner-scale-set chart does.
+#
+# `namespace` is REQUIRED and has no default (values.schema.json): it is
+# wherever YOUR estate installed the controller, and a guessed namespace
+# grants the Role to a ServiceAccount that does not exist -- the scale
+# sets render, and the controller can never manage them. `name` is the
+# upstream controller chart's default for a release named `arc`; change
+# it with the release name.
 controllerServiceAccount:
   name: arc-gha-rs-controller
-  namespace: arc-system
+  namespace: ""
 
 # ServiceAccount for the runner pods (plumbing-only identity doctrine:
 # registry pull + caches, nothing else). Created estate-side; empty
@@ -57,7 +64,7 @@ runnerGroup: Default
 # Runtime Nix transfer policy for every ephemeral runner. Rendered as
 # a content-addressed ConfigMap and exposed through NIX_CONFIG, which
 # overrides only the keys named here; the image's nix.conf continues
-# to own the substituter list (INF-621).
+# to own the substituter list.
 #
 # Nix 2.35 retries most 5xx responses, including 504, but its 100ms
 # default base delay exhausts five attempts inside a few seconds. This
@@ -151,7 +158,7 @@ nixBuilders:
     # so an install that has not migrated renders known_hosts unchanged.
     certAuthorities: []
     #   - hosts:
-    #       - "*.ci-cache.svc.cluster.local"
+    #       - "*.<namespace>.svc.cluster.local"
     #     key: "ssh-ed25519 AAAA..."
   openbao:
     address: ""
@@ -172,19 +179,26 @@ nixBuilders:
     # that is a render error, never a silently truncated certificate.
     certificateTTL: 1h
     requestTimeout: 15s
-  builders:
-    - host: nix-worker-amd64.ci-cache.svc.cluster.local
-      system: x86_64-linux
-      maxJobs: 2
-      speedFactor: 1
-      supportedFeatures: []
-      mandatoryFeatures: []
-    - host: nix-worker-arm64.ci-cache.svc.cluster.local
-      system: aarch64-linux
-      maxJobs: 2
-      speedFactor: 1
-      supportedFeatures: []
-      mandatoryFeatures: []
+  # The remote builders, one per worker. REQUIRED when enabled, and empty
+  # by default: a host is ci-builders' worker Service in whatever
+  # namespace YOUR estate installed it into, which this chart cannot know
+  # (values.schema.json refuses an empty list while `enabled`). One entry
+  # per architecture ci-builders runs:
+  #
+  #   builders:
+  #     - host: nix-worker-amd64.<namespace>.svc.cluster.local
+  #       system: x86_64-linux
+  #       maxJobs: 2
+  #       speedFactor: 1
+  #       supportedFeatures: []
+  #       mandatoryFeatures: []
+  #     - host: nix-worker-arm64.<namespace>.svc.cluster.local
+  #       system: aarch64-linux
+  #       maxJobs: 2
+  #       speedFactor: 1
+  #       supportedFeatures: []
+  #       mandatoryFeatures: []
+  builders: []
 
 # Runner pod scheduling. The tolerations are no-ops on untainted
 # clusters; estates with tainted worker/CI pools get the doctrine for
@@ -338,8 +352,8 @@ scaleSets:
         memory: 24Gi
         ephemeral-storage: 40Gi
   # The middle of the measured distribution (2026-08-27 fleet survey,
-  # cgroup memory.peak across 22 jobs): a 10.4–13.4Gi cluster — gitops
-  # lint/test, bar's moon ci, trustform-front build — sat on 24Gi
+  # cgroup memory.peak across 22 jobs): a 10.4–13.4Gi cluster — Go
+  # lint/test, a JS monorepo's CI, a front-end build — sat on 24Gi
   # runners at ~50%. 14Gi is the packing sweet spot: TWO medium
   # runners fit one r6g.xlarge (~29Gi allocatable), where one 24Gi
   # runner monopolized it. gomaxprocs stays 4 (CPU is compressible;
@@ -388,7 +402,7 @@ janitor:
   #    GitHub's side to orphan. Gated on the deletion being older than the
   #    grace period, so an ordinary delete is never touched.
   #
-  # Signature 2 stalled the whole truvity org's CI on 2026-09-24 until a
+  # Signature 2 stalled a whole organization's CI on 2026-09-24 until a
   # person cleared it by hand. Remove 1 when #4307 ships a fix; 2 stands
   # until a JIT registration survives a container restart.
   enabled: true

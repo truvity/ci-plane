@@ -1,0 +1,753 @@
+---
+# Source: ci-builders/templates/buildkitd.yaml
+# Only the listed consumer namespaces may reach the builders.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: buildkitd-arm64-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: arm64
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners-example
+      ports:
+        - port: 1234
+          protocol: TCP
+
+---
+# Source: ci-builders/templates/buildkitd.yaml
+# Only the listed consumer namespaces may reach the builders.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: buildkitd-amd64-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: amd64
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners-example
+      ports:
+        - port: 1234
+          protocol: TCP
+
+---
+# Source: ci-builders/templates/npm-cache.yaml
+# Only the listed consumer namespaces may reach the cache.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: npm-cache-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: npm-cache
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners-example
+      ports:
+        - port: 4873
+          protocol: TCP
+
+---
+# Source: ci-builders/templates/nix-cache.yaml
+# nix-cache: transparent read-through cache of the nix upstream,
+# consumed as an ordinary HTTP SUBSTITUTER — not an HTTP_PROXY (a
+# forward proxy only sees CONNECT tunnels for HTTPS and can cache
+# nothing without MITM). Runners list this service before the upstream
+# in nix.conf; pod down = fall through to upstream: slower, never
+# broken. A CACHE on a disposable PVC — zero IAM, no backups.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # Version suffix: bump on ANY nginx.conf edit — the Deployment
+  # references the versioned name, so the bump is what rolls the pod
+  # (GitOps engines never restart pods on in-place ConfigMap changes).
+  name: nix-cache-nginx-v3
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-builders
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+    events { worker_connections 1024; }
+    http {
+      access_log off;
+      # Writable paths for a non-root, read-only-rootfs container.
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /cache/tmp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
+      # max_size is enforced by LRU eviction; the slack below the PVC
+      # size absorbs temp files and eviction lag. inactive far above
+      # any real reuse window — eviction is size-driven here.
+      proxy_cache_path /cache/nix levels=1:2 keys_zone=nix:64m
+                       max_size=28g inactive=90d use_temp_path=off;
+
+      # Resolve the CDN continuously and expose every current address
+      # as an upstream peer. This keeps DNS rotation (the variable
+      # proxy_pass used by v2) while also giving proxy_next_upstream a
+      # different peer to try after a connection error or retryable 5xx.
+      resolver kube-dns.kube-system.svc.cluster.local valid=300s ipv6=off;
+      upstream nixos_cache {
+        zone nixos_cache 64k;
+        server cache.nixos.org:443 resolve;
+      }
+
+      server {
+        listen 8080;
+
+        location = /healthz { return 200; }
+
+        # Advertise a BETTER priority than the upstream we proxy.
+        # Nix chooses a substituter by the Priority in its
+        # nix-cache-info (LOWER wins), not by the order they appear in
+        # `substituters`. Proxying upstream's own nix-cache-info
+        # returned Priority 40 -- a tie with cache.nixos.org, which nix
+        # broke toward upstream. This cache therefore served almost
+        # nothing while runners pulled ~155 GB/day straight from
+        # Fastly. StoreDir MUST match the upstream's or nix rejects the
+        # substituter outright.
+        location = /nix-cache-info {
+          default_type text/x-nix-cache-info;
+          return 200 "StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 10\n";
+        }
+
+        location / {
+          proxy_pass https://nixos_cache;
+          proxy_set_header Host cache.nixos.org;
+          proxy_ssl_server_name on;
+          proxy_ssl_name cache.nixos.org;
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+
+          # Bound each network phase independently. A healthy CDN
+          # stream should never go a minute without a byte; failing
+          # there leaves enough of the four-minute aggregate budget to
+          # try the other resolved peers.
+          proxy_connect_timeout 30s;
+          proxy_send_timeout 1m;
+          proxy_read_timeout 1m;
+          # Retry an idempotent cache GET against another resolved CDN
+          # peer. OSS nginx has no delayed backoff; Nix supplies that
+          # outer retry curve through the runner NIX_CONFIG.
+          proxy_next_upstream error timeout invalid_header
+                              http_500 http_502 http_503 http_504;
+          proxy_next_upstream_tries 4;
+          proxy_next_upstream_timeout 4m;
+
+          proxy_cache nix;
+          proxy_cache_key $uri;
+          # Deterministic TTLs, upstream headers ignored: store paths
+          # are content-addressed, so both .narinfo and nar/* are
+          # immutable in practice. 404s are cached briefly — nix
+          # probes many nonexistent narinfos per closure.
+          proxy_ignore_headers Cache-Control Expires;
+          proxy_cache_valid 200 90d;
+          proxy_cache_valid 404 5m;
+          # Collapse a cold fleet's concurrent misses for the same
+          # path into ONE upstream fetch in the normal case. A waiter
+          # falls through after four minutes—before Nix's five-minute
+          # idle timeout—while lock_age prevents another request from
+          # taking over cache population for ten minutes.
+          proxy_cache_lock on;
+          proxy_cache_lock_timeout 4m;
+          proxy_cache_lock_age 10m;
+          # Refresh an expired object in the background while clients
+          # receive the stale copy. Explicit HTTP statuses matter: an
+          # upstream-generated 504 is neither a transport `error` nor
+          # nginx's own `timeout`.
+          proxy_cache_background_update on;
+          proxy_cache_use_stale error timeout invalid_header updating
+                                http_500 http_502 http_503 http_504;
+          add_header X-Cache $upstream_cache_status always;
+        }
+      }
+    }
+
+---
+# Source: ci-builders/templates/npm-cache.yaml
+# npm-cache (verdaccio): read-through proxy of registry.npmjs.org.
+# Metadata is short-TTL'd, tarballs cached forever on a disposable PVC
+# — a CACHE by doctrine: no backups, losing it costs a re-warm.
+# Public packages only: publish denied, registration off, no uplink
+# credentials. Consumers reach it as an ordinary registry
+# (npmRegistryServer: http://npm-cache.<ns>.svc) behind a health-probe
+# fallback to upstream.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # Version suffix: bump on ANY config edit — the Deployment references
+  # the versioned name, so the bump is what rolls the pod.
+  name: npm-cache-config-v1
+  labels:
+    app.kubernetes.io/name: npm-cache
+    app.kubernetes.io/part-of: ci-builders
+data:
+  config.yaml: |
+    storage: /verdaccio/storage
+    # Registration disabled; nothing authenticates, nothing publishes.
+    auth:
+      htpasswd:
+        file: /verdaccio/storage/htpasswd
+        max_users: -1
+    uplinks:
+      npmjs:
+        url: https://registry.npmjs.org/
+        cache: true
+    packages:
+      '**':
+        access: $all
+        proxy: npmjs
+        # no publish/unpublish rule -> denied for everyone
+    server:
+      keepAliveTimeout: 60
+    web:
+      enable: true
+      title: ci npm cache
+    log:
+      type: stdout
+      format: pretty
+      level: warn
+    listen: 0.0.0.0:4873
+
+---
+# Source: ci-builders/templates/bazel-remote.yaml
+# bazel-remote: a Bazel Remote Execution v2 API cache (moon's remote
+# task cache speaks it; moon has no native S3). Disk-backed by default:
+# zero IAM, cluster-local latency. bazelRemote.s3.enabled switches on
+# bazel-remote's S3 PROXY backend, which sits in FRONT of the same
+# local --dir disk rather than replacing it -- the PVC below stays the
+# working set either way. It is a CACHE either way: losing it costs one
+# cold rebuild (or, with S3, however much the disk hasn't re-warmed).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bazel-remote-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# Source: ci-builders/templates/nix-cache.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nix-cache-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 30Gi
+
+---
+# Source: ci-builders/templates/npm-cache.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: npm-cache-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# Source: ci-builders/templates/bazel-remote.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: bazel-remote
+  labels:
+    app.kubernetes.io/name: bazel-remote
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: bazel-remote
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9092
+      targetPort: grpc
+
+---
+# Source: ci-builders/templates/buildkitd.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd-arm64
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: buildkitd
+    ci-plane.io/arch: arm64
+  ports:
+    - name: grpc
+      port: 1234
+      targetPort: 1234
+
+---
+# Source: ci-builders/templates/buildkitd.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd-amd64
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: buildkitd
+    ci-plane.io/arch: amd64
+  ports:
+    - name: grpc
+      port: 1234
+      targetPort: 1234
+
+---
+# Source: ci-builders/templates/nix-cache.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nix-cache
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: nix-cache
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+# Source: ci-builders/templates/npm-cache.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: npm-cache
+  labels:
+    app.kubernetes.io/name: npm-cache
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: npm-cache
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+
+---
+# Source: ci-builders/templates/bazel-remote.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bazel-remote
+  labels:
+    app.kubernetes.io/name: bazel-remote
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bazel-remote
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bazel-remote
+        app.kubernetes.io/part-of: ci-builders
+    spec:
+      # The Service is named bazel-remote → k8s service links inject
+      # BAZEL_REMOTE_PORT=tcp://ip:8080, which the binary parses as its
+      # OWN --port env flag and crashes. Kill service-link envs.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bazel-remote
+          image: docker.io/buchgr/bazel-remote-cache:v2.6.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - --dir=/data
+            - --max_size=8
+            - --port=8080
+            - --grpc_port=9092
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9092
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 50m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bazel-remote-data
+
+---
+# Source: ci-builders/templates/nix-cache.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nix-cache
+  labels:
+    app.kubernetes.io/name: nix-cache
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nix-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nix-cache
+        app.kubernetes.io/part-of: ci-builders
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.31.6-alpine
+          command: ["nginx", "-c", "/etc/nginx-cache/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx-cache
+              readOnly: true
+            - name: data
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101 # nginx uid in the official alpine image
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 101
+      volumes:
+        - name: conf
+          configMap:
+            name: nix-cache-nginx-v3
+        - name: data
+          persistentVolumeClaim:
+            claimName: nix-cache-data
+        - name: tmp
+          emptyDir: {}
+
+---
+# Source: ci-builders/templates/npm-cache.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: npm-cache
+  labels:
+    app.kubernetes.io/name: npm-cache
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: npm-cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: npm-cache
+        app.kubernetes.io/part-of: ci-builders
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001 # verdaccio uid in the official image
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verdaccio
+          image: docker.io/verdaccio/verdaccio:6.10.4
+          # No args: the image's entrypoint is `dumb-init --` with
+          # `verdaccio --config /verdaccio/conf/config.yaml` as CMD —
+          # args REPLACE the CMD, so passing flags alone makes
+          # dumb-init exec "--config" and crashloop. The mount below
+          # lands on the image's default config path.
+          ports:
+            - name: http
+              containerPort: 4873
+          volumeMounts:
+            - name: conf
+              mountPath: /verdaccio/conf
+              readOnly: true
+            - name: data
+              mountPath: /verdaccio/storage
+          readinessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            limits:
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: conf
+          configMap:
+            name: npm-cache-config-v1
+        - name: data
+          persistentVolumeClaim:
+            claimName: npm-cache-data
+
+---
+# Source: ci-builders/templates/buildkitd.yaml
+# Rootless BuildKit: no privileged securityContext. The unconfined
+# seccomp profile is the documented rootless-buildkit requirement —
+# user-namespace isolation replaces the default profile, which blocks
+# the unprivileged clone/mount syscalls rootless depends on.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buildkitd-arm64
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  serviceName: buildkitd-arm64
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: arm64
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buildkitd
+        app.kubernetes.io/part-of: ci-builders
+        ci-plane.io/arch: arm64
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # Rootless buildkit needs user namespaces; the default sysctl
+        # ceiling on minimal hosts is too low.
+        - name: enable-userns
+          image: docker.io/library/busybox:1.38
+          command: ["sysctl", "-w", "user.max_user_namespaces=63359"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: buildkitd
+          image: docker.io/moby/buildkit:v0.33.0-rootless
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --oci-worker-no-process-sandbox
+          ports:
+            - name: grpc
+              containerPort: 1234
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: Unconfined
+          readinessProbe:
+            exec:
+              # --addr: buildctl defaults to the unix socket; the daemon
+              # listens on TCP for the runners.
+              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            limits:
+              ephemeral-storage: 10Gi
+              memory: 6Gi
+            requests:
+              cpu: 1000m
+              ephemeral-storage: 2Gi
+              memory: 4Gi
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 50Gi
+
+---
+# Source: ci-builders/templates/buildkitd.yaml
+# Rootless BuildKit: no privileged securityContext. The unconfined
+# seccomp profile is the documented rootless-buildkit requirement —
+# user-namespace isolation replaces the default profile, which blocks
+# the unprivileged clone/mount syscalls rootless depends on.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buildkitd-amd64
+  labels:
+    app.kubernetes.io/name: buildkitd
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  serviceName: buildkitd-amd64
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd
+      ci-plane.io/arch: amd64
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buildkitd
+        app.kubernetes.io/part-of: ci-builders
+        ci-plane.io/arch: amd64
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        # Rootless buildkit needs user namespaces; the default sysctl
+        # ceiling on minimal hosts is too low.
+        - name: enable-userns
+          image: docker.io/library/busybox:1.38
+          command: ["sysctl", "-w", "user.max_user_namespaces=63359"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: buildkitd
+          image: docker.io/moby/buildkit:v0.33.0-rootless
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --oci-worker-no-process-sandbox
+          ports:
+            - name: grpc
+              containerPort: 1234
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: Unconfined
+          readinessProbe:
+            exec:
+              # --addr: buildctl defaults to the unix socket; the daemon
+              # listens on TCP for the runners.
+              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            limits:
+              ephemeral-storage: 10Gi
+              memory: 6Gi
+            requests:
+              cpu: 1000m
+              ephemeral-storage: 2Gi
+              memory: 4Gi
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 50Gi

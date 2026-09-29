@@ -57,7 +57,7 @@ ARG OPKSSH_VERSION=0.16.0
 # cache is never chosen.
 ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
 
-# nix-worker-host-cert (INF host-certificates phase 1): signs the worker's
+# nix-worker-host-cert (host certificates, phase 1): signs the worker's
 # OWN SSH host key with an OpenBao SSH secrets engine, so a client's
 # known_hosts can trust one `@cert-authority` line instead of pinning one
 # host key per architecture. A SIBLING binary to image/nix-worker-client
@@ -116,7 +116,7 @@ RUN apt-get update -qq \
 # `nixremote` is the SSH login the runners present a CA-signed
 # certificate for; it has no password and sshd restricts what it may run.
 #
-# `nix` is a SECOND login (INF host-certificates phase 1): the modern
+# `nix` is a SECOND login (host certificates, phase 1): the modern
 # ssh-ng protocol via `nix-daemon --stdio`, alongside `nixremote`'s legacy
 # `nix-store --serve`. It needs a real shell, not nologin: sshd's
 # ForceCommand execs the forced command through the account's shell

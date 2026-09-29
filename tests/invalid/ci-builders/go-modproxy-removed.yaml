@@ -1,0 +1,11 @@
+# refuses: removed `goModproxy`
+# A key 2.0.0 removed. Failing loudly beats a module proxy that silently
+# stopped existing.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+goModproxy:
+  enabled: false

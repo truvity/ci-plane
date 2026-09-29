@@ -1,0 +1,12 @@
+# The base every CI render of ci-builders starts from (-f, before any
+# --set): the estate facts the chart refuses to render without. Inert for
+# a component that is off.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

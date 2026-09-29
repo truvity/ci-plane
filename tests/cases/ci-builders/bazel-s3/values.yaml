@@ -1,0 +1,13 @@
+# bazel-remote's S3 proxy backend, which is off by default.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+bazelRemote:
+  serviceAccountName: bazel-remote
+  s3:
+    enabled: true
+    bucket: example-bucket
+    region: eu-example-1

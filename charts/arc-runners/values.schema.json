@@ -1,0 +1,210 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "arc-runners chart values",
+  "description": "Open, not strict: only types, and the inputs the chart cannot work without. The estate facts -- the organization, the controller's namespace, and the remote builders' hosts -- have no default.",
+  "type": "object",
+  "required": [
+    "githubConfigUrl",
+    "controllerServiceAccount"
+  ],
+  "properties": {
+    "githubConfigUrl": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The organization this release registers against: https://github.com/<org>."
+    },
+    "githubConfigSecret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "arcVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "controllerServiceAccount": {
+      "type": "object",
+      "required": [
+        "name",
+        "namespace"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the estate installed the ARC controller. No default."
+        }
+      }
+    },
+    "runnerServiceAccountName": {
+      "type": "string"
+    },
+    "runnerImage": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      }
+    },
+    "minRunners": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "maxRunners": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nixBuilders": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "builders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "host",
+              "system",
+              "maxJobs",
+              "speedFactor"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1,
+                "description": "ci-builders' worker Service: nix-worker-<arch>.<namespace>.svc.cluster.local."
+              },
+              "system": {
+                "type": "string",
+                "minLength": 1
+              },
+              "maxJobs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "speedFactor": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "supportedFeatures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mandatoryFeatures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "description": "The remote builders. Required, and non-empty, while nixBuilders is enabled."
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "builders"
+        ],
+        "properties": {
+          "builders": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraEnvFrom": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "packing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "scaleSets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "object",
+          "null"
+        ]
+      }
+    },
+    "janitor": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "graceSeconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

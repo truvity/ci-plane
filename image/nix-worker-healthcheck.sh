@@ -5,7 +5,7 @@ runtime_dir=${NIX_WORKER_RUNTIME_DIR:-/run/nix-worker}
 ssh_dir=${NIX_WORKER_SSH_DIR:-/etc/nix-worker/ssh}
 trusted_user_ca=${NIX_WORKER_TRUSTED_USER_CA_FILE:-/etc/nix-worker/ca/trusted_user_ca_keys}
 
-# Host-certificate freshness (INF host-certificates phase 1): READINESS
+# Host-certificate freshness (host certificates, phase 1): READINESS
 # only, never startup or liveness. A worker whose renewal loop
 # (nix-worker-entrypoint.sh) has stalled still serves every session
 # opened under its still-valid certificate -- killing the pod would drop

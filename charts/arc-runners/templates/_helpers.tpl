@@ -88,7 +88,7 @@ same for both schemes.
 {{- end -}}
 
 {{- /*
-INF host-certificates phase 1. Renders one `@cert-authority` line per
+Host certificates, phase 1. Renders one `@cert-authority` line per
 nixBuilders.knownHosts.certAuthorities entry, joined with newlines; an
 empty list renders "". Appended by nix-worker-client's setup binary to
 the pinned known_hosts Secret content -- both stay valid at once during

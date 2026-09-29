@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Host-certificate freshness in the nix-worker readiness probe (INF
-# host-certificates phase 1), asserted directly against
+# Host-certificate freshness in the nix-worker readiness probe (host
+# certificates, phase 1), asserted directly against
 # image/nix-worker-healthcheck.sh -- no cluster, no running nix-daemon or
 # sshd needed, because that file's own checks live in functions the
 # script only calls from main() (see its BASH_SOURCE guard); sourcing it

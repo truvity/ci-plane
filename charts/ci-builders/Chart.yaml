@@ -8,10 +8,11 @@ description: >-
   re-warm. The Go module proxy used to live here and is now
   truvity/ci-cache.
 type: application
-# version and appVersion are stamped by the release workflow; the
-# committed values are placeholders that helm lint accepts.
-version: 0.0.0-dev
-appVersion: 0.0.0-dev
+# Placeholders: the git tag is the sole version authority. The release
+# workflow (.github/workflows/release.yaml) overwrites both fields from
+# the tag before it packages the chart.
+version: 0.0.0
+appVersion: 0.0.0
 home: https://github.com/truvity/ci-plane
 sources:
   - https://github.com/truvity/ci-plane

@@ -59,9 +59,9 @@ data:
         # `substituters`. Proxying upstream's own nix-cache-info
         # returned Priority 40 -- a tie with cache.nixos.org, which nix
         # broke toward upstream. This cache therefore served almost
-        # nothing while runners pulled ~155 GB/day straight from Fastly
-        # (INF-621). StoreDir MUST match the upstream's or nix rejects
-        # the substituter outright.
+        # nothing while runners pulled ~155 GB/day straight from
+        # Fastly. StoreDir MUST match the upstream's or nix rejects the
+        # substituter outright.
         location = /nix-cache-info {
           default_type text/x-nix-cache-info;
           return 200 "StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 10\n";

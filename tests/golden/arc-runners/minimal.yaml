@@ -1,0 +1,621 @@
+---
+# Source: arc-runners/templates/janitor.yaml
+# arc-runner-janitor: sweeps ephemeral runners stranded by upstream ARC
+# bug actions/actions-runner-controller#4307. GitHub hands each queued
+# job to a runner as a MESSAGE that can be acquired once; when a job is
+# cancelled or interrupted, the acquiring runner fails to clean up and
+# every later runner logs "Job message already acquired" or "job
+# assignment is invalid", then idles forever. The queue stalls beside
+# idle capacity — a signature that reads like a capacity problem and is
+# not one. Namespace-scoped RBAC; deletes ONLY runners that (a) hold no
+# job, (b) match a stuck signature, (c) are older than the grace
+# period. Remove when #4307 ships a fix.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arc-runner-janitor
+  labels:
+    app.kubernetes.io/name: arc-runner-janitor
+    app.kubernetes.io/part-of: arc-runners
+
+---
+# Source: arc-runners/templates/janitor.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arc-runner-janitor-v2
+data:
+  sweep.sh: |
+    #!/bin/sh
+    set -eu
+    GRACE_SECONDS=180
+    NOW=$(date -u +%s)
+    STUCK='Job message already acquired|job assignment is invalid|invalid job assignment'
+    swept=0
+
+    # jq converts the timestamp, not `date`: the image is Alpine, so
+    # `date` is BusyBox, and BusyBox cannot parse ISO-8601 with -d.
+    # jq's fromdateiso8601 is exact and jq is already a dependency.
+    # Collected first, then fed to the loop by HEREDOC rather than by a
+    # pipe. A piped `while` runs in a subshell, so `swept` would be
+    # incremented in a process that exits before anything reads it and the
+    # count at the end would always be 0 -- a number that is worse than no
+    # number, because it looks like an answer. POSIX sh has no process
+    # substitution, and the root filesystem is read-only, so a heredoc is
+    # the way to keep the loop in this shell.
+    idle=$(kubectl get ephemeralrunners -n example -o json \
+      | jq -r '.items[] | select((.status.jobRepositoryName // "") == "")
+               | "\(.metadata.name)\t\(.metadata.creationTimestamp|fromdateiso8601)"')
+
+    while IFS="$(printf '\t')" read -r name created_epoch; do
+        [ -z "$name" ] && continue
+        age=$(( NOW - created_epoch ))
+        if [ "$age" -lt "$GRACE_SECONDS" ]; then
+          echo "skip $name: age ${age}s < grace"
+          continue
+        fi
+        # Read the runner's own log; a pod that is gone or starting has none.
+        if kubectl logs -n example "$name" --tail=200 2>/dev/null \
+             | grep -qE "$STUCK"; then
+          echo "STUCK $name (age ${age}s, no job, signature matched) — deleting"
+          kubectl delete ephemeralrunner -n example "$name" --wait=false || true
+          swept=$((swept+1))
+        else
+          echo "ok $name (age ${age}s, idle, no signature)"
+        fi
+      done <<SWEEP_IDLE
+    $idle
+    SWEEP_IDLE
+
+    # ── second signature: stuck in DELETION ──────────────────────────────
+    #
+    # The sweep above cannot see this class, and deliberately so: it skips
+    # any runner that holds a job, and these hold one. Observed on
+    # truvity 2026-09-24, where it stalled the whole org's CI until a
+    # person stripped the finalizers by hand.
+    #
+    # The shape: a runner's JIT registration is SINGLE-USE. If its first
+    # start fails for any reason -- on that day, the CNI could not assign
+    # the pod an IP -- every restart afterwards is refused with
+    # "Registration ... was not found", and the pod crash-loops. Deleting
+    # it does not help, because the runner-registration finalizer exists
+    # to deregister the runner from GitHub before the object may go, and
+    # that cleanup cannot complete against a registration that is already
+    # gone. So the object can neither run nor die, while still holding the
+    # job GitHub assigned it. Nothing times out. The queue simply stops.
+    #
+    # Stripping the finalizer is safe for exactly the reason it is stuck:
+    # the GitHub-side registration the finalizer wants to remove does not
+    # exist. Nothing is orphaned by letting the object go.
+    #
+    # Gated on the deletion being OLDER than the grace period, so an
+    # ordinary delete -- which completes in well under a second -- is
+    # never touched. Only a deletion that has plainly stopped making
+    # progress qualifies.
+    wedged=$(kubectl get ephemeralrunners -n example -o json \
+      | jq -r '.items[]
+               | select(.metadata.deletionTimestamp != null)
+               | select((.metadata.finalizers // []) | length > 0)
+               | "\(.metadata.name)\t\(.metadata.deletionTimestamp|fromdateiso8601)"')
+
+    while IFS="$(printf '\t')" read -r name deleted_epoch; do
+        [ -z "$name" ] && continue
+        age=$(( NOW - deleted_epoch ))
+        if [ "$age" -lt "$GRACE_SECONDS" ]; then
+          echo "skip $name: deleting for ${age}s < grace"
+          continue
+        fi
+        echo "WEDGED $name (deleting for ${age}s, finalizers still set) — releasing"
+        kubectl patch ephemeralrunner -n example "$name" \
+          --type=merge -p '{"metadata":{"finalizers":null}}' || true
+        swept=$((swept+1))
+      done <<SWEEP_WEDGED
+    $wedged
+    SWEEP_WEDGED
+
+    # Said out loud. A sweep that found nothing and a sweep that could not
+    # see anything print the same empty output otherwise, and the second
+    # is the one worth knowing about.
+    echo "sweep complete ($swept released)"
+
+---
+# Source: arc-runners/templates/nix-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-nix-config-df8643f062aa
+  labels:
+    app.kubernetes.io/name: runner-nix-config
+    app.kubernetes.io/part-of: gha-rs
+data:
+  nix.conf: |
+    filetransfer-retry-attempts = 8
+    filetransfer-retry-delay = 5000
+    filetransfer-retry-delay-rate-limited = 10000
+    filetransfer-retry-max-delay = 60000
+    filetransfer-retry-jitter = true
+    connect-timeout = 30
+    stalled-download-timeout = 300
+    
+immutable: true
+
+---
+# Source: arc-runners/templates/janitor.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arc-runner-janitor
+rules:
+  - apiGroups: ["actions.github.com"]
+    resources: ["ephemeralrunners"]
+    # `patch` is for the second sweep only, which strips a finalizer that
+    # can never complete. It cannot create or edit a runner's spec.
+    verbs: ["get", "list", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+# The controller's per-scale-set manager Role — mirrors the upstream
+# chart: the controller SA needs these in the runner namespace to run
+# ephemeral runners here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: preview-large-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-large
+    app.kubernetes.io/component: manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+# The controller's per-scale-set manager Role — mirrors the upstream
+# chart: the controller SA needs these in the runner namespace to run
+# ephemeral runners here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: preview-medium-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-medium
+    app.kubernetes.io/component: manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+# The controller's per-scale-set manager Role — mirrors the upstream
+# chart: the controller SA needs these in the runner namespace to run
+# ephemeral runners here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: preview-small-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-small
+    app.kubernetes.io/component: manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+
+---
+# Source: arc-runners/templates/janitor.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arc-runner-janitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arc-runner-janitor
+subjects:
+  - kind: ServiceAccount
+    name: arc-runner-janitor
+    namespace: example
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: preview-large-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-large
+    app.kubernetes.io/component: manager-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: preview-large-gha-rs-manager
+subjects:
+  - kind: ServiceAccount
+    name: arc-gha-rs-controller
+    namespace: arc-system
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: preview-medium-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-medium
+    app.kubernetes.io/component: manager-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: preview-medium-gha-rs-manager
+subjects:
+  - kind: ServiceAccount
+    name: arc-gha-rs-controller
+    namespace: arc-system
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: preview-small-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-small
+    app.kubernetes.io/component: manager-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: preview-small-gha-rs-manager
+subjects:
+  - kind: ServiceAccount
+    name: arc-gha-rs-controller
+    namespace: arc-system
+
+---
+# Source: arc-runners/templates/janitor.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: arc-runner-janitor
+  labels:
+    app.kubernetes.io/name: arc-runner-janitor
+    app.kubernetes.io/part-of: arc-runners
+spec:
+  schedule: "*/3 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: arc-runner-janitor
+          restartPolicy: Never
+          enableServiceLinks: false
+          containers:
+            - name: sweep
+              image: docker.io/alpine/k8s:1.37.0
+              command: ["/bin/sh", "/scripts/sweep.sh"]
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                limits:
+                  memory: 128Mi
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: script
+              configMap:
+                name: arc-runner-janitor-v2
+                defaultMode: 0555
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: preview-large
+  labels:
+    app.kubernetes.io/name: preview-large
+    app.kubernetes.io/instance: preview-large
+    app.kubernetes.io/component: autoscaling-runner-set
+    app.kubernetes.io/part-of: gha-rs
+    # The controller's compatibility gate — see values.arcVersion.
+    app.kubernetes.io/version: "0.14.2"
+    actions.github.com/organization: example
+    actions.github.com/scale-set-name: preview-large
+    actions.github.com/scale-set-namespace: example
+  annotations:
+    actions.github.com/runner-group-name: Default
+    actions.github.com/runner-scale-set-name: preview-large
+    actions.github.com/cleanup-manager-role-name: preview-large-gha-rs-manager
+    actions.github.com/cleanup-manager-role-binding: preview-large-gha-rs-manager
+    actions.github.com/values-hash: 17b1beaf7fdf5fc15f07ba03e6fd99d3ced623f2c5ff69017ca7db3b8f16d6d
+spec:
+  githubConfigUrl: https://github.com/example
+  githubConfigSecret: arc-github-app
+  runnerGroup: Default
+  minRunners: 1
+  maxRunners: 8
+  listenerTemplate:
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+      containers:
+        - name: listener
+  template:
+    metadata:
+      # Pod-template labels reach the runner pod verbatim; this one is
+      # what every runner's packing affinity looks for (values.packing).
+      labels:
+        ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  ci-plane.io/packing-group: runners
+              namespaceSelector: {}
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+        - name: runner
+          image: ghcr.io/truvity/ci-plane/runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: GOMAXPROCS
+              value: "4"
+            - name: NIX_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: runner-nix-config-df8643f062aa
+                  key: nix.conf
+          resources:
+            limits:
+              cpu: "4"
+              ephemeral-storage: 40Gi
+              memory: 24Gi
+            requests:
+              cpu: "2"
+              memory: 24Gi
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: preview-medium
+  labels:
+    app.kubernetes.io/name: preview-medium
+    app.kubernetes.io/instance: preview-medium
+    app.kubernetes.io/component: autoscaling-runner-set
+    app.kubernetes.io/part-of: gha-rs
+    # The controller's compatibility gate — see values.arcVersion.
+    app.kubernetes.io/version: "0.14.2"
+    actions.github.com/organization: example
+    actions.github.com/scale-set-name: preview-medium
+    actions.github.com/scale-set-namespace: example
+  annotations:
+    actions.github.com/runner-group-name: Default
+    actions.github.com/runner-scale-set-name: preview-medium
+    actions.github.com/cleanup-manager-role-name: preview-medium-gha-rs-manager
+    actions.github.com/cleanup-manager-role-binding: preview-medium-gha-rs-manager
+    actions.github.com/values-hash: 955fdaaaca659168946338a858cfef85e0c49c3b6603e02a790ef4bd1356c3f
+spec:
+  githubConfigUrl: https://github.com/example
+  githubConfigSecret: arc-github-app
+  runnerGroup: Default
+  minRunners: 1
+  maxRunners: 8
+  listenerTemplate:
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+      containers:
+        - name: listener
+  template:
+    metadata:
+      # Pod-template labels reach the runner pod verbatim; this one is
+      # what every runner's packing affinity looks for (values.packing).
+      labels:
+        ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  ci-plane.io/packing-group: runners
+              namespaceSelector: {}
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+        - name: runner
+          image: ghcr.io/truvity/ci-plane/runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: GOMAXPROCS
+              value: "4"
+            - name: NIX_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: runner-nix-config-df8643f062aa
+                  key: nix.conf
+          resources:
+            limits:
+              cpu: "4"
+              ephemeral-storage: 30Gi
+              memory: 14Gi
+            requests:
+              cpu: "2"
+              memory: 14Gi
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: preview-small
+  labels:
+    app.kubernetes.io/name: preview-small
+    app.kubernetes.io/instance: preview-small
+    app.kubernetes.io/component: autoscaling-runner-set
+    app.kubernetes.io/part-of: gha-rs
+    # The controller's compatibility gate — see values.arcVersion.
+    app.kubernetes.io/version: "0.14.2"
+    actions.github.com/organization: example
+    actions.github.com/scale-set-name: preview-small
+    actions.github.com/scale-set-namespace: example
+  annotations:
+    actions.github.com/runner-group-name: Default
+    actions.github.com/runner-scale-set-name: preview-small
+    actions.github.com/cleanup-manager-role-name: preview-small-gha-rs-manager
+    actions.github.com/cleanup-manager-role-binding: preview-small-gha-rs-manager
+    actions.github.com/values-hash: c72155a2d1bb38ed63e65a9efe97a1c1d7bf8124cefbcfde06baf000c241049
+spec:
+  githubConfigUrl: https://github.com/example
+  githubConfigSecret: arc-github-app
+  runnerGroup: Default
+  minRunners: 1
+  maxRunners: 8
+  listenerTemplate:
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+      containers:
+        - name: listener
+  template:
+    metadata:
+      # Pod-template labels reach the runner pod verbatim; this one is
+      # what every runner's packing affinity looks for (values.packing).
+      labels:
+        ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  ci-plane.io/packing-group: runners
+              namespaceSelector: {}
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+        - name: runner
+          image: ghcr.io/truvity/ci-plane/runner:latest
+          command: ["/home/runner/run.sh"]
+          env:
+            - name: GOMAXPROCS
+              value: "2"
+            - name: NIX_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: runner-nix-config-df8643f062aa
+                  key: nix.conf
+          resources:
+            limits:
+              cpu: "2"
+              ephemeral-storage: 20Gi
+              memory: 6Gi
+            requests:
+              cpu: "1"
+              memory: 6Gi
