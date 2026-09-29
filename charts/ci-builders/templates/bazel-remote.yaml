@@ -18,7 +18,9 @@ metadata:
   name: bazel-remote-data
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: {{ .Values.storageClassName }}
+  {{- with .Values.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
   resources:
     requests:
       storage: {{ $z.size }}

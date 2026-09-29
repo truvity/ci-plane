@@ -53,7 +53,9 @@ scores with `LeastAllocated`, and balanced allocation agrees with it, so
 of all the nodes a runner fits, it lands on the emptiest. Bigger nodes
 do not change this: a pool of nodes that each hold several runners still
 ends up with one idle warm runner per node. And the spread cannot be
-undone afterwards, because runners carry `karpenter.sh/do-not-disrupt`
+undone afterwards on a Karpenter estate, because runners there carry
+`karpenter.sh/do-not-disrupt` (set via `podAnnotations`, empty by chart
+default — see docs/day-1-install.md#values-an-awskarpenter-estate-sets)
 and the autoscaler may not move them to empty a node. On a managed
 control plane the scheduler profile is out of reach, so the fix is in
 the pod spec.

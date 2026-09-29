@@ -125,7 +125,9 @@ metadata:
   name: nix-cache-data
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: {{ .Values.storageClassName }}
+  {{- with .Values.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
   resources:
     requests:
       storage: {{ $n.size }}

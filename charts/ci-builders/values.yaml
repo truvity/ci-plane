@@ -41,12 +41,19 @@ nixWorkerImage:
   digest: "" # sha256:… — stamped at release; empty renders the tag instead
   tag: latest
 
-# Scheduling defaults shared by every component. The upstream defaults
-# are empty; an estate with tainted worker pools sets tolerations here
-# once.
+# Scheduling and storage defaults shared by every component. Empty by
+# default (component contract C13: estate facts are inputs, never
+# defaults) -- an estate with tainted worker pools sets tolerations
+# here once, and an empty storageClassName renders NO
+# `storageClassName` field on a PVC at all, which Kubernetes reads as
+# "use the cluster's default StorageClass". That is not the same as an
+# explicit empty string, which Kubernetes reads as "no class" -- the
+# templates omit the field rather than render it empty. Truvity's own
+# AWS/Karpenter fleet sets `storageClassName: gp3` here; see
+# docs/day-1-install.md#values-an-awskarpenter-estate-sets.
 nodeSelector: {}
 tolerations: []
-storageClassName: gp3
+storageClassName: ""
 
 buildkitd:
   # Rootless BuildKit builders, one single-replica StatefulSet per arch,
@@ -108,10 +115,10 @@ buildkitd:
     # `enabled: false` to run without a policy.
     enabled: true
     consumerNamespaces: []
-  # Annotations for the builder pods. Karpenter estates keep the
-  # default: a builder mid-build is not migratable state.
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"
+  # Annotations for the builder pods. Empty by default (C13); a
+  # Karpenter estate sets `karpenter.sh/do-not-disrupt: "true"` here --
+  # a builder mid-build is not migratable state.
+  podAnnotations: {}
   # Per-arch scheduling override. Empty = the chart default
   # (kubernetes.io/arch selector + the chart-global tolerations). An
   # estate whose arches live on different pools sets each arch's
@@ -280,8 +287,10 @@ nixWorkers:
     # namespaces that may reach the workers (see buildkitd.networkPolicy).
     enabled: true
     consumerNamespaces: []
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"
+  # Empty by default (C13); a Karpenter estate sets
+  # `karpenter.sh/do-not-disrupt: "true"` here, same as buildkitd's
+  # podAnnotations above.
+  podAnnotations: {}
   scheduling:
     arm64: {}
     amd64: {}

@@ -5,6 +5,36 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v4.0.0
+
+**Breaking values: another major.** More estate facts are no longer
+defaults (component contract C13; v3.0.0 already removed the first
+five the same way). Each is now empty by default, and nothing renders
+on it until you set it:
+
+| chart | value | old default | now |
+|---|---|---|---|
+| ci-builders | `storageClassName` | `gp3` | empty (cluster's default StorageClass) |
+| ci-builders | `buildkitd.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` | `{}` |
+| ci-builders | `nixWorkers.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` | `{}` |
+| arc-runners | `tolerations` | `[{key: arch, operator: Exists}, {key: ci, value: "true", effect: NoSchedule}]` | `[]` |
+| arc-runners | `podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` | `{}` |
+| arc-runners | `listenerTolerations` | `[{key: arch, operator: Exists}]` | `[]` |
+
+To upgrade, set each of these to what the old default resolved to in
+your estate, or to its real value. [docs/day-1-install.md](docs/day-1-install.md)
+has the shape, under "Values an AWS/Karpenter estate sets".
+
+- None of these become `required` in `values.schema.json`: the chart
+  works with each left empty (no toleration, no annotation, the
+  cluster's default StorageClass), so C13's schema rule ("required only
+  where the chart cannot work without the value") leaves them optional.
+- `ci-builders`' PVC templates now omit `storageClassName` entirely when
+  it is empty, rather than rendering `storageClassName: ""`, which
+  Kubernetes reads as "no class" rather than "the cluster's default".
+- Golden renders gained an `aws-karpenter` case per chart that sets all
+  six values explicitly, alongside the existing bare-defaults case.
+
 ## v3.0.0
 
 **Breaking values: the next release is a major.** Estate facts are no
