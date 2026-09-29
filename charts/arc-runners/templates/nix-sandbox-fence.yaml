@@ -1,0 +1,121 @@
+{{- /*
+v3.1.0. A Localhost seccomp profile on a node is usable by ANY pod the
+scheduler puts on that node -- baseline pod security admits every
+Localhost profile, whatever it contains -- and nixSandbox's profile is a
+RELAXED one: it lets a container create namespaces and mount, which is
+exactly what makes Nix's sandbox work and exactly what makes the
+profile dangerous in the wrong pod. A pod naming it with hostUsers left
+true would let mount and namespace creation act on the NODE's own
+namespaces, not a contained one.
+
+This ValidatingAdmissionPolicy is the fence: for each scale set that
+turns nixSandbox on, it refuses any Pod, `pods/ephemeralcontainers`
+update (`kubectl debug` on a running pod), Deployment, StatefulSet,
+DaemonSet, ReplicaSet, ReplicationController, Job or CronJob naming that
+set's profile UNLESS the object is a Pod in this release's own
+namespace, carrying that set's `actions.github.com/scale-set-name`
+label (which ARC 0.14.2 copies from the AutoscalingRunnerSet down to
+every runner pod it creates), with `hostUsers: false`. Off by default
+(`nixSandbox.fence.enabled`): the mutation above (hostUsers,
+procMount, seccompProfile on the scale set's own pods) works without
+it, but nothing then stops another pod on the same node from naming the
+same profile file.
+
+`contains`, not equality, on the localhostProfile path: it is a path
+under the kubelet's seccomp root
+(/var/lib/kubelet/seccomp/profiles/<name>), and a relative spelling like
+`profiles/./<name>` or `profiles//<name>` names the same file without
+matching an exact string. Every field is read with optional access
+(`?.`, `orValue`) so no expression can error on a valid object that
+simply omits a field -- under a cluster-wide `failurePolicy: Fail`, an
+expression error would refuse every pod in the cluster, including
+whatever would have fixed it. Pre-1.25 seccomp ANNOTATIONS are not
+checked: the kubelet has ignored them since 1.27.
+
+Ported from opwerm/nexus PR #306 (talos/patches/user-namespaces.yaml,
+kubernetes/infra/raw/arc-runners/nix-sandbox.yaml), which fenced ONE
+hand-written profile for one scale set; this generalises the same
+CEL shape to every sandboxed scale set of the release, one validation
+expression per set, each naming its own profile literal.
+*/ -}}
+{{- if .Values.nixSandbox.fence.enabled }}
+{{- $root := . }}
+{{- $sandboxed := list }}
+{{- range $setName, $p := $root.Values.scaleSets }}
+{{- if $p }}
+{{- $ns := $p.nixSandbox | default (dict) }}
+{{- if $ns.enabled }}
+{{- if not $ns.seccompProfile }}{{ fail (printf "scaleSets.%s.nixSandbox.seccompProfile is required when nixSandbox.enabled" $setName) }}{{ end }}
+{{- $sandboxed = append $sandboxed (dict "name" $setName "profile" $ns.seccompProfile) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if not $sandboxed }}{{ fail "nixSandbox.fence.enabled is true but no scaleSets entry has nixSandbox.enabled -- the fence would protect nothing; turn a set's sandbox on first, or leave the fence off" }}{{ end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  # Cluster-scoped, so the name carries the release: two organizations'
+  # releases in the same cluster must not collide or overwrite each
+  # other's fence.
+  name: {{ $root.Release.Name }}-nix-sandbox-fence
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers, replicationcontrollers]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets, daemonsets, replicasets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs, cronjobs]
+  variables:
+    - name: isPod
+      expression: object.kind == 'Pod'
+    - name: spec
+      expression: >-
+        variables.isPod ? object.spec :
+        object.kind == 'CronJob' ? object.spec.jobTemplate.spec.template.spec :
+        object.spec.template.spec
+    - name: containers
+      expression: >-
+        variables.spec.containers
+        + variables.spec.?initContainers.orValue([])
+        + variables.spec.?ephemeralContainers.orValue([])
+  validations:
+    {{- range $sandboxed }}
+    # {{ .name }}: only a Pod in {{ $root.Release.Namespace }} carrying
+    # this set's scale-set label, with hostUsers: false, may name
+    # {{ .profile }}.
+    - expression: >-
+        !(
+          variables.spec.?securityContext.?seccompProfile.?localhostProfile.orValue('').contains('{{ .profile }}')
+          || variables.containers.exists(c, c.?securityContext.?seccompProfile.?localhostProfile.orValue('').contains('{{ .profile }}'))
+        ) || (
+          variables.isPod
+          && request.namespace == '{{ $root.Release.Namespace }}'
+          && object.metadata.?labels[?'actions.github.com/scale-set-name'].orValue('') == '{{ .name }}'
+          && object.spec.?hostUsers.orValue(true) == false
+        )
+      messageExpression: >-
+        'seccomp profile {{ .profile }} is reserved for {{ $root.Release.Namespace }}/{{ .name }} runner pods with hostUsers: false; refused on '
+        + object.kind + ' ' + request.namespace + '/' + object.metadata.?name.orValue(object.metadata.?generateName.orValue(''))
+      reason: Forbidden
+    {{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $root.Release.Name }}-nix-sandbox-fence
+spec:
+  policyName: {{ $root.Release.Name }}-nix-sandbox-fence
+  validationActions: [Deny]
+{{- end }}

@@ -1,0 +1,30 @@
+# v3.1.0: one dedicated, sandboxed scale set (a big single-node Nix
+# builder) alongside the default profile matrix, which stays
+# unsandboxed. Fence off here -- see the nix-sandbox-fence case for that.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+scaleSets:
+  preview-large: null
+  preview-medium: null
+  preview-small: null
+  nix-builder-arm64:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "4"
+        memory: 16Gi
+      limits:
+        cpu: "8"
+        memory: 16Gi
+        ephemeral-storage: 80Gi
+    nodeSelector:
+      kubernetes.io/hostname: hive-8
+    minRunners: 0
+    maxRunners: 1
+    extraNixConfig: |
+      cores = 0
+      max-jobs = 2
+    nixSandbox:
+      enabled: true
+      seccompProfile: profiles/nix-sandbox.json

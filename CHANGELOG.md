@@ -5,6 +5,96 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v4.1.0 (unreleased)
+
+**arc-runners: one scale set no longer needs a second release to
+differ.** `scaleSets.<name>` now accepts `nodeSelector`, `tolerations`,
+`affinity`, `minRunners`, `podAnnotations`, `extraEnv`, `extraEnvFrom`
+and `extraNixConfig`, each falling back to the release-wide value of the
+same name when unset on that scale set and otherwise REPLACING it
+outright (never merging — an explicitly empty map or list on one set has
+to be reachable even when the release default is non-empty).
+`extraNixConfig` is additive rather than a fallback: it APPENDS to the
+release-wide `nixConfig` for that one set, because Nix's config format
+keeps the LAST occurrence of a scalar key. Additive: a release that sets
+none of these on any scale set renders byte-identical to v4.0.0,
+ConfigMap name and `values-hash` annotation included — proved by golden
+renders of the unchanged `minimal`, `nix-builders` and `aws-karpenter`
+cases plus a new `per-set-overrides` case. See
+[docs/architecture.md](docs/architecture.md#one-different-scale-set-does-not-need-a-second-release).
+
+**arc-runners: Nix's own build sandbox, per scale set
+(`scaleSets.<name>.nixSandbox`).** The runner image's Nix is
+single-user, so with the sandbox off — its default when nothing else
+provides isolation — one derivation's builder can write into another's
+output before it is signed, and read `/proc/<pid>/environ` of every
+other process in the pod, including the runner's own GitHub
+OIDC-token-request variables. This is true on every estate running this
+image today. Enabling `nixSandbox` on a scale set renders `hostUsers:
+false`, `procMount: Unmasked` and a `Localhost` seccomp profile on that
+set's pods, and appends `sandbox = true` / `sandbox-fallback = false` to
+its Nix config (after any `extraNixConfig`, so nothing else can quietly
+re-enable the fallback). `seccompProfile` is required the moment
+`enabled: true`. The chart cannot install the profile file or raise the
+node's `user.max_user_namespaces` — both are node-side facts outside a
+Helm chart's reach — see the new
+[docs/nix-sandbox.md](docs/nix-sandbox.md) and its generator,
+`hack/gen-nix-sandbox-seccomp.sh` (ported from opwerm/nexus PR #306,
+which hand-wrote a stopgap `MutatingAdmissionPolicy` for exactly this
+gap; that stopgap is no longer needed for a new install once this
+release is in use).
+
+A release-wide `nixSandbox.fence.enabled` (default off) renders a
+`ValidatingAdmissionPolicy` that refuses any OTHER pod, in any other
+namespace, without that exact scale set's label, or with `hostUsers`
+left `true`, from naming a sandboxed set's profile — PodSecurity
+`baseline` admits any `Localhost` profile a node happens to carry,
+without ever inspecting what it contains, so the profile file alone
+protects nothing on a shared node pool.
+
+**Both images now bake ONLY `https://cache.nixos.org/` as their Nix
+substituter, not one estate's in-cluster Service.**
+`image/runner/Dockerfile` and `image/nix-worker/Dockerfile` previously
+defaulted `NIX_SUBSTITUTERS` to a fixed in-cluster hostname in a fixed
+namespace — cluster-specific content baked into a public image, and
+stale since ci-builders 2.x stopped requiring that fixed namespace: the
+Nix cache Service now lives in whatever namespace an estate installs
+ci-builders into. arc-runners gains `nixCache.url`, which, when set,
+renders a full `substituters = <url> https://cache.nixos.org/` line into
+the chart's own `NIX_CONFIG` overlay (which already beat the image's
+baked nix.conf) — no rebuilt image needed to point at a different cache,
+ever again.
+
+**This is NOT byte-identical for every existing consumer**, and it
+cannot be: the old default resolved to a real, working cache on at least
+one estate (ours — Truvity's own `ci-cache` namespace), so removing it
+changes behaviour the moment a release picks up the new image.
+Concretely: **before upgrading to an image built from this release, set
+`nixCache.url` to whatever your estate's Nix-cache Service resolves to
+today** (the exact in-cluster DNS name the OLD image baked, which this
+same diff removes from both Dockerfiles — check your own fleet's
+history, or day-1-install.md's install steps, before assuming it matches
+another estate's). Skipping this degrades every Nix
+call on affected runners to fetching straight from cache.nixos.org
+instead of the in-cluster cache — slower (a cold, unwarmed cache pays
+the full upstream transfer instead of a same-cluster hop), never
+broken, and never the retry storm a non-resolving name used to cause
+(architecture.md's "Could not resolve host" measurement): that failure
+mode required the OLD default's name to be absent, and the new default,
+cache.nixos.org, always resolves. Pinned digests on existing chart
+releases are unaffected: only a release that adopts a NEW image build
+after this change needs `nixCache.url` set.
+
+- `charts/arc-runners`, `values.schema.json`: `nixCache` and
+  `nixSandbox.fence` added (types only, open schema, matching the
+  chart's existing convention); no new REQUIRED keys.
+- New golden cases: `per-set-overrides`, `nix-sandbox`,
+  `nix-sandbox-fence`, `nix-cache`. New invalid fixtures:
+  `nix-sandbox-without-profile`, `nix-sandbox-fence-without-sandbox`.
+- `hack/leak-canary.sh`: the Dockerfile-specific allowance for the old
+  baked substituter is removed — the pattern it excused no longer
+  appears in either Dockerfile's default.
+
 ## v4.0.0
 
 **Breaking values: another major.** More estate facts are no longer

@@ -1,0 +1,22 @@
+# refuses: nixSandbox.seccompProfile is required
+# Sandboxing on with no profile named: an admission policy or a node
+# can only ever protect a NAMED profile, so this is refused before it
+# renders a pod asking the kubelet for a Localhost profile with no path.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+scaleSets:
+  preview-large: null
+  preview-medium: null
+  preview-small: null
+  nix-builder-arm64:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    nixSandbox:
+      enabled: true

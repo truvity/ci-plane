@@ -1,0 +1,36 @@
+# v3.1.0: one scale set (preview-small) overriding the release-wide
+# scheduling/env defaults, and appending to nixConfig, while
+# preview-large and preview-medium keep inheriting the release-wide
+# values unchanged -- proving the fallback goes both ways in one render.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nodeSelector:
+  cloud.google.com/gke-nodepool: ci-default
+extraEnv:
+  - name: AWS_ENDPOINT_URL_S3
+    value: https://default.r2.cloudflarestorage.com
+scaleSets:
+  preview-small:
+    nodeSelector:
+      kubernetes.io/hostname: hive-8
+    tolerations: []
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values: ["arm64"]
+    minRunners: 0
+    podAnnotations: {}
+    extraEnv:
+      - name: AWS_ENDPOINT_URL_S3
+        value: https://preview-small.r2.cloudflarestorage.com
+    extraEnvFrom:
+      - secretRef:
+          name: gocache-r2-preview-small
+    extraNixConfig: |
+      cores = 0
+      max-jobs = 2

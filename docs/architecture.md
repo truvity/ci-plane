@@ -46,6 +46,59 @@ Two of those labels are load-bearing, learned the hard way:
   set's rendered inputs change, which is what prompts the controller to
   recycle the listener — same mechanism as upstream.
 
+## One different scale set does not need a second release
+
+Through v3.0.0, everything about a scale set except `gomaxprocs`,
+`resources` and (undocumented, but already read this way)
+`minRunners` was release-wide: `nodeSelector`, `tolerations`,
+`affinity`, `podAnnotations`, `extraEnv`, `extraEnvFrom` and `nixConfig`
+applied identically to every profile in `scaleSets`. An estate that
+needed ONE scale set to differ — a big Nix builder pinned to one node, an
+amd64 set on a dedicated host — had no lever inside this chart for it,
+and paid for the difference with a whole second release of `arc-runners`
+sharing the same GitHub App secret (opwerm's `arc-runners-nix` release is
+exactly this shape).
+
+v3.1.0 adds `scaleSets.<name>.<key>` overrides for each of those keys,
+each REPLACING the release-wide value when set on that one scale set
+(never merging into it — a deep merge would leave no way to ask for an
+explicitly empty map or list on one set while the release default is
+non-empty) and falling back to the release-wide value otherwise. A
+release that sets none of them on any scale set renders BYTE-IDENTICAL
+to before this existed: the ConfigMap, the ConfigMap name and the
+`values-hash` annotation are unaffected unless a scale set actually uses
+a new key (`templates/_helpers.tpl`'s `nixConfigFor`/`nixConfigNameFor`,
+and the conditional `hasKey` guards around `$spec` in
+`templates/runnersets.yaml`, carry the full reasoning). `extraNixConfig`
+is additive rather than a fallback value: it APPENDS to the release-wide
+`nixConfig` for one set only, because Nix keeps the LAST occurrence of a
+scalar key when it reads its config top-to-bottom.
+
+## The Nix sandbox is per scale set, and the chart cannot install its half
+
+`scaleSets.<name>.nixSandbox` (v3.1.0) is the chart-rendered half of
+running Nix's own build sandbox in a pod at all: `hostUsers: false`,
+`procMount: Unmasked` and a `Localhost` seccomp profile on that set's
+pods, plus `sandbox = true`/`sandbox-fallback = false` in its
+`NIX_CONFIG`. The chart cannot install the OTHER half — the profile
+file on the node, and the node's own `user.max_user_namespaces` sysctl —
+because both are node-shaped facts a Helm chart has no channel to. See
+[docs/nix-sandbox.md](nix-sandbox.md) for the full mechanism, the
+estate's checklist, and `nixSandbox.fence.enabled`'s
+`ValidatingAdmissionPolicy`, which exists because a `Localhost` seccomp
+profile is a file ANY pod scheduled on that node can name — PodSecurity
+`baseline` never inspects what the profile actually contains.
+
+This is the chart-side half of opwerm/nexus PR #306's stopgap: that PR
+hand-wrote a `MutatingAdmissionPolicy` to fake `hostUsers`,
+`procMount` and `seccompProfile` onto one scale set's pods because this
+chart could not yet set them, and said so at the time ("the upstream fix
+... truvity/ci-plane arc-runners gains per-scale-set hostUsers,
+podSecurityContext and runnerSecurityContext values"). With this
+release, that stopgap's mutating policy is no longer needed for a new
+install; its Talos node patches (the sysctl and the seccomp profile
+itself) stay either way, because those are node facts, not chart output.
+
 ## Runners pack; they do not spread
 
 Left to the default scheduler, runners SPREAD. `NodeResourcesFit`

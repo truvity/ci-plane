@@ -172,6 +172,29 @@
         "type": "object"
       }
     },
+    "nixCache": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "When set, becomes the first entry of a full `substituters = <url> https://cache.nixos.org/` line rendered into NIX_CONFIG. Empty default: the image's own baked cache.nixos.org-only substituter list stands."
+        }
+      }
+    },
+    "nixSandbox": {
+      "type": "object",
+      "description": "Release-wide switch only. A scale set's own nixSandbox.enabled/seccompProfile live under scaleSets.<name> -- open, not schema-checked here, same as the rest of a scale set's fields -- and are refused at render time instead (templates/runnersets.yaml) when enabled with no profile.",
+      "properties": {
+        "fence": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
     "packing": {
       "type": "object",
       "properties": {

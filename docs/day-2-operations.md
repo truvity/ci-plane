@@ -97,6 +97,17 @@ ephemeral-storage request (breaks scale-from-zero) but a hard limit
 (exceeding it must evict the pod, never the node). A runner killed at
 its cgroup limit uploads no log and reads as a hang — err high.
 
+## The Nix sandbox's seccomp profile
+
+`hack/gen-nix-sandbox-seccomp.sh` regenerates the profile a
+`nixSandbox.enabled` scale set needs whenever the CONTAINERD minor
+version on the nodes it lands on bumps — the default profile it starts
+from grows syscalls over time, and a stale copy denies new ones with
+`EPERM` in a build that used to work. This is a node-side artifact, not
+part of `just check`: regenerate it, review the diff, reinstall it on
+those nodes, and only then bump whatever pin drives the containerd
+version. See [nix-sandbox.md](nix-sandbox.md).
+
 ## Cache operations
 
 Every cache is disposable: delete the PVC, it re-warms. buildkitd's

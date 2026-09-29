@@ -1,0 +1,7 @@
+# v3.1.0: an estate running ci-builders' Nix read-through cache points
+# every runner pod at it without a rebuilt image.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nixCache:
+  url: http://nix-cache.example.svc.cluster.local

@@ -61,15 +61,60 @@ controller to recycle the listener — same mechanism as upstream.
      meaningless (a set that can never run a job). */}}
 {{- $min := $root.Values.minRunners }}
 {{- if hasKey $p "minRunners" }}{{ $min = $p.minRunners }}{{ end }}
-{{- $nixConfig := include "arc-runners.nixConfig" $root }}
-{{- $nixConfigName := include "arc-runners.nixConfigName" $root }}
+{{- /*
+v3.1.0: per-scale-set overrides, each REPLACING the release-wide value
+(not merging into it — a map or list has one obvious "unset" state,
+empty, and a deep merge would leave no way to ask for that) when the
+key is present on this scale set at all. hasKey again, not `default`:
+an explicit `nodeSelector: {}` or `extraEnv: []` on one set must render
+as "nothing", not fall back to the release-wide value because an empty
+map/list looks unset to sprig's `default`. */}}
+{{- $nodeSelector := $root.Values.nodeSelector }}
+{{- if hasKey $p "nodeSelector" }}{{ $nodeSelector = $p.nodeSelector }}{{ end }}
+{{- $tolerations := $root.Values.tolerations }}
+{{- if hasKey $p "tolerations" }}{{ $tolerations = $p.tolerations }}{{ end }}
+{{- $podAnnotations := $root.Values.podAnnotations }}
+{{- if hasKey $p "podAnnotations" }}{{ $podAnnotations = $p.podAnnotations }}{{ end }}
+{{- $extraEnv := $root.Values.extraEnv }}
+{{- if hasKey $p "extraEnv" }}{{ $extraEnv = $p.extraEnv }}{{ end }}
+{{- $extraEnvFrom := $root.Values.extraEnvFrom }}
+{{- if hasKey $p "extraEnvFrom" }}{{ $extraEnvFrom = $p.extraEnvFrom }}{{ end }}
+{{- /*
+nixSandbox is per-set only — there is no release-wide default to fall
+back to, since sandboxing one set says nothing about the others. A
+seccompProfile is required the moment enabled is true: an admission
+policy or a node can only ever protect a NAMED profile, so an empty
+name here would either fail closed everywhere (nothing to fence) or,
+worse, render a pod that asks the kubelet for a Localhost profile with
+no path — a refusal at the kubelet, far from this chart's own error.
+See docs/nix-sandbox.md for what the profile has to contain and how to
+generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
+{{- $nixSandbox := $p.nixSandbox | default (dict) }}
+{{- if $nixSandbox.enabled }}
+{{- if not $nixSandbox.seccompProfile }}{{ fail (printf "scaleSets.%s.nixSandbox.seccompProfile is required when nixSandbox.enabled" $name) }}{{ end }}
+{{- end }}
+{{- $nixConfig := include "arc-runners.nixConfigFor" (dict "root" $root "p" $p) }}
+{{- $nixConfigName := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) }}
 {{- /* Disabled, the hash input is exactly the pre-nixBuilders one, so a
-     release that only carries the (off) feature recycles no listener. */}}
+     release that only carries the (off) feature recycles no listener.
+     The new v3.1.0 keys enter the hash ONLY when this set actually sets
+     them (hasKey / non-empty checks below) — never unconditionally — so
+     a release that uses none of them hashes byte-identically to before
+     this feature existed; that identity is the golden proof for the
+     default case. */}}
 {{- $spec := dict "p" $p "img" (include "arc-runners.runnerImage" $root) "min" $min "max" ($p.maxRunners | default $root.Values.maxRunners) "url" $root.Values.githubConfigUrl "nixConfig" $root.Values.nixConfig }}
 {{- if $root.Values.nixBuilders.enabled }}
 {{- $_ := set $spec "nixBuilders" $root.Values.nixBuilders }}
 {{- $_ := set $spec "nixConfigName" $nixConfigName }}
 {{- end }}
+{{- if hasKey $p "nodeSelector" }}{{ $_ := set $spec "nodeSelector" $nodeSelector }}{{ end }}
+{{- if hasKey $p "tolerations" }}{{ $_ := set $spec "tolerations" $tolerations }}{{ end }}
+{{- if hasKey $p "affinity" }}{{ $_ := set $spec "affinity" $p.affinity }}{{ end }}
+{{- if hasKey $p "podAnnotations" }}{{ $_ := set $spec "podAnnotations" $podAnnotations }}{{ end }}
+{{- if hasKey $p "extraEnv" }}{{ $_ := set $spec "extraEnv" $extraEnv }}{{ end }}
+{{- if hasKey $p "extraEnvFrom" }}{{ $_ := set $spec "extraEnvFrom" $extraEnvFrom }}{{ end }}
+{{- if $p.extraNixConfig }}{{ $_ := set $spec "extraNixConfig" $p.extraNixConfig }}{{ end }}
+{{- if $nixSandbox.enabled }}{{ $_ := set $spec "nixSandbox" $nixSandbox }}{{ end }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -113,7 +158,7 @@ spec:
       labels:
         {{- include "arc-runners.packingLabels" $root | nindent 8 }}
       {{- end }}
-      {{- with $root.Values.podAnnotations }}
+      {{- with $podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -124,15 +169,27 @@ spec:
       {{- if $root.Values.nixBuilders.enabled }}
       automountServiceAccountToken: false
       {{- end }}
-      {{- with $root.Values.nodeSelector }}
+      {{- /*
+      hostUsers: false is the pod-level half of nixSandbox (the other
+      half is the runner container's procMount/seccompProfile below).
+      Only rendered when THIS set asks for it — an unsandboxed set's pod
+      spec carries no hostUsers key at all, exactly as before v3.1.0.
+      Nix's own build sandbox creates a NESTED user namespace per
+      derivation; the pod needs its own first, or the nested one has
+      nowhere to live. See docs/nix-sandbox.md.
+      */}}
+      {{- if $nixSandbox.enabled }}
+      hostUsers: false
+      {{- end }}
+      {{- with $nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $root.Values.tolerations }}
+      {{- with $tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with include "arc-runners.affinity" $root }}
+      {{- with include "arc-runners.affinity" (dict "root" $root "p" $p) }}
       affinity:
         {{- . | nindent 8 }}
       {{- end }}
@@ -177,7 +234,7 @@ spec:
         - name: runner
           image: {{ include "arc-runners.runnerImage" $root }}
           command: ["/home/runner/run.sh"]
-          {{- with $root.Values.extraEnvFrom }}
+          {{- with $extraEnvFrom }}
           # Credentials the runner needs that this chart must not know: an
           # object store with no pod identity wants an access key, and the
           # right place for it is a Secret in the cluster -- delivered by
@@ -187,10 +244,27 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if $nixSandbox.enabled }}
+          # procMount/seccomp are the container-level half of nixSandbox;
+          # hostUsers above is the pod-level half. Baseline pod security
+          # allows procMount: Unmasked only because hostUsers is false
+          # (Kubernetes >=1.35's check_procMount_baseline.go) -- the two
+          # always render together, never one without the other. The
+          # profile itself must already exist on every node this set can
+          # land on (docs/nix-sandbox.md, hack/gen-nix-sandbox-seccomp.sh)
+          # and, ideally, be fenced so only this set's pods can name it
+          # (values.nixSandbox.fence.enabled) -- baseline PSA allows ANY
+          # Localhost profile to ANY pod on the node that has the file.
+          securityContext:
+            procMount: Unmasked
+            seccompProfile:
+              type: Localhost
+              localhostProfile: {{ $nixSandbox.seccompProfile | quote }}
+          {{- end }}
           env:
             - name: GOMAXPROCS
               value: {{ $p.gomaxprocs | quote }}
-            {{- with $root.Values.extraEnv }}
+            {{- with $extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
             {{- if $nixConfig }}
