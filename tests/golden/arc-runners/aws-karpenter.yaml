@@ -407,6 +407,9 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
       containers:
         - name: listener
   template:
@@ -415,7 +418,15 @@ spec:
       # what every runner's packing affinity looks for (values.packing).
       labels:
         ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -477,6 +488,9 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
       containers:
         - name: listener
   template:
@@ -485,7 +499,15 @@ spec:
       # what every runner's packing affinity looks for (values.packing).
       labels:
         ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -547,6 +569,9 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
       containers:
         - name: listener
   template:
@@ -555,7 +580,15 @@ spec:
       # what every runner's packing affinity looks for (values.packing).
       labels:
         ci-plane.io/packing-group: runners
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
+      tolerations:
+        - key: arch
+          operator: Exists
+        - effect: NoSchedule
+          key: ci
+          value: "true"
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

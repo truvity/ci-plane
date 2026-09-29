@@ -435,7 +435,9 @@ spec:
         name: store
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: {{ $.Values.storageClassName }}
+        {{- with $.Values.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
         resources:
           requests:
             storage: {{ $n.storeSize }}

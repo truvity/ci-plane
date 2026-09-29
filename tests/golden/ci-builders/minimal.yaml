@@ -244,7 +244,6 @@ metadata:
   name: bazel-remote-data
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: gp3
   resources:
     requests:
       storage: 10Gi
@@ -257,7 +256,6 @@ metadata:
   name: nix-cache-data
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: gp3
   resources:
     requests:
       storage: 30Gi
@@ -270,7 +268,6 @@ metadata:
   name: npm-cache-data
 spec:
   accessModes: ["ReadWriteOnce"]
-  storageClassName: gp3
   resources:
     requests:
       storage: 20Gi
@@ -608,8 +605,6 @@ spec:
         app.kubernetes.io/name: buildkitd
         app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: arm64
-      annotations:
-        karpenter.sh/do-not-disrupt: "true"
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
@@ -662,7 +657,6 @@ spec:
         name: cache
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: gp3
         resources:
           requests:
             storage: 50Gi
@@ -693,8 +687,6 @@ spec:
         app.kubernetes.io/name: buildkitd
         app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: amd64
-      annotations:
-        karpenter.sh/do-not-disrupt: "true"
     spec:
       nodeSelector:
         kubernetes.io/arch: amd64
@@ -747,7 +739,6 @@ spec:
         name: cache
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: gp3
         resources:
           requests:
             storage: 50Gi

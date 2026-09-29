@@ -68,6 +68,31 @@ Order matters: caches before runners, controller before both charts.
    valid at once during a migration. See
    [architecture.md](architecture.md#worker-host-certificates-phase-1).
 
+## Values an AWS/Karpenter estate sets
+
+Neither chart bakes in a storage class, a toleration or a scheduling
+annotation any more (component contract C13: estate facts are inputs,
+never defaults). Before v4.0.0 these rendered unconditionally as
+Truvity's own AWS/Karpenter shape; now each is empty or absent until you
+set it, and the chart works with each left empty. What Truvity's own
+fleet sets explicitly:
+
+| chart | value | what an AWS/Karpenter estate sets |
+|---|---|---|
+| ci-builders | `storageClassName` | `gp3` |
+| ci-builders | `buildkitd.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
+| ci-builders | `nixWorkers.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
+| arc-runners | `tolerations` | `[{key: arch, operator: Exists}, {key: ci, value: "true", effect: NoSchedule}]` |
+| arc-runners | `podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
+| arc-runners | `listenerTolerations` | `[{key: arch, operator: Exists}]` |
+
+An empty `storageClassName` renders no `storageClassName` field on a PVC
+at all, which Kubernetes reads as "use the cluster's default
+StorageClass" — not the same as an explicit empty string, which
+Kubernetes reads as "no class". A second, non-AWS estate sets its own
+storage class and its own tolerations instead; neither of these has a
+chart default to fall back on.
+
 ## Install the cache plane
 
 ```bash
@@ -92,7 +117,8 @@ rendering it. List your runner namespaces, or set that component's
 Key values (see the chart's values.yaml for the full annotated set):
 `buildkitd.archs`, `buildkitd.scheduling.<arch>` (nodeSelector +
 tolerations per arch, REPLACING the default when set),
-`nixWorkers.scheduling.<arch>`, `storageClassName`,
+`nixWorkers.scheduling.<arch>`, `storageClassName` (empty by default —
+see "Values an AWS/Karpenter estate sets" above),
 `nixCache.upstream`. A Nix worker is privileged so
 its daemon can create Linux sandboxes: enabling it without selecting a
 dedicated, tainted CI/build pool is not a supported production shape.
@@ -152,15 +178,17 @@ queued jobs.
 - One ephemeral pod per job; a warm runner per set (`minRunners: 1`)
   removes the cold-start window that upstream ARC#4307 turns into a
   permanent stall.
-- Run CI pools on-demand, not spot: the `karpenter.sh/do-not-disrupt`
-  annotation stops consolidation, not reclaims.
+- Run CI pools on-demand, not spot: an estate that sets `podAnnotations`
+  to `karpenter.sh/do-not-disrupt: "true"` (see "Values an AWS/Karpenter
+  estate sets" above; empty by default) stops consolidation, not
+  reclaims.
 - Runners prefer nodes that already run runners, across every scale
   set and organization (`packing`, on by default). The same annotation
-  is why: nothing can repack runners after they are scheduled, so they
-  have to be placed together in the first place. It is a preference
-  only, so a full pool still scales out as before. Set
-  `packing.enabled: false` to get the scheduler's default spreading
-  back; a custom `affinity` is merged with it, not replaced.
+  is why packing matters: without it, nothing can repack runners after
+  they are scheduled, so they have to be placed together in the first
+  place. It is a preference only, so a full pool still scales out as
+  before. Set `packing.enabled: false` to get the scheduler's default
+  spreading back; a custom `affinity` is merged with it, not replaced.
 - The `#4307` janitor CronJob ships enabled — it deletes only runners
   that hold no job, match a stuck-log signature, and outlived a grace
   period.

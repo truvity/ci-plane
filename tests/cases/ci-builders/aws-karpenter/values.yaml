@@ -1,0 +1,22 @@
+# The scheduling and storage inputs an AWS/Karpenter estate sets
+# explicitly now that the chart carries no estate-shaped default (C13,
+# v4.0.0). A second, non-AWS estate sets its own storage class and
+# tolerations instead -- see docs/day-1-install.md.
+storageClassName: gp3
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST

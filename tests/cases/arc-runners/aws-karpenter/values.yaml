@@ -1,0 +1,18 @@
+# The scheduling inputs an AWS/Karpenter estate sets explicitly now
+# that the chart carries no estate-shaped default (C13, v4.0.0). A
+# second, non-AWS estate sets its own tolerations instead -- see
+# docs/day-1-install.md.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+tolerations:
+  - key: arch
+    operator: Exists
+  - key: ci
+    value: "true"
+    effect: NoSchedule
+podAnnotations:
+  karpenter.sh/do-not-disrupt: "true"
+listenerTolerations:
+  - key: arch
+    operator: Exists

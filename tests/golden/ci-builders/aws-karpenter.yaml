@@ -59,9 +59,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: arc-runners-example
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: arc-runners-other
       ports:
         - port: 2222
           protocol: TCP
@@ -83,9 +80,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: arc-runners-example
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: arc-runners-other
       ports:
         - port: 2222
           protocol: TCP
@@ -110,16 +104,6 @@ spec:
       ports:
         - port: 4873
           protocol: TCP
-
----
-# Source: ci-builders/templates/nix-workers.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: nix-worker
-  labels:
-    app.kubernetes.io/name: nix-worker
-    app.kubernetes.io/part-of: ci-builders
 
 ---
 # Source: ci-builders/templates/nix-cache.yaml
@@ -277,7 +261,7 @@ immutable: true
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nix-worker-principals-5a4c64498aab
+  name: nix-worker-principals-e3b0c44298fc
   labels:
     app.kubernetes.io/name: nix-worker
     app.kubernetes.io/part-of: ci-builders
@@ -289,7 +273,7 @@ data:
   # exactly backwards from the default this key exists to protect
   # (default empty -> nobody). `quote` on an empty join renders "", which
   # mounts as a genuinely zero-byte file.
-  nix: "ci@example"
+  nix: ""
 immutable: true
 
 ---
@@ -308,31 +292,16 @@ immutable: true
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nix-worker-opkssh-163c4c71c325
+  name: nix-worker-opkssh-cbe5cfdf7c21
   labels:
     app.kubernetes.io/name: nix-worker
     app.kubernetes.io/part-of: ci-builders
 data:
   # Quoted FLOW scalars, for the same "empty must mount zero bytes, not
   # a whitespace line" reason as the principals ConfigMap's `nix` key.
-  providers: "https://access.example opkssh 24h"
-  auth_id: "nix oidc:groups:example.nix-workers.user https://access.example\nadmin oidc:groups:example.nix-workers.admin https://access.example"
+  providers: ""
+  auth_id: ""
 immutable: true
-
----
-# Source: ci-builders/templates/nix-workers.yaml
-# OpenBao's HTTPS issuer CA, decoded once and shared by every
-# architecture's worker (they all sign against the same OpenBao route).
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nix-worker-openbao-ca
-  labels:
-    app.kubernetes.io/name: nix-worker
-    app.kubernetes.io/part-of: ci-builders
-data:
-  ca.crt: |-
-    test
 
 ---
 # Source: ci-builders/templates/npm-cache.yaml
@@ -395,6 +364,7 @@ metadata:
   name: bazel-remote-data
 spec:
   accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
   resources:
     requests:
       storage: 10Gi
@@ -407,6 +377,7 @@ metadata:
   name: nix-cache-data
 spec:
   accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
   resources:
     requests:
       storage: 30Gi
@@ -419,6 +390,7 @@ metadata:
   name: npm-cache-data
 spec:
   accessModes: ["ReadWriteOnce"]
+  storageClassName: gp3
   resources:
     requests:
       storage: 20Gi
@@ -794,6 +766,8 @@ spec:
         app.kubernetes.io/name: buildkitd
         app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: arm64
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       nodeSelector:
         kubernetes.io/arch: arm64
@@ -846,6 +820,7 @@ spec:
         name: cache
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
         resources:
           requests:
             storage: 50Gi
@@ -876,6 +851,8 @@ spec:
         app.kubernetes.io/name: buildkitd
         app.kubernetes.io/part-of: ci-builders
         ci-plane.io/arch: amd64
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       nodeSelector:
         kubernetes.io/arch: amd64
@@ -928,6 +905,7 @@ spec:
         name: cache
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
         resources:
           requests:
             storage: 50Gi
@@ -965,7 +943,7 @@ spec:
         # (nix-worker-entrypoint.sh) are both decided once at container
         # startup, never re-read live, so a running pod's ability to
         # reach `nix` at all is fixed until it restarts.
-        checksum/nix-worker-principals: 5a4c64498aab331f7fa7f055477543671bd23aa1be4d73a1166b0a05297119b8
+        checksum/nix-worker-principals: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         # Same reasoning, for opkssh's own two files: whether THIS arch
         # copies them in is fixed at container start
         # (NIX_WORKER_OPKSSH_ENABLED below), so a provider/group edit --
@@ -974,9 +952,9 @@ spec:
         # just the shared ConfigMap's content: two identical ConfigMaps
         # can still mean different things to an on-list vs. an off-list
         # arch.
-        checksum/nix-worker-opkssh: c95f15b9075512d707b14de6bf3ccb0513d4a63de71c2f63853f0d994ee8f1a3
+        checksum/nix-worker-opkssh: 0ed7f8692ac00abb5ddf552db47df57babe58473b17089521d899078c775643e
+        karpenter.sh/do-not-disrupt: "true"
     spec:
-      serviceAccountName: nix-worker
       automountServiceAccountToken: false
       enableServiceLinks: false
       nodeSelector:
@@ -1008,7 +986,7 @@ spec:
             - name: NIX_WORKER_MAX_FREE_BYTES
               value: "21474836480"
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
-              value: "true"
+              value: "false"
             - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
               value: "true"
             # opkssh (the people pilot): true only for the
@@ -1018,30 +996,6 @@ spec:
             # the same image and the same opkssh-src ConfigMap.
             - name: NIX_WORKER_OPKSSH_ENABLED
               value: "false"
-            - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
-              value: "true"
-            - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
-              value: "12h"
-            - name: NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING
-              value: "2h"
-            - name: NIX_WORKER_CERTIFICATE_TTL
-              value: "24h"
-            - name: NIX_WORKER_OPENBAO_ADDRESS
-              value: "https://openbao.example"
-            - name: NIX_WORKER_OPENBAO_NAMESPACE
-              value: "example"
-            - name: NIX_WORKER_OPENBAO_AUTH_MOUNT
-              value: "jwt-example"
-            - name: NIX_WORKER_OPENBAO_AUTH_ROLE
-              value: "nix-worker"
-            - name: NIX_WORKER_OPENBAO_SSH_MOUNT
-              value: "ssh"
-            - name: NIX_WORKER_OPENBAO_SSH_ROLE
-              value: "host"
-            - name: NIX_WORKER_REQUEST_TIMEOUT
-              value: "15s"
-            - name: NIX_WORKER_HOST_PRINCIPALS
-              value: "nix-worker-arm64.example.svc.cluster.local"
           ports:
             - name: ssh
               containerPort: 2222
@@ -1109,12 +1063,6 @@ spec:
             # script for why leaving it unmounted is not an option).
             - name: opk
               mountPath: /etc/opk
-            - name: openbao-token
-              mountPath: /var/run/secrets/openbao
-              readOnly: true
-            - name: openbao-ca
-              mountPath: /var/run/nix-worker-openbao
-              readOnly: true
       volumes:
         - name: runtime
           emptyDir: {}
@@ -1137,32 +1085,21 @@ spec:
             defaultMode: 0444
         - name: principals
           configMap:
-            name: nix-worker-principals-5a4c64498aab
+            name: nix-worker-principals-e3b0c44298fc
             defaultMode: 0444
         - name: opkssh-src
           configMap:
-            name: nix-worker-opkssh-163c4c71c325
+            name: nix-worker-opkssh-cbe5cfdf7c21
             defaultMode: 0444
         - name: opk
           emptyDir:
             sizeLimit: 1Mi
-        - name: openbao-token
-          projected:
-            defaultMode: 0400
-            sources:
-              - serviceAccountToken:
-                  audience: "openbao"
-                  expirationSeconds: 3600
-                  path: token
-        - name: openbao-ca
-          configMap:
-            name: nix-worker-openbao-ca
-            defaultMode: 0444
   volumeClaimTemplates:
     - metadata:
         name: store
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
         resources:
           requests:
             storage: 100Gi
@@ -1200,7 +1137,7 @@ spec:
         # (nix-worker-entrypoint.sh) are both decided once at container
         # startup, never re-read live, so a running pod's ability to
         # reach `nix` at all is fixed until it restarts.
-        checksum/nix-worker-principals: 5a4c64498aab331f7fa7f055477543671bd23aa1be4d73a1166b0a05297119b8
+        checksum/nix-worker-principals: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         # Same reasoning, for opkssh's own two files: whether THIS arch
         # copies them in is fixed at container start
         # (NIX_WORKER_OPKSSH_ENABLED below), so a provider/group edit --
@@ -1209,9 +1146,9 @@ spec:
         # just the shared ConfigMap's content: two identical ConfigMaps
         # can still mean different things to an on-list vs. an off-list
         # arch.
-        checksum/nix-worker-opkssh: e9534c904e67c72edc49e9512e26cc205a975fef4809e81745887809fc67195d
+        checksum/nix-worker-opkssh: 0ed7f8692ac00abb5ddf552db47df57babe58473b17089521d899078c775643e
+        karpenter.sh/do-not-disrupt: "true"
     spec:
-      serviceAccountName: nix-worker
       automountServiceAccountToken: false
       enableServiceLinks: false
       nodeSelector:
@@ -1243,7 +1180,7 @@ spec:
             - name: NIX_WORKER_MAX_FREE_BYTES
               value: "21474836480"
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
-              value: "true"
+              value: "false"
             - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
               value: "true"
             # opkssh (the people pilot): true only for the
@@ -1252,31 +1189,7 @@ spec:
             # it did before this feature existed, even though it shares
             # the same image and the same opkssh-src ConfigMap.
             - name: NIX_WORKER_OPKSSH_ENABLED
-              value: "true"
-            - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
-              value: "true"
-            - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
-              value: "12h"
-            - name: NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING
-              value: "2h"
-            - name: NIX_WORKER_CERTIFICATE_TTL
-              value: "24h"
-            - name: NIX_WORKER_OPENBAO_ADDRESS
-              value: "https://openbao.example"
-            - name: NIX_WORKER_OPENBAO_NAMESPACE
-              value: "example"
-            - name: NIX_WORKER_OPENBAO_AUTH_MOUNT
-              value: "jwt-example"
-            - name: NIX_WORKER_OPENBAO_AUTH_ROLE
-              value: "nix-worker"
-            - name: NIX_WORKER_OPENBAO_SSH_MOUNT
-              value: "ssh"
-            - name: NIX_WORKER_OPENBAO_SSH_ROLE
-              value: "host"
-            - name: NIX_WORKER_REQUEST_TIMEOUT
-              value: "15s"
-            - name: NIX_WORKER_HOST_PRINCIPALS
-              value: "nix-worker-amd64.example.svc.cluster.local"
+              value: "false"
           ports:
             - name: ssh
               containerPort: 2222
@@ -1344,12 +1257,6 @@ spec:
             # script for why leaving it unmounted is not an option).
             - name: opk
               mountPath: /etc/opk
-            - name: openbao-token
-              mountPath: /var/run/secrets/openbao
-              readOnly: true
-            - name: openbao-ca
-              mountPath: /var/run/nix-worker-openbao
-              readOnly: true
       volumes:
         - name: runtime
           emptyDir: {}
@@ -1372,32 +1279,21 @@ spec:
             defaultMode: 0444
         - name: principals
           configMap:
-            name: nix-worker-principals-5a4c64498aab
+            name: nix-worker-principals-e3b0c44298fc
             defaultMode: 0444
         - name: opkssh-src
           configMap:
-            name: nix-worker-opkssh-163c4c71c325
+            name: nix-worker-opkssh-cbe5cfdf7c21
             defaultMode: 0444
         - name: opk
           emptyDir:
             sizeLimit: 1Mi
-        - name: openbao-token
-          projected:
-            defaultMode: 0400
-            sources:
-              - serviceAccountToken:
-                  audience: "openbao"
-                  expirationSeconds: 3600
-                  path: token
-        - name: openbao-ca
-          configMap:
-            name: nix-worker-openbao-ca
-            defaultMode: 0444
   volumeClaimTemplates:
     - metadata:
         name: store
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
         resources:
           requests:
             storage: 100Gi

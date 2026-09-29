@@ -200,10 +200,12 @@ nixBuilders:
   #       mandatoryFeatures: []
   builders: []
 
-# Runner pod scheduling. The tolerations are no-ops on untainted
-# clusters; estates with tainted worker/CI pools get the doctrine for
-# free. nodeSelector is estate-specific (e.g. a dedicated CI pool).
-# Extra environment for the RUNNER container, both empty by default so an
+# Runner pod scheduling. Empty by default (component contract C13:
+# estate facts are inputs, never defaults) -- nodeSelector and
+# tolerations render only what you set. Truvity's own AWS/Karpenter
+# fleet sets both here; see
+# docs/day-1-install.md#values-an-awskarpenter-estate-sets. Extra
+# environment for the RUNNER container, both empty by default so an
 # existing installation renders byte-identically.
 #
 # THE CASE THIS EXISTS FOR. The Go build cache (setup-devbox's GOCACHEPROG)
@@ -230,17 +232,13 @@ extraEnvFrom: []
 extraEnv: []
 
 nodeSelector: {}
-tolerations:
-  - key: arch
-    operator: Exists
-  - key: ci
-    value: "true"
-    effect: NoSchedule
+tolerations: []
 # A runner mid-job is not migratable state: node-consolidation eviction
-# cancels the run. Jobs end, THEN the node may go. This stops
-# consolidation, not spot reclaim — run CI pools on-demand.
-podAnnotations:
-  karpenter.sh/do-not-disrupt: "true"
+# cancels the run. Jobs end, THEN the node may go. Setting podAnnotations
+# to `{karpenter.sh/do-not-disrupt: "true"}` stops consolidation, not
+# spot reclaim — run CI pools on-demand. Empty by default (C13);
+# Truvity's own AWS/Karpenter fleet sets it.
+podAnnotations: {}
 
 # Runner PACKING: put a new runner on a node that already runs runners,
 # rather than on the emptiest node that fits.
@@ -296,10 +294,10 @@ packing:
 affinity: {}
 
 # The listener long-polls GitHub for jobs; it schedules wherever the
-# controller namespace allows and needs the same arch tolerance.
-listenerTolerations:
-  - key: arch
-    operator: Exists
+# controller namespace allows. Empty by default (C13); an estate whose
+# controller namespace is tainted sets the same tolerations here as
+# `tolerations` above.
+listenerTolerations: []
 
 # The profile matrix. Recipes are not one population: measured on a Go
 # monorepo, linters peak at a flat ~4Gi while a cold build wants ~20Gi;

@@ -110,7 +110,9 @@ spec:
         name: cache
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: {{ $.Values.storageClassName }}
+        {{- with $.Values.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
         resources:
           requests:
             storage: {{ $b.cacheSize }}
