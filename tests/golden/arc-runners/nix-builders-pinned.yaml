@@ -123,7 +123,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: runner-nix-config-293351067710
+  name: runner-nix-config-a20457692b10
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
@@ -443,7 +443,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-large
     actions.github.com/cleanup-manager-role-name: preview-large-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-large-gha-rs-manager
-    actions.github.com/values-hash: fa29afe8f57a334740522d4417b7199d37f5119fe8d0c3b5b66819d9afa9f8e
+    actions.github.com/values-hash: 93aae9d5f806d96a912ae38ac90a819b88d9dc98bbb0f1d31a2d55dd56ab7ef
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -549,7 +549,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-293351067710
+                  name: runner-nix-config-a20457692b10
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -631,7 +631,7 @@ spec:
                 path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-293351067710
+            name: runner-nix-config-a20457692b10
             items:
               - key: machines.template
                 path: machines.template
@@ -684,7 +684,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-medium
     actions.github.com/cleanup-manager-role-name: preview-medium-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-medium-gha-rs-manager
-    actions.github.com/values-hash: fd758f0f3fc5c9b8017c840e66d54b5abe433a09b6ac2d254b0260b1aef1626
+    actions.github.com/values-hash: 80d3170001ecfcbd7c741d0344e19776aeda4cf64acb9dad3587e33a035f28f
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -790,7 +790,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-293351067710
+                  name: runner-nix-config-a20457692b10
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -872,7 +872,7 @@ spec:
                 path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-293351067710
+            name: runner-nix-config-a20457692b10
             items:
               - key: machines.template
                 path: machines.template
@@ -925,7 +925,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-small
     actions.github.com/cleanup-manager-role-name: preview-small-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-small-gha-rs-manager
-    actions.github.com/values-hash: 407ab448985c25033bb7792e57554e4c5734b700a92dfa9a7f706b45d4b239d
+    actions.github.com/values-hash: 67d3ba6ebffa10c47a9246c500824010b661da7628bb50adf917c5447b476ee
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -1031,7 +1031,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-293351067710
+                  name: runner-nix-config-a20457692b10
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -1113,7 +1113,7 @@ spec:
                 path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-293351067710
+            name: runner-nix-config-a20457692b10
             items:
               - key: machines.template
                 path: machines.template
