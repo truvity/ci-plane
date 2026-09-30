@@ -1,16 +1,22 @@
 {{- if .Values.nixWorkers.enabled }}
 {{- $n := .Values.nixWorkers }}
-{{- if not $n.ssh.existingSecret }}{{ fail "nixWorkers.ssh.existingSecret is required when nixWorkers is enabled" }}{{ end }}
-{{- if not $n.ssh.hostPrivateKeyKey }}{{ fail "nixWorkers.ssh.hostPrivateKeyKey is required when nixWorkers is enabled" }}{{ end }}
+{{- /* The static host key is read ONLY on the explicit static-key path
+     (hostCertificate.enabled: false). With a host certificate the
+     worker generates an ephemeral key per pod and mounts no Secret. */}}
+{{- if not $n.hostCertificate.enabled }}
+{{- if not $n.ssh.existingSecret }}{{ fail "nixWorkers.ssh.existingSecret is required when nixWorkers.hostCertificate.enabled is false: without a host certificate clients pin the host key, so it must come from a Secret (with hostCertificate on, the default, each pod generates its own and no Secret is needed)" }}{{ end }}
+{{- if not $n.ssh.hostPrivateKeyKey }}{{ fail "nixWorkers.ssh.hostPrivateKeyKey is required when nixWorkers.hostCertificate.enabled is false" }}{{ end }}
+{{- end }}
 {{- if not $n.ssh.trustedUserCAKeys }}{{ fail "nixWorkers.ssh.trustedUserCAKeys is required when nixWorkers is enabled" }}{{ end }}
 {{- range $key := $n.ssh.trustedUserCAKeys }}{{ if not ($key | trim) }}{{ fail "nixWorkers.ssh.trustedUserCAKeys may not contain an empty key" }}{{ end }}{{ end }}
 {{- if not $n.archs }}{{ fail "nixWorkers.archs is required when nixWorkers is enabled" }}{{ end }}
 {{- if le (int $n.maxJobs) 0 }}{{ fail "nixWorkers.maxJobs must be positive" }}{{ end }}
 {{- if le (int $n.cores) 0 }}{{ fail "nixWorkers.cores must be positive" }}{{ end }}
-{{- /* nixWorkers.accounts.nixremote.enabled: false together with an
-     empty accounts.nix.principals would leave this worker with NO
-     machine login at all -- neither account could ever be reached. */}}
-{{- if and (not $n.accounts.nixremote.enabled) (not $n.accounts.nix.principals) }}{{ fail "nixWorkers.accounts.nixremote.enabled is false and nixWorkers.accounts.nix.principals is empty: this worker would have no machine login at all" }}{{ end }}
+{{- /* An empty accounts.nix.principals leaves this worker with NO
+     machine login at all: `nix` is the only one since v5.0.0 removed
+     the legacy `nixremote`. */}}
+{{- if not $n.accounts.nix.principals }}{{ fail "nixWorkers.accounts.nix.principals is empty: this worker would have no machine login at all (the default is [ci-nix], what arc-runners' nixBuilders.login.principal signs for)" }}{{ end }}
+{{- range $p := $n.accounts.nix.principals }}{{ if not ($p | toString | trim) }}{{ fail "nixWorkers.accounts.nix.principals may not contain an empty principal" }}{{ end }}{{ end }}
 {{- /* opkssh (the people pilot). archs is an allow-list INTO
      $n.archs, not a parallel list of its own -- naming an architecture
      this worker does not run is always a mistake, never a wider render.
@@ -282,8 +288,6 @@ spec:
               value: {{ $n.maxFreeBytes | quote }}
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
               value: {{ $n.accounts.nix.trusted | quote }}
-            - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
-              value: {{ $n.accounts.nixremote.enabled | quote }}
             # opkssh (the people pilot): true only for the
             # architecture(s) named in nixWorkers.opkssh.archs -- every
             # other arch's container gets "false" and renders exactly as
@@ -356,9 +360,15 @@ spec:
               mountPath: /build
             - name: tmp
               mountPath: /tmp
+            {{- if not $n.hostCertificate.enabled }}
+            # The static host key (the explicit static-key path). With a
+            # host certificate the entrypoint generates an ephemeral key
+            # per pod in the runtime emptyDir instead, and nothing is
+            # mounted here.
             - name: ssh
               mountPath: /etc/nix-worker/ssh
               readOnly: true
+            {{- end }}
             - name: trusted-user-ca
               mountPath: /etc/nix-worker/ca
               readOnly: true
@@ -386,14 +396,22 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        # Memory-backed: with a host certificate the worker's ephemeral
+        # host PRIVATE key lives here (nix-worker-entrypoint.sh), and a
+        # key that exists only for the life of the pod has no business
+        # on the node's disk. Everything else here is a few small files
+        # (paths, pids, the principals copy, the runtime sshd_config).
         - name: runtime
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
         - name: build
           emptyDir:
             sizeLimit: {{ $n.buildDirSize }}
         - name: tmp
           emptyDir:
             sizeLimit: 2Gi
+        {{- if not $n.hostCertificate.enabled }}
         - name: ssh
           secret:
             secretName: {{ $n.ssh.existingSecret }}
@@ -401,6 +419,7 @@ spec:
             items:
               - key: {{ $n.ssh.hostPrivateKeyKey }}
                 path: ssh_host_ed25519_key
+        {{- end }}
         - name: trusted-user-ca
           configMap:
             name: {{ $caName }}

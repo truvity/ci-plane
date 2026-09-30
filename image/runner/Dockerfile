@@ -236,27 +236,20 @@ RUN ARCH=$(dpkg --print-architecture) \
  && accessctl --version \
  && r2broker --version
 
-# The same manifest also serves dedicated Nix workers when Kubernetes
-# overrides the command. ARC keeps the upstream runner command and user.
-# Worker-only packages and accounts are inert in ordinary job pods.
+# The nixbld accounts are what a multi-user nix daemon builds as; kept
+# from the days this manifest also served the Nix workers (split into
+# image/nix-worker on 2026-09-24), because the single-user install below
+# has always run with them present. v5.0.0 removed the rest of that
+# worker role from this image -- the `nixremote` login, sshd's config and
+# the worker scripts -- together with the chart's fallback that could
+# still run a worker on it.
 RUN groupadd --system nixbld \
  && for i in $(seq 1 32); do \
       useradd --system --gid nixbld --home-dir /var/empty \
         --shell /usr/sbin/nologin "nixbld${i}"; \
     done \
  && nixbld_members=$(for i in $(seq 1 32); do printf 'nixbld%s,' "$i"; done) \
- && gpasswd -M "${nixbld_members%,}" nixbld \
- && useradd --system --create-home --home-dir /home/nixremote \
-      --shell /bin/bash nixremote \
- && passwd -d nixremote \
- && mkdir -p /etc/nix-worker /run/sshd \
- && chmod 0755 /run/sshd
-
-COPY --chmod=0755 nix-worker-seed.sh /usr/local/bin/nix-worker-seed
-COPY --chmod=0755 nix-worker-entrypoint.sh /usr/local/bin/nix-worker-entrypoint
-COPY --chmod=0755 nix-worker-ssh-command.sh /usr/local/bin/nix-worker-ssh-command
-COPY --chmod=0755 nix-worker-healthcheck.sh /usr/local/bin/nix-worker-healthcheck
-COPY --chmod=0644 sshd_config /etc/nix-worker/sshd_config
+ && gpasswd -M "${nixbld_members%,}" nixbld
 
 USER runner
 # Docker's USER directive sets the uid, not the environment — nix's
@@ -305,16 +298,5 @@ RUN NIX_CONFIG="filter-syscalls = false" \
       'experimental-features = nix-command flakes' \
       "substituters = ${NIX_SUBSTITUTERS}" \
       > /home/runner/.config/nix/nix.conf
-
-# The worker mounts its PVC at /nix, hiding the profile links created by
-# the installer. Preserve multicall aliases outside /nix; their targets
-# are in the Nix closure seeded onto each worker PVC.
-USER root
-RUN mkdir -p /usr/local/libexec/nix-worker \
- && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-daemon)" \
-      /usr/local/libexec/nix-worker/nix-daemon \
- && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-store)" \
-      /usr/local/libexec/nix-worker/nix-store
-USER runner
 
 ENV PATH="/home/runner/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"

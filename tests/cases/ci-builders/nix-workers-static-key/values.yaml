@@ -1,0 +1,21 @@
+# The explicit static-key path: no host certificate, so clients pin the
+# host key, which therefore comes from a Secret (arc-runners'
+# nixBuilders.knownHosts.pinned: true on the other side). No OpenBao
+# route, ServiceAccount or projected token is rendered.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  archs: [amd64]
+  ssh:
+    existingSecret: nix-builder-server
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  hostCertificate:
+    enabled: false

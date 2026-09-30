@@ -1,0 +1,24 @@
+# refuses: nixWorkerImage.repository is required
+# v5.0.0 removed the fallback to runnerImage: the runner image no longer
+# carries the worker role.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkerImage:
+  repository: ""
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker

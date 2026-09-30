@@ -119,8 +119,10 @@ upstream when down.
 ## Persistent Nix worker operations
 
 The workers are CI-only. Diagnose them from an in-cluster Job or a
-manually dispatched ARC workflow. Each private key is unique to one pod
-and never persisted in a Kubernetes Secret, but trusted workflow code
+manually dispatched ARC workflow. Each client private key is unique to
+one runner pod, each host private key (with host certificates, the
+default) to one worker pod, and neither is persisted in a Kubernetes
+Secret, but trusted workflow code
 can read and copy it from `/home/runner/.ssh`, and read the projected
 token the job-started hook signs with; namespace ingress, the one-hour
 certificate lifetime and the single-job pod bound that accepted CI-only
@@ -132,8 +134,10 @@ Each architecture owns a disposable persistent store. Deleting its PVC
 loses reuse but not source artifacts; the init container reseeds the Nix
 runtime closure and later CI jobs warm it again. Worker readiness checks
 the daemon socket, daemon PID, sshd PID, trusted client CA and local SSH
-port. An SSH connection is not sufficient proof: verify a remote
-derivation and copied-back output.
+port, and -- with host certificates -- that the current certificate
+certifies this pod's own host key with at least `minRemaining` left
+(readiness only). An SSH connection is not sufficient proof: verify a
+remote derivation and copied-back output.
 
 ### Signer outage and authorization failures
 
@@ -195,16 +199,26 @@ the same key never gets that far).
 
 ### Host-key rotation
 
-Host rotation is independent from the client CA and affects both
-organizations. It requires a maintenance window because sshd loads its
-host private key only at process start. First add the new host public key
-alongside the old one in both namespace-local `known_hosts` values,
-bump `nixBuilders.knownHosts.revision`, and verify ARC has recycled every
-warm runner before changing the server key. Then update the server host
-key, sync its Secret,
-and restart both worker StatefulSets. Smoke both organizations and
-architectures before removing the old `known_hosts` entries. Roll back by
-restoring the previous server key and restarting both StatefulSets.
+With host certificates (the default since v5.0.0) there is nothing to
+rotate: every worker pod generates its own ephemeral host key at start,
+so restarting a StatefulSet IS a host-key rotation, needs no window, and
+clients notice nothing -- they trust the host CA, not the key. What can
+need rotating is the host CA itself: the same two-step as the user CA
+above. Add the new CA's public key as a second
+`nixBuilders.knownHosts.certAuthorities` entry, let ARC recycle every
+warm runner, move the workers' signing to the new CA (their next
+restart or renewal picks it up), and only then remove the old entry.
+
+The explicit static-key path (`nixWorkers.hostCertificate.enabled:
+false`) keeps the old procedure and its maintenance window, because sshd
+loads its host private key only at process start. First add the new
+host public key alongside the old one in both namespace-local
+`known_hosts` values, bump `nixBuilders.knownHosts.revision`, and verify
+ARC has recycled every warm runner before changing the server key. Then
+update the server host key, sync its Secret, and restart both worker
+StatefulSets. Smoke both organizations and architectures before removing
+the old `known_hosts` entries. Roll back by restoring the previous
+server key and restarting both StatefulSets.
 
 ## npm read-through (verdaccio)
 

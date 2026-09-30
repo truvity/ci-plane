@@ -122,7 +122,7 @@ nixCache:
 # Optional persistent remote builders. Each runner pod creates an
 # ephemeral Ed25519 key and exchanges a narrowly projected ServiceAccount
 # JWT for a short-lived OpenBao SSH user certificate. The estate supplies
-# only pinned host identity and OpenBao routing/CA data; no client private
+# only the workers' host CA and OpenBao routing/CA data; no client private
 # key enters a Kubernetes Secret. If signing is unavailable, setup
 # publishes an empty machines file and ordinary local Nix builds remain.
 #
@@ -131,62 +131,56 @@ nixCache:
 # because a certificate lives at most one hour and a warm pod idles longer.
 nixBuilders:
   enabled: false
-  # DEPRECATED, kept as a non-breaking alias for `login.user` below;
-  # removal in a later release. Setting only this (its default,
-  # unchanged) renders exactly as before login.* existed. Setting BOTH
-  # this and `login.user` to values that disagree is a render-time
-  # failure (templates/runnersets.yaml) rather than a silent pick of
-  # one; setting both to the SAME value is fine. New installs should set
-  # `login.user` only.
-  sshUser: nixremote
   # The machine login: which SSH account a runner connects to on the
   # worker, which certificate principal it asks OpenBao to sign for, and
-  # which store protocol the connection speaks. `user` absorbs the
-  # deprecated top-level `sshUser` above (kept for the one existing
-  # consumer that already sets it) so the three travel together going
-  # forward: switching protocol without also moving principal is a
-  # certificate that authenticates as the wrong account.
+  # which store protocol the connection speaks. They travel together:
+  # switching protocol without also moving principal is a certificate
+  # that authenticates as the wrong account.
   #
-  # Defaults are today's shape unchanged: the legacy `nixremote` account,
-  # speaking the classic `ssh://` store protocol (`nix-store --serve`,
-  # ci-builders' nixWorkers.ssh). A cut-over to the modern protocol sets:
-  #
-  #   login:
-  #     user: nix          # ci-builders' second login (nixWorkers.accounts.nix)
-  #     principal: ci-nix  # must be in that account's `principals` list
-  #     protocol: ssh-ng   # nix-daemon --stdio, not nix-store --serve
+  # v5.0.0 defaults are the only login ci-builders' workers still have:
+  # the `nix` account (nixWorkers.accounts.nix), principal ci-nix (in
+  # that account's default `principals`), over ssh-ng (nix-daemon
+  # --stdio). The legacy `nixremote` account over ssh:// is gone, and so
+  # is the deprecated top-level `sshUser` alias for `login.user` --
+  # setting it is a render-time failure (templates/removed-values.yaml).
   #
   # `principal` need not equal `user`: the OS account is always literally
   # `nix`, but AuthorizedPrincipalsFile can require a narrower principal
   # name than the account itself.
   login:
-    user: nixremote
-    principal: nixremote
-    # "ssh" (default) or "ssh-ng". nix-worker-client validates whatever
+    user: nix
+    principal: ci-nix
+    # "ssh-ng" (default) or "ssh". nix-worker-client validates whatever
     # certificate comes back against this: under "ssh-ng" a force-command
     # critical option, if the signing role's grant adds one, must equal
     # exactly "nix-daemon --stdio" (what ci-builders' `Match User nix`
     # block already forces server-side) or remote builders are refused
     # rather than installed with a certificate that cannot work.
-    protocol: ssh
+    protocol: ssh-ng
   knownHosts:
     existingSecret: nix-builder-known-hosts
     key: known_hosts
     # Bump whenever Secret contents change; participates in the immutable
     # ConfigMap and ARC values hashes, recycling warm runners deterministically.
+    # Required only while `pinned` is true.
     revision: ""
-    # true (default): pin each worker's static host key from the Secret
-    # above, same as always. false: do NOT mount that Secret at all --
-    # known_hosts is built ENTIRELY from certAuthorities below, so a
-    # build reaches a worker only by trusting the CA that signs its host
-    # certificate (ci-builders' nixWorkers.hostCertificate), never a
-    # fixed key. Refused at render time with an empty certAuthorities
-    # list below: that combination would trust nothing and break every
+    # false (default since v5.0.0): known_hosts is built ENTIRELY from
+    # certAuthorities below, so a build reaches a worker only by trusting
+    # the CA that signs its host certificate (ci-builders'
+    # nixWorkers.hostCertificate, on by default, with an ephemeral host
+    # key per pod -- there is no stable key to pin), and the Secret above
+    # is never mounted. Refused at render time with an empty
+    # certAuthorities list: that would trust nothing and break every
     # build (templates/runnersets.yaml).
-    pinned: true
-    # ADDED to the pinned known_hosts above when pinned is true, or the
-    # WHOLE of known_hosts when pinned is false. Each entry renders one
-    # line:
+    #
+    # true: the explicit static-key path, for workers running with
+    # nixWorkers.hostCertificate.enabled: false -- each worker's static
+    # host key is pinned from the Secret above (existingSecret, key and
+    # revision then required), and any certAuthorities are ADDED to it.
+    pinned: false
+    # The WHOLE of known_hosts while pinned is false (the default), or
+    # ADDED to the pinned content when pinned is true. Each entry renders
+    # one line:
     #
     #   @cert-authority <hosts, comma-joined> <key>
     #
@@ -194,8 +188,8 @@ nixBuilders:
     # principals for (ci-builders' nixWorkers.hostCertificate renders
     # `nix-worker-<arch>.<namespace>.svc.cluster.local` per architecture);
     # `key` is the CA's own SSH public key (ssh-ed25519 ...), NOT a host
-    # key. Default empty: the rendered ConfigMap key exists but is empty,
-    # so an install that has not migrated renders known_hosts unchanged.
+    # key. Empty by default, and therefore REQUIRED while nixBuilders is
+    # enabled with pinned false: the CA is an estate fact.
     certAuthorities: []
     #   - hosts:
     #       - "*.<namespace>.svc.cluster.local"
@@ -212,7 +206,7 @@ nixBuilders:
     authMount: ""
     authRole: "" # REQUIRED when enabled: the login role bound to runnerServiceAccountName
     sshMount: ssh # the SSH secrets engine mount
-    sshRole: user # its signing role; must allow principal login.principal
+    sshRole: ci-nix # its signing role; must allow principal login.principal
     audience: openbao
     tokenExpirationSeconds: 600
     # 5m..1h. The signing role caps certificates at one hour; a value above

@@ -15,3 +15,6 @@ still a caller who believes this chart owns their module proxy.
 {{- if hasKey .Values "goModproxy" }}
 {{- fail "ci-builders 2.0.0 removed `goModproxy`. The Go module proxy is now its own product: truvity/ci-cache, chart oci://ghcr.io/truvity/charts/ci-cache-server, which caches the Go BUILD cache as well as modules and is not AWS-only. Delete the goModproxy block from your values and install that chart instead." }}
 {{- end }}
+{{- if hasKey ((.Values.nixWorkers | default dict).accounts | default dict) "nixremote" }}
+{{- fail "ci-builders 5.0.0 removed `nixWorkers.accounts.nixremote`: the legacy `nixremote` login (nix-store --serve) and its shim are gone from the worker image, and `nix` over ssh-ng is the only machine login. Delete the nixremote block from your values; runners connect as nixBuilders.login.user=nix, principal ci-nix, protocol ssh-ng (arc-runners 5.0.0's defaults)." }}
+{{- end }}

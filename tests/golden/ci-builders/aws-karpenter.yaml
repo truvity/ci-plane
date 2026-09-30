@@ -106,6 +106,16 @@ spec:
           protocol: TCP
 
 ---
+# Source: ci-builders/templates/nix-workers.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nix-worker
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+
+---
 # Source: ci-builders/templates/nix-cache.yaml
 # nix-cache: transparent read-through cache of the nix upstream,
 # consumed as an ordinary HTTP SUBSTITUTER — not an HTTP_PROXY (a
@@ -261,7 +271,7 @@ immutable: true
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nix-worker-principals-e3b0c44298fc
+  name: nix-worker-principals-a798b637df11
   labels:
     app.kubernetes.io/name: nix-worker
     app.kubernetes.io/part-of: ci-builders
@@ -273,7 +283,7 @@ data:
   # exactly backwards from the default this key exists to protect
   # (default empty -> nobody). `quote` on an empty join renders "", which
   # mounts as a genuinely zero-byte file.
-  nix: ""
+  nix: "ci-nix"
 immutable: true
 
 ---
@@ -302,6 +312,21 @@ data:
   providers: ""
   auth_id: ""
 immutable: true
+
+---
+# Source: ci-builders/templates/nix-workers.yaml
+# OpenBao's HTTPS issuer CA, decoded once and shared by every
+# architecture's worker (they all sign against the same OpenBao route).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nix-worker-openbao-ca
+  labels:
+    app.kubernetes.io/name: nix-worker
+    app.kubernetes.io/part-of: ci-builders
+data:
+  ca.crt: |-
+    test
 
 ---
 # Source: ci-builders/templates/npm-cache.yaml
@@ -943,7 +968,7 @@ spec:
         # (nix-worker-entrypoint.sh) are both decided once at container
         # startup, never re-read live, so a running pod's ability to
         # reach `nix` at all is fixed until it restarts.
-        checksum/nix-worker-principals: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        checksum/nix-worker-principals: a798b637df11906f2e69355c79da09987469590b11dd940719bb9d9a87a89205
         # Same reasoning, for opkssh's own two files: whether THIS arch
         # copies them in is fixed at container start
         # (NIX_WORKER_OPKSSH_ENABLED below), so a provider/group edit --
@@ -955,6 +980,7 @@ spec:
         checksum/nix-worker-opkssh: 0ed7f8692ac00abb5ddf552db47df57babe58473b17089521d899078c775643e
         karpenter.sh/do-not-disrupt: "true"
     spec:
+      serviceAccountName: nix-worker
       automountServiceAccountToken: false
       enableServiceLinks: false
       nodeSelector:
@@ -986,8 +1012,6 @@ spec:
             - name: NIX_WORKER_MAX_FREE_BYTES
               value: "21474836480"
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
-              value: "false"
-            - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
               value: "true"
             # opkssh (the people pilot): true only for the
             # architecture(s) named in nixWorkers.opkssh.archs -- every
@@ -996,6 +1020,30 @@ spec:
             # the same image and the same opkssh-src ConfigMap.
             - name: NIX_WORKER_OPKSSH_ENABLED
               value: "false"
+            - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
+              value: "true"
+            - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
+              value: "12h"
+            - name: NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING
+              value: "2h"
+            - name: NIX_WORKER_CERTIFICATE_TTL
+              value: "24h"
+            - name: NIX_WORKER_OPENBAO_ADDRESS
+              value: "https://openbao.example"
+            - name: NIX_WORKER_OPENBAO_NAMESPACE
+              value: "example"
+            - name: NIX_WORKER_OPENBAO_AUTH_MOUNT
+              value: "jwt-example"
+            - name: NIX_WORKER_OPENBAO_AUTH_ROLE
+              value: "nix-worker"
+            - name: NIX_WORKER_OPENBAO_SSH_MOUNT
+              value: "ssh"
+            - name: NIX_WORKER_OPENBAO_SSH_ROLE
+              value: "host"
+            - name: NIX_WORKER_REQUEST_TIMEOUT
+              value: "15s"
+            - name: NIX_WORKER_HOST_PRINCIPALS
+              value: "nix-worker-arm64.example.svc.cluster.local"
           ports:
             - name: ssh
               containerPort: 2222
@@ -1042,9 +1090,6 @@ spec:
               mountPath: /build
             - name: tmp
               mountPath: /tmp
-            - name: ssh
-              mountPath: /etc/nix-worker/ssh
-              readOnly: true
             - name: trusted-user-ca
               mountPath: /etc/nix-worker/ca
               readOnly: true
@@ -1063,29 +1108,35 @@ spec:
             # script for why leaving it unmounted is not an option).
             - name: opk
               mountPath: /etc/opk
+            - name: openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: openbao-ca
+              mountPath: /var/run/nix-worker-openbao
+              readOnly: true
       volumes:
+        # Memory-backed: with a host certificate the worker's ephemeral
+        # host PRIVATE key lives here (nix-worker-entrypoint.sh), and a
+        # key that exists only for the life of the pod has no business
+        # on the node's disk. Everything else here is a few small files
+        # (paths, pids, the principals copy, the runtime sshd_config).
         - name: runtime
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
         - name: build
           emptyDir:
             sizeLimit: 40Gi
         - name: tmp
           emptyDir:
             sizeLimit: 2Gi
-        - name: ssh
-          secret:
-            secretName: nix-builder-server
-            defaultMode: 0400
-            items:
-              - key: ssh_host_ed25519_key
-                path: ssh_host_ed25519_key
         - name: trusted-user-ca
           configMap:
             name: nix-worker-trusted-user-ca-505c1089d201
             defaultMode: 0444
         - name: principals
           configMap:
-            name: nix-worker-principals-e3b0c44298fc
+            name: nix-worker-principals-a798b637df11
             defaultMode: 0444
         - name: opkssh-src
           configMap:
@@ -1094,6 +1145,18 @@ spec:
         - name: opk
           emptyDir:
             sizeLimit: 1Mi
+        - name: openbao-token
+          projected:
+            defaultMode: 0400
+            sources:
+              - serviceAccountToken:
+                  audience: "openbao"
+                  expirationSeconds: 3600
+                  path: token
+        - name: openbao-ca
+          configMap:
+            name: nix-worker-openbao-ca
+            defaultMode: 0444
   volumeClaimTemplates:
     - metadata:
         name: store
@@ -1137,7 +1200,7 @@ spec:
         # (nix-worker-entrypoint.sh) are both decided once at container
         # startup, never re-read live, so a running pod's ability to
         # reach `nix` at all is fixed until it restarts.
-        checksum/nix-worker-principals: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        checksum/nix-worker-principals: a798b637df11906f2e69355c79da09987469590b11dd940719bb9d9a87a89205
         # Same reasoning, for opkssh's own two files: whether THIS arch
         # copies them in is fixed at container start
         # (NIX_WORKER_OPKSSH_ENABLED below), so a provider/group edit --
@@ -1149,6 +1212,7 @@ spec:
         checksum/nix-worker-opkssh: 0ed7f8692ac00abb5ddf552db47df57babe58473b17089521d899078c775643e
         karpenter.sh/do-not-disrupt: "true"
     spec:
+      serviceAccountName: nix-worker
       automountServiceAccountToken: false
       enableServiceLinks: false
       nodeSelector:
@@ -1180,8 +1244,6 @@ spec:
             - name: NIX_WORKER_MAX_FREE_BYTES
               value: "21474836480"
             - name: NIX_WORKER_ACCOUNTS_NIX_TRUSTED
-              value: "false"
-            - name: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED
               value: "true"
             # opkssh (the people pilot): true only for the
             # architecture(s) named in nixWorkers.opkssh.archs -- every
@@ -1190,6 +1252,30 @@ spec:
             # the same image and the same opkssh-src ConfigMap.
             - name: NIX_WORKER_OPKSSH_ENABLED
               value: "false"
+            - name: NIX_WORKER_HOST_CERTIFICATE_ENABLED
+              value: "true"
+            - name: NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY
+              value: "12h"
+            - name: NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING
+              value: "2h"
+            - name: NIX_WORKER_CERTIFICATE_TTL
+              value: "24h"
+            - name: NIX_WORKER_OPENBAO_ADDRESS
+              value: "https://openbao.example"
+            - name: NIX_WORKER_OPENBAO_NAMESPACE
+              value: "example"
+            - name: NIX_WORKER_OPENBAO_AUTH_MOUNT
+              value: "jwt-example"
+            - name: NIX_WORKER_OPENBAO_AUTH_ROLE
+              value: "nix-worker"
+            - name: NIX_WORKER_OPENBAO_SSH_MOUNT
+              value: "ssh"
+            - name: NIX_WORKER_OPENBAO_SSH_ROLE
+              value: "host"
+            - name: NIX_WORKER_REQUEST_TIMEOUT
+              value: "15s"
+            - name: NIX_WORKER_HOST_PRINCIPALS
+              value: "nix-worker-amd64.example.svc.cluster.local"
           ports:
             - name: ssh
               containerPort: 2222
@@ -1236,9 +1322,6 @@ spec:
               mountPath: /build
             - name: tmp
               mountPath: /tmp
-            - name: ssh
-              mountPath: /etc/nix-worker/ssh
-              readOnly: true
             - name: trusted-user-ca
               mountPath: /etc/nix-worker/ca
               readOnly: true
@@ -1257,29 +1340,35 @@ spec:
             # script for why leaving it unmounted is not an option).
             - name: opk
               mountPath: /etc/opk
+            - name: openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: openbao-ca
+              mountPath: /var/run/nix-worker-openbao
+              readOnly: true
       volumes:
+        # Memory-backed: with a host certificate the worker's ephemeral
+        # host PRIVATE key lives here (nix-worker-entrypoint.sh), and a
+        # key that exists only for the life of the pod has no business
+        # on the node's disk. Everything else here is a few small files
+        # (paths, pids, the principals copy, the runtime sshd_config).
         - name: runtime
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
         - name: build
           emptyDir:
             sizeLimit: 40Gi
         - name: tmp
           emptyDir:
             sizeLimit: 2Gi
-        - name: ssh
-          secret:
-            secretName: nix-builder-server
-            defaultMode: 0400
-            items:
-              - key: ssh_host_ed25519_key
-                path: ssh_host_ed25519_key
         - name: trusted-user-ca
           configMap:
             name: nix-worker-trusted-user-ca-505c1089d201
             defaultMode: 0444
         - name: principals
           configMap:
-            name: nix-worker-principals-e3b0c44298fc
+            name: nix-worker-principals-a798b637df11
             defaultMode: 0444
         - name: opkssh-src
           configMap:
@@ -1288,6 +1377,18 @@ spec:
         - name: opk
           emptyDir:
             sizeLimit: 1Mi
+        - name: openbao-token
+          projected:
+            defaultMode: 0400
+            sources:
+              - serviceAccountToken:
+                  audience: "openbao"
+                  expirationSeconds: 3600
+                  path: token
+        - name: openbao-ca
+          configMap:
+            name: nix-worker-openbao-ca
+            defaultMode: 0444
   volumeClaimTemplates:
     - metadata:
         name: store

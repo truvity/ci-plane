@@ -123,7 +123,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: runner-nix-config-f3023255fffb
+  name: runner-nix-config-293351067710
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
@@ -142,9 +142,8 @@ data:
   machines.template: |-
     
     ssh-ng://nix@nix-worker-amd64.example.svc.cluster.local x86_64-linux /home/runner/.ssh/nix-builder 2 1 - -
-    ssh-ng://nix@nix-worker-arm64.example.svc.cluster.local aarch64-linux /home/runner/.ssh/nix-builder 2 1 - -
   ssh_config: |-
-    Host nix-worker-amd64.example.svc.cluster.local nix-worker-arm64.example.svc.cluster.local
+    Host nix-worker-amd64.example.svc.cluster.local
       BatchMode yes
       IdentitiesOnly yes
       IdentityFile /home/runner/.ssh/nix-builder
@@ -182,7 +181,7 @@ data:
   # instead of "nothing to append" -- the same trap ci-builders' worker
   # principals ConfigMap documents. Default empty renders "", a
   # genuinely zero-byte file, so an unmigrated install appends nothing.
-  known-hosts-cert-authorities: "@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA"
+  known-hosts-cert-authorities: ""
 immutable: true
 
 ---
@@ -444,7 +443,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-large
     actions.github.com/cleanup-manager-role-name: preview-large-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-large-gha-rs-manager
-    actions.github.com/values-hash: 7fa9e4865d9e17b2ef1e71a8aee9f9c717d5da6c3526376125b157eb27a4a5d
+    actions.github.com/values-hash: fa29afe8f57a334740522d4417b7199d37f5119fe8d0c3b5b66819d9afa9f8e
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -476,7 +475,7 @@ spec:
             weight: 100
       initContainers:
         - name: prepare-nix-builder-ssh
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/usr/local/bin/nix-worker-client-setup"]
           env:
             - name: POD_NAME
@@ -512,7 +511,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -527,6 +526,9 @@ spec:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE"]
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -539,7 +541,7 @@ spec:
               mountPath: /var/run/nix-builders
       containers:
         - name: runner
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/home/runner/run.sh"]
           env:
             - name: GOMAXPROCS
@@ -547,7 +549,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-f3023255fffb
+                  name: runner-nix-config-293351067710
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -592,7 +594,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           resources:
             limits:
               cpu: "4"
@@ -606,6 +608,9 @@ spec:
           # machines file. The projected token is here for the same hook, so
           # workflow code can read it too — see docs/architecture.md.
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -617,9 +622,16 @@ spec:
             - name: nix-builders
               mountPath: /etc/nix-builders
       volumes:
+        - name: nix-builder-known-hosts
+          secret:
+            secretName: nix-builder-known-hosts
+            defaultMode: 0444
+            items:
+              - key: known_hosts
+                path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-f3023255fffb
+            name: runner-nix-config-293351067710
             items:
               - key: machines.template
                 path: machines.template
@@ -672,7 +684,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-medium
     actions.github.com/cleanup-manager-role-name: preview-medium-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-medium-gha-rs-manager
-    actions.github.com/values-hash: e65be44ed436d242c959ef743bb3fbf824ec941ad7ff85df87b254ce92371a8
+    actions.github.com/values-hash: fd758f0f3fc5c9b8017c840e66d54b5abe433a09b6ac2d254b0260b1aef1626
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -704,7 +716,7 @@ spec:
             weight: 100
       initContainers:
         - name: prepare-nix-builder-ssh
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/usr/local/bin/nix-worker-client-setup"]
           env:
             - name: POD_NAME
@@ -740,7 +752,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -755,6 +767,9 @@ spec:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE"]
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -767,7 +782,7 @@ spec:
               mountPath: /var/run/nix-builders
       containers:
         - name: runner
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/home/runner/run.sh"]
           env:
             - name: GOMAXPROCS
@@ -775,7 +790,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-f3023255fffb
+                  name: runner-nix-config-293351067710
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -820,7 +835,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           resources:
             limits:
               cpu: "4"
@@ -834,6 +849,9 @@ spec:
           # machines file. The projected token is here for the same hook, so
           # workflow code can read it too — see docs/architecture.md.
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -845,9 +863,16 @@ spec:
             - name: nix-builders
               mountPath: /etc/nix-builders
       volumes:
+        - name: nix-builder-known-hosts
+          secret:
+            secretName: nix-builder-known-hosts
+            defaultMode: 0444
+            items:
+              - key: known_hosts
+                path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-f3023255fffb
+            name: runner-nix-config-293351067710
             items:
               - key: machines.template
                 path: machines.template
@@ -900,7 +925,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-small
     actions.github.com/cleanup-manager-role-name: preview-small-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-small-gha-rs-manager
-    actions.github.com/values-hash: 4e8ea8a436153d6629d5eddf81449d08bb14ced5c19ea5a8c3206318acbdc95
+    actions.github.com/values-hash: 407ab448985c25033bb7792e57554e4c5734b700a92dfa9a7f706b45d4b239d
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -932,7 +957,7 @@ spec:
             weight: 100
       initContainers:
         - name: prepare-nix-builder-ssh
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/usr/local/bin/nix-worker-client-setup"]
           env:
             - name: POD_NAME
@@ -968,7 +993,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -983,6 +1008,9 @@ spec:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE"]
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -995,7 +1023,7 @@ spec:
               mountPath: /var/run/nix-builders
       containers:
         - name: runner
-          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/truvity/ci-plane/runner:latest
           command: ["/home/runner/run.sh"]
           env:
             - name: GOMAXPROCS
@@ -1003,7 +1031,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-f3023255fffb
+                  name: runner-nix-config-293351067710
                   key: nix.conf
             # Per-job signing: the runner runs this hook as `runner` before
             # the job's first step (see arc-runners.nixJobStartedHook). The
@@ -1048,7 +1076,7 @@ spec:
             - name: NIX_BUILDER_PROTOCOL
               value: "ssh-ng"
             - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
-              value: "false"
+              value: "true"
           resources:
             limits:
               cpu: "2"
@@ -1062,6 +1090,9 @@ spec:
           # machines file. The projected token is here for the same hook, so
           # workflow code can read it too — see docs/architecture.md.
           volumeMounts:
+            - name: nix-builder-known-hosts
+              mountPath: /var/run/nix-builder-known-hosts
+              readOnly: true
             - name: nix-builder-config
               mountPath: /var/run/nix-builder-config
               readOnly: true
@@ -1073,9 +1104,16 @@ spec:
             - name: nix-builders
               mountPath: /etc/nix-builders
       volumes:
+        - name: nix-builder-known-hosts
+          secret:
+            secretName: nix-builder-known-hosts
+            defaultMode: 0444
+            items:
+              - key: known_hosts
+                path: known_hosts
         - name: nix-builder-config
           configMap:
-            name: runner-nix-config-f3023255fffb
+            name: runner-nix-config-293351067710
             items:
               - key: machines.template
                 path: machines.template

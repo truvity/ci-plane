@@ -1,6 +1,10 @@
 Port 2222
 ListenAddress 0.0.0.0
 AddressFamily any
+# The static key's mount (nixWorkers.hostCertificate.enabled: false).
+# With a host certificate (the default), nix-worker-entrypoint.sh
+# rewrites this line in its runtime copy to the ephemeral per-pod key it
+# generates, and adds HostCertificate right after it.
 HostKey /etc/nix-worker/ssh/ssh_host_ed25519_key
 PidFile /run/nix-worker/sshd.pid
 AuthorizedKeysFile none
@@ -12,7 +16,9 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthenticationMethods publickey
 UsePAM no
-AllowUsers nixremote
+# Rewritten by nix-worker-entrypoint.sh in its runtime copy: `nix` only
+# when its principals file is non-empty, `admin` only with opkssh on.
+AllowUsers nix
 StrictModes yes
 DisableForwarding yes
 
@@ -25,11 +31,15 @@ X11Forwarding no
 PermitUserEnvironment no
 GatewayPorts no
 
-ForceCommand /usr/local/bin/nix-worker-ssh-command
+# Every account that can be reached overrides this in its own Match
+# block below; anything that somehow reached this default gets no
+# command at all. (Until v5.0.0 this was the legacy `nixremote` login's
+# `nix-store --serve` shim, removed together with that login.)
+ForceCommand /usr/sbin/nologin
 LogLevel VERBOSE
 
 # opkssh (the people pilot): OIDC sign-in with no CA, additive to
-# the OpenBao-certificate logins above -- AuthorizedKeysCommand and
+# the OpenBao-certificate login below -- AuthorizedKeysCommand and
 # TrustedUserCAKeys/AuthorizedPrincipalsFile are independent sshd
 # mechanisms, tried in turn for pubkey auth, so this line never displaces
 # or reorders the `Match User nix` block below (truvity/tailscale's
@@ -37,21 +47,20 @@ LogLevel VERBOSE
 # subnet routers). Baked unconditionally, like ForceCommand above: the
 # `opksshuser`-owned /etc/opk/{providers,auth_id} files decide who is
 # actually admitted (empty, the default, admits nobody), and AllowUsers
-# below decides which accounts can even attempt pubkey auth as `nix` or
+# above decides which accounts can even attempt pubkey auth as `nix` or
 # `admin` in the first place -- image/nix-worker-entrypoint.sh sets both
 # from NIX_WORKER_OPKSSH_ENABLED, never this file.
 AuthorizedKeysCommand /usr/local/bin/opkssh verify %u %k %t
 AuthorizedKeysCommandUser opksshuser
 
-# A SECOND login (host certificates, phase 1): the modern ssh-ng
-# protocol via `nix-daemon --stdio`, gated independently of `nixremote`
-# above. AuthorizedPrincipalsFile, not a fixed principal: the chart
-# renders the content of nixWorkers.accounts.nix.principals into a
-# ConfigMap, and an EMPTY file (the default) means no principal matches,
-# so a certificate signed by the trusted CA above still cannot log in as
-# `nix` -- AllowUsers above gains `nix` only when that list is non-empty
-# (nix-worker-entrypoint.sh), which is what actually determines whether
-# this Match block is ever reached.
+# The machine login: the ssh-ng protocol via `nix-daemon --stdio`.
+# AuthorizedPrincipalsFile, not a fixed principal: the chart renders the
+# content of nixWorkers.accounts.nix.principals into a ConfigMap, and an
+# EMPTY file means no principal matches, so a certificate signed by the
+# trusted CA above still cannot log in as `nix` -- AllowUsers above gains
+# `nix` only when that list is non-empty (nix-worker-entrypoint.sh),
+# which is what actually determines whether this Match block is ever
+# reached.
 #
 # This path is under /run/nix-worker (an emptyDir sshd already trusts
 # for PidFile above), NOT the ConfigMap's own mount point
@@ -75,9 +84,9 @@ Match User nix
 # in the baked file is harmless the same way the `nix` block above is:
 # unreachable usernames never reach a Match block at all.
 #
-# ForceCommand none overrides the global ForceCommand above (the legacy
-# nix-worker-ssh-command shim) -- without it `admin` would be forced
-# through that script too and could never get a shell. PermitTTY yes is
+# ForceCommand none overrides the global ForceCommand above (nologin)
+# -- without it `admin` would be forced through that too and could never
+# get a shell. PermitTTY yes is
 # the one thing this worker grants nowhere else. Forwarding stays
 # disabled: the global DisableForwarding yes is not overridden here.
 Match User admin

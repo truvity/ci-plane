@@ -9,16 +9,15 @@ set -euo pipefail
 target_root=${NIX_WORKER_SEED_ROOT:-/seed}
 runtime_dir=${NIX_WORKER_RUNTIME_DIR:-/runtime}
 nix_bin=/home/runner/.nix-profile/bin/nix
-# These aliases live outside /nix so they survive the worker PVC mount.
-# Keep their multicall names: resolving them to the underlying
-# `.../bin/nix` binary loses argv[0], so `nix-daemon`/`nix-store`
-# would behave as the generic `nix` CLI instead of their legacy modes.
+# This alias lives outside /nix so it survives the worker PVC mount.
+# Keep its multicall name: resolving it to the underlying `.../bin/nix`
+# binary loses argv[0], so `nix-daemon` would behave as the generic `nix`
+# CLI instead of the daemon.
 nix_daemon=/usr/local/libexec/nix-worker/nix-daemon
-nix_store=/usr/local/libexec/nix-worker/nix-store
 nix_real=$(readlink -f "$nix_daemon")
 nix_root=${nix_real%/bin/nix}
 
-[[ -x "$nix_bin" && -x "$nix_daemon" && -x "$nix_store" ]]
+[[ -x "$nix_bin" && -x "$nix_daemon" ]]
 mkdir -p "$target_root/nix" "$runtime_dir"
 
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nfilter-syscalls = false'
@@ -32,4 +31,3 @@ export NIX_CONFIG=$'experimental-features = nix-command flakes\nfilter-syscalls 
 mkdir -p "$target_root/nix/var/nix/gcroots/ci-plane"
 ln -sfn "$nix_root" "$target_root/nix/var/nix/gcroots/ci-plane/worker-runtime"
 printf '%s\n' "$nix_daemon" > "$runtime_dir/nix-daemon-path"
-printf '%s\n' "$nix_store" > "$runtime_dir/nix-store-path"

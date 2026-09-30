@@ -1,0 +1,25 @@
+# refuses: nixWorkers.accounts.nix.principals is empty
+# `nix` is the only machine login since v5.0.0: no principal would leave
+# the worker admitting no machine at all.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker
+  accounts:
+    nix:
+      principals: []
