@@ -9,7 +9,7 @@ nixBuilders:
   enabled: true
   knownHosts:
     pinned: true
-    revision: test-v1
+    revision: pinned-v1
   openbao:
     address: https://openbao.example
     namespace: example
