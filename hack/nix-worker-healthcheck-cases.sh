@@ -8,10 +8,12 @@
 #
 # What has to hold: fresh cert -> ready; a cert with less than
 # minRemaining left -> not ready, naming the cause; missing -> not
-# ready; not parseable -> not ready; expired -> not ready; and the whole
+# ready; not parseable -> not ready; expired -> not ready; a valid cert
+# for a DIFFERENT key than the worker's own (ephemeral, per pod since
+# v5.0.0) host key -> not ready; and the whole
 # check is a no-op unless BOTH the readiness probe's own "--readiness"
 # argument and NIX_WORKER_HOST_CERTIFICATE_ENABLED=true are present --
-# proving host certificates disabled (the chart default) leaves every
+# proving host certificates disabled (the static-key path) leaves every
 # probe unaffected.
 set -uo pipefail
 
@@ -93,6 +95,32 @@ echo garbage > "$work/cert-garbage.pub"
 check "unparseable certificate file is not ready" "not parseable" \
   "$work/cert-garbage.pub" "2h"
 
+# The ephemeral host key (v5.0.0): the certificate must certify THIS
+# worker's own public key, not merely be a fresh certificate.
+check "fresh certificate for this worker's own host key is ready" pass \
+  "$work/cert-fresh.pub" "2h" "$host_key.pub"
+
+other_key="$work/other_host_key"
+ssh-keygen -q -t ed25519 -N '' -f "$other_key"
+check "fresh certificate for a DIFFERENT host key is not ready" "not this worker's host key" \
+  "$work/cert-fresh.pub" "2h" "$other_key.pub"
+
+check "missing host public key is not ready" "missing or unreadable" \
+  "$work/cert-fresh.pub" "2h" "$work/no-such-key.pub"
+
+# host_key_path: which private key sshd was started with, and so which
+# one the liveness/startup/readiness probes insist exists.
+runtime_dir=/run/nix-worker-test ssh_dir=/etc/nix-worker-test/ssh
+assert_host_key_path() {
+  local desc="$1" want="$2" got
+  got=$(host_key_path)
+  if [ "$got" = "$want" ]; then echo "ok    $desc"; else echo "FAIL  $desc: got $got, want $want"; fail=1; fi
+}
+NIX_WORKER_HOST_CERTIFICATE_ENABLED=true assert_host_key_path \
+  "host certificates on: the ephemeral key in the runtime emptyDir" /run/nix-worker-test/ssh_host_ed25519_key
+NIX_WORKER_HOST_CERTIFICATE_ENABLED=false assert_host_key_path \
+  "host certificates off: the static key from the Secret mount" /etc/nix-worker-test/ssh/ssh_host_ed25519_key
+
 # host_certificate_check_applies: the gate that keeps every probe
 # unaffected unless BOTH the readiness flag and the feature are on.
 assert_applies() {
@@ -107,7 +135,7 @@ assert_applies() {
 NIX_WORKER_HOST_CERTIFICATE_ENABLED=true assert_applies \
   "--readiness with host certificates enabled: check applies" yes --readiness
 NIX_WORKER_HOST_CERTIFICATE_ENABLED=false assert_applies \
-  "--readiness with host certificates disabled (chart default): unaffected" no --readiness
+  "--readiness with host certificates disabled (the static-key path): unaffected" no --readiness
 NIX_WORKER_HOST_CERTIFICATE_ENABLED=true assert_applies \
   "liveness/startup probe (no --readiness argument): unaffected even with the feature on" no
 unset NIX_WORKER_HOST_CERTIFICATE_ENABLED

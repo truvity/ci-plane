@@ -1,0 +1,22 @@
+# refuses: nixBuilders.knownHosts.certAuthorities is empty and knownHosts.pinned is false
+# The v5 default trusts the workers through their host CA alone; with no
+# CA line known_hosts would trust nothing and every build would fail.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+nixBuilders:
+  enabled: true
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: ci-nix
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1

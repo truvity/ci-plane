@@ -5,6 +5,83 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v5.0.0
+
+Released 2026-09-30.
+
+### Breaking: the Nix workers have one login, and no stored host key
+
+**The worker generates an ephemeral ed25519 host key per pod, and the
+defaults are the v4 cut-over shape: `nix` / `ci-nix` over ssh-ng,
+known_hosts via `@cert-authority` only.** Image and charts ship at one
+version as always; do not run a v5 image with a v4 chart or the other
+way round (a v4 chart rendering `nixremote` on makes the v5 worker
+refuse to start, naming why).
+
+- **ci-builders `nixWorkers.hostCertificate.enabled` defaults to
+  `true`.** With it on, the worker generates its host key at container
+  start in the (now memory-backed) runtime `emptyDir`, signs it on the
+  OpenBao host CA as before, and mounts NO host key Secret:
+  `nixWorkers.ssh.existingSecret` (formerly defaulting to
+  `nix-builder-server`) is no longer read, and has no default. The
+  readiness probe additionally requires the certificate to certify this
+  pod's own key. `nixWorkers.openbao.{address, caBundle, namespace,
+  authMount, authRole}` are therefore required whenever the workers are
+  enabled.
+- **The static host key is an explicit option:**
+  `hostCertificate.enabled: false` plus `ssh.existingSecret` (required
+  then), with runners pinning it (`knownHosts.pinned: true`).
+- **The legacy `nixremote` login is gone**: the account, the
+  `nix-worker-ssh-command` shim (`nix-store --serve`) and the
+  `nix-store` alias left the worker image, and the runner image lost
+  its leftover worker role (the `nixremote` account, worker scripts and
+  `sshd_config`). `nixWorkers.accounts.nixremote` is REFUSED at render
+  time (any value, including `enabled: false`). sshd's global
+  `ForceCommand` is now `nologin`; `nix` and `admin` override it.
+- **ci-builders `nixWorkers.accounts.nix` defaults** to
+  `principals: [ci-nix]`, `trusted: true` (the trust `nixremote` always
+  had; a remote build worker needs it). An empty `principals` list is
+  refused: it would leave no machine login.
+- **arc-runners `nixBuilders` defaults**: `login.user: nix`,
+  `login.principal: ci-nix`, `login.protocol: ssh-ng`,
+  `openbao.sshRole: ci-nix` (was `user`), `knownHosts.pinned: false`.
+  `knownHosts.certAuthorities` is therefore required while nixBuilders
+  is enabled (unless you pin); `knownHosts.revision` is required only
+  when pinned. `nixBuilders.sshUser` (the deprecated alias) is REFUSED
+  at render time.
+- **nix-worker-client defaults** (used only when the chart does not set
+  them, which it always does): principal `ci-nix`, protocol `ssh-ng`,
+  known_hosts unpinned.
+- **ci-builders `nixWorkerImage.repository` is required**: the fallback
+  to `runnerImage` is gone, since the runner image no longer carries the
+  worker role.
+
+#### Migrating a consumer
+
+A consumer already on the v4 cut-over shape (the Truvity devel estate
+since 2026-09-27) mostly DELETES values:
+
+1. ci-builders: delete `nixWorkers.accounts.nixremote` (required: it is
+   refused), `nixWorkers.hostCertificate.enabled: true` (now the
+   default), and `nixWorkers.accounts.nix` if it says
+   `principals: [ci-nix]`, `trusted: true`. Keep `nixWorkers.openbao.*`.
+   Stop delivering the `nix-builder-server` Secret: nothing mounts it.
+   Retire the host key it holds (secret manager row, KV path) once the
+   v5 workers are rolled -- it never has to be kept or rotated again.
+2. arc-runners: delete `nixBuilders.sshUser` (required: it is refused),
+   and optionally `login`, `knownHosts.pinned: false` and
+   `openbao.sshRole: ci-nix`, now the defaults. Keep
+   `knownHosts.certAuthorities`.
+3. Bump both charts together (one version, as always). The workers roll
+   (new host keys, which clients never see: they trust the CA) and the
+   runners recycle (the values hash changes).
+
+A consumer still on the v4 legacy shape (`nixremote` over `ssh://`,
+pinned known_hosts) must first move to host certificates on the host
+CA and to a ci-nix signing role. For a consumer with Nix disabled
+(`nixWorkers.enabled`/`nixBuilders.enabled` false) nothing changes
+unless it sets one of the removed keys.
+
 ## v4.2.0
 
 Released 2026-09-29.

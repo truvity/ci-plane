@@ -1,0 +1,25 @@
+# The explicit static-key path on the runner side: known_hosts pinned
+# from a Secret (for workers with nixWorkers.hostCertificate.enabled:
+# false), over the legacy-free default login.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+nixBuilders:
+  enabled: true
+  knownHosts:
+    pinned: true
+    revision: test-v1
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: ci-nix
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1

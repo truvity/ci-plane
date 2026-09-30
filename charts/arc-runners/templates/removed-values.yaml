@@ -1,0 +1,13 @@
+{{- /*
+Keys this chart no longer honours.
+
+A chart that quietly ignores a value the caller still sets is the worst
+shape an upgrade can take: helm reports success, argo reports Synced,
+and the setting the caller asked for is simply gone. So each removed key
+fails the render and says what replaced it. The check is hasKey, not
+truthiness: `sshUser: nixremote` is still a caller who believes the
+legacy login exists.
+*/ -}}
+{{- if hasKey ((.Values.nixBuilders | default dict)) "sshUser" }}
+{{- fail "arc-runners 5.0.0 removed `nixBuilders.sshUser` (the deprecated alias of nixBuilders.login.user) together with the legacy `nixremote` login it named. Delete it from your values; the machine login is nixBuilders.login.{user,principal,protocol}, by default nix / ci-nix / ssh-ng." }}
+{{- end }}

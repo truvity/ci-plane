@@ -45,34 +45,35 @@ Order matters: caches before runners, controller before both charts.
    [truvity/ci-cache](https://github.com/truvity/ci-cache). Setting
    `goModproxy` here fails the render rather than being ignored.
 6. For persistent Nix workers:
-   - `<namespace>/nix-builder-server`, delivered by the estate's secret
-     manager, containing the stable `ssh_host_ed25519_key` (and its
-     public half for operations);
-   - `<runner namespace>/nix-builder-known-hosts`, containing only
-     `known_hosts` for both worker Service FQDNs;
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
-     signing role (default `user`) that allows the principal `nixremote`
+     signing role (default `ci-nix`) that allows the principal `ci-nix`
      and caps certificates at one hour; its public keys go to
      `nixWorkers.ssh.trustedUserCAKeys` here and to
      `nixBuilders.openbao.sshCAPublicKeys` in each runner release;
    - per organization, an OpenBao JWT login role on the environment's
      auth mount, bound exactly to the runner ServiceAccount, whose token
-     may only sign on that role.
+     may only sign on that role;
+   - an OpenBao SSH HOST CA (`nixWorkers.openbao.hostSshMount`/
+     `hostSshRole`, `cert_type=host`) with a login role for the workers'
+     own ServiceAccount (`nixWorkers.openbao.*`); its public key goes to
+     each runner release as a `nixBuilders.knownHosts.certAuthorities`
+     entry for the worker Service names.
 
    Each runner generates its client key inside its own pod and receives a
-   short-lived certificate. No client private key or `authorized_keys`
-   Secret exists. Do not add engineer keys or expose worker Services
-   outside the cluster.
+   short-lived certificate; each worker generates its HOST key inside its
+   own pod and receives a host certificate. No client private key, host
+   private key, `authorized_keys` or `known_hosts` Secret exists. Do not
+   add engineer keys or expose worker Services outside the cluster. See
+   [architecture.md](architecture.md#worker-host-certificates-and-ephemeral-host-keys).
 
-   **Host certificates (`nixWorkers.hostCertificate`) are an additive
-   alternative to the pinned `ssh.existingSecret` host key above, off by
-   default.** Enabling them signs each worker's own host key against a
-   SECOND OpenBao SSH role (`nixWorkers.openbao.hostSshMount`/
-   `hostSshRole`, `cert_type=host`), and a caller trusts the CA instead of
-   pinning one host key Secret per architecture by adding it to
-   `nixBuilders.knownHosts.certAuthorities` on the runner side — both stay
-   valid at once during a migration. See
-   [architecture.md](architecture.md#worker-host-certificates-phase-1).
+   **Without host certificates** (`nixWorkers.hostCertificate.enabled:
+   false`, the explicit static-key path) the workers need a stable host
+   key instead — a Secret named by `nixWorkers.ssh.existingSecret`,
+   delivered by the estate's secret manager, containing
+   `ssh_host_ed25519_key` — and each runner release pins it:
+   `nixBuilders.knownHosts.pinned: true` with a `known_hosts` Secret
+   (`nixBuilders.knownHosts.existingSecret`) for both worker Service
+   FQDNs.
 
 ## Values an AWS/Karpenter estate sets
 

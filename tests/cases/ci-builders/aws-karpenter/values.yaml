@@ -20,3 +20,11 @@ nixWorkers:
   ssh:
     trustedUserCAKeys:
       - ssh-ed25519 AAAATEST
+  # Host certificates are on by default (v5.0.0): the OpenBao route the
+  # workers sign their ephemeral host keys on is an estate fact.
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker

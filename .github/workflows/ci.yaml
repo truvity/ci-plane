@@ -43,30 +43,44 @@ jobs:
             echo "bare render leaked an S3 flag or serviceAccountName" >&2
             exit 1
           fi
+          # Every nixWorkers render below starts from these: the user CA
+          # the workers trust, and -- host certificates being ON by
+          # default since v5.0.0 -- the OpenBao route each worker signs
+          # its ephemeral host key on.
+          nix_worker_args=(
+            --set nixWorkers.enabled=true
+            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST'
+            --set nixWorkers.openbao.address=https://openbao.example
+            --set nixWorkers.openbao.namespace=dev
+            --set nixWorkers.openbao.caBundle=dGVzdA==
+            --set nixWorkers.openbao.authMount=jwt-dev
+            --set nixWorkers.openbao.authRole=nix-worker
+          )
           # Estate-shaped overlay: the paths a consuming estate exercises.
           helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-            --set nixWorkers.enabled=true \
-            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            "${nix_worker_args[@]}" \
             --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a,arc-runners-org-b}' \
             --set runnerImage.registry=example.ecr/github \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
-          # Host certificates, phase 1: the estate-shaped overlay for
-          # signing the worker's OWN host key, plus the second SSH login
-          # (nixWorkers.accounts.nix).
+          # The v5 default render: an ephemeral host key per pod, so the
+          # static nix-builder-server Secret is neither required nor
+          # mounted, and the `nix` login admits ci-nix, trusted.
           helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-            --set nixWorkers.enabled=true \
-            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
-            --set 'nixWorkers.networkPolicy.consumerNamespaces={arc-runners-org-a}' \
-            --set nixWorkers.hostCertificate.enabled=true \
-            --set nixWorkers.openbao.address=https://openbao.example \
-            --set nixWorkers.openbao.namespace=dev \
-            --set nixWorkers.openbao.caBundle=dGVzdA== \
-            --set nixWorkers.openbao.authMount=jwt-dev \
-            --set nixWorkers.openbao.authRole=nix-worker \
-            --set-string 'nixWorkers.accounts.nix.principals[0]=ci@example' \
-            --set nixWorkers.accounts.nix.trusted=true \
-            > /tmp/hostcert-overlay.yaml
+            "${nix_worker_args[@]}" > /tmp/hostcert-overlay.yaml
+          if grep -qE 'secretName: nix-builder-server|mountPath: /etc/nix-worker/ssh$' /tmp/hostcert-overlay.yaml; then
+            echo "the default (host certificate) render still mounts a static host key Secret" >&2
+            exit 1
+          fi
+          if ! grep -qF -- 'nix: "ci-nix"' /tmp/hostcert-overlay.yaml \
+             || ! grep -A1 'NIX_WORKER_ACCOUNTS_NIX_TRUSTED' /tmp/hostcert-overlay.yaml | grep -qF -- 'value: "true"'; then
+            echo "the default render must admit principal ci-nix on the trusted nix login" >&2
+            exit 1
+          fi
+          if grep -qF -- 'NIXREMOTE' /tmp/hostcert-overlay.yaml; then
+            echo "the render still carries the removed nixremote login toggle" >&2
+            exit 1
+          fi
           # The nix-worker readinessProbe alone carries "--readiness" --
           # it is the only probe allowed to watch the host certificate's
           # remaining life. Matched on the exact command-line literals
@@ -86,50 +100,46 @@ jobs:
             echo "hostCertificate.enabled render is missing NIX_WORKER_HOST_CERTIFICATE_MIN_REMAINING (default 2h)" >&2
             exit 1
           fi
-          # The bare nixWorkers.enabled=true render (no hostCertificate)
-          # must still carry --readiness on the readinessProbe alone --
-          # the flag is unconditional; only the env var it reads for is
-          # gated -- and nixremote's login toggle at its own default
-          # (true).
-          bare_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-            --set nixWorkers.enabled=true \
-            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST')
-          bare_readiness=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck", "--readiness"]' <<<"$bare_out")
-          bare_other_probes=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck"]' <<<"$bare_out")
-          if [ "$bare_readiness" = 0 ] || [ "$bare_other_probes" != "$(( bare_readiness * 2 ))" ]; then
-            echo "the bare nixWorkers render must still carry --readiness on exactly the readinessProbe" >&2
-            exit 1
-          fi
-          # nixWorkers.accounts.nixremote.enabled (the legacy login
-          # toggle): true by default, and the render must say so
-          # explicitly -- nix-worker-entrypoint.sh's own bash default
-          # exists only for scripts that drive it outside the chart
-          # (hack/nix-worker-principals-e2e.sh).
-          nixremote_default_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-            --set nixWorkers.enabled=true \
-            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST')
-          if ! grep -A1 'NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED' <<< "$nixremote_default_out" | grep -qF -- 'value: "true"'; then
-            echo "nixWorkers.accounts.nixremote.enabled default render is missing NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=true" >&2
-            exit 1
-          fi
-          nixremote_off_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
+          # The explicit static-key path (hostCertificate.enabled: false):
+          # the Secret-backed key is mounted, no OpenBao route is needed,
+          # and --readiness is still on exactly the readinessProbe -- the
+          # flag is unconditional; only the check it gates is not.
+          static_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
             --set nixWorkers.enabled=true \
             --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixWorkers.accounts.nixremote.enabled=false \
-            --set-string 'nixWorkers.accounts.nix.principals[0]=ci@example')
-          if ! grep -A1 'NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED' <<< "$nixremote_off_out" | grep -qF -- 'value: "false"'; then
-            echo "nixWorkers.accounts.nixremote.enabled=false did not render NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=false" >&2
+            --set nixWorkers.hostCertificate.enabled=false \
+            --set nixWorkers.ssh.existingSecret=nix-builder-server)
+          if ! grep -qF -- 'secretName: nix-builder-server' <<<"$static_out"; then
+            echo "hostCertificate.enabled=false must mount the static host key Secret" >&2
             exit 1
           fi
-          # And the refusal: disabling the legacy login with no nix
-          # principal configured either would leave this worker with no
-          # machine login at all -- the same idiom as the goModproxy
-          # guard below.
+          static_readiness=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck", "--readiness"]' <<<"$static_out")
+          static_other_probes=$(grep -cF -- 'command: ["/usr/local/bin/nix-worker-healthcheck"]' <<<"$static_out")
+          if [ "$static_readiness" = 0 ] || [ "$static_other_probes" != "$(( static_readiness * 2 ))" ]; then
+            echo "the static-key nixWorkers render must still carry --readiness on exactly the readinessProbe" >&2
+            exit 1
+          fi
+          # And its refusal: the static-key path with no Secret named.
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
                --set nixWorkers.enabled=true \
                --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               --set nixWorkers.hostCertificate.enabled=false > /dev/null 2>&1; then
+            echo "the static-key path rendered without nixWorkers.ssh.existingSecret" >&2
+            exit 1
+          fi
+          # The removed legacy login: any accounts.nixremote -- even the
+          # `enabled: false` the last v4 consumer set -- is refused, and
+          # so is an empty principals list (no machine login at all).
+          if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
+               "${nix_worker_args[@]}" \
                --set nixWorkers.accounts.nixremote.enabled=false > /dev/null 2>&1; then
-            echo "nixremote.enabled=false guard did not fire on an empty accounts.nix.principals" >&2
+            echo "removed-values guard did not fire on nixWorkers.accounts.nixremote" >&2
+            exit 1
+          fi
+          if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
+               "${nix_worker_args[@]}" \
+               --set 'nixWorkers.accounts.nix.principals=null' > /dev/null 2>&1; then
+            echo "empty accounts.nix.principals guard did not fire" >&2
             exit 1
           fi
           # opkssh (the people pilot). nixWorkers.opkssh.archs is
@@ -140,8 +150,7 @@ jobs:
           # the one property most worth a render test, since a bug here
           # widens the pilot past the one worker it names.
           opkssh_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-            --set nixWorkers.enabled=true \
-            --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+            "${nix_worker_args[@]}" \
             --set 'nixWorkers.opkssh.archs={amd64}' \
             --set nixWorkers.opkssh.issuer=https://access.example \
             --set nixWorkers.opkssh.clientId=opkssh \
@@ -179,8 +188,7 @@ jobs:
           # "default off leaves no trace" bar as the bazel-remote S3
           # check above.
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-               --set nixWorkers.enabled=true \
-               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               "${nix_worker_args[@]}" \
                | grep -qE 'oidc:groups|NIX_WORKER_OPKSSH_ENABLED.{0,40}"true"'; then
             echo "bare nixWorkers render leaked opkssh identity content or an enabled flag" >&2
             exit 1
@@ -189,29 +197,27 @@ jobs:
           # that nixWorkers.archs does not run, and archs non-empty with
           # no issuer to pin against.
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-               --set nixWorkers.enabled=true \
-               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               "${nix_worker_args[@]}" \
                --set 'nixWorkers.opkssh.archs={riscv}' > /dev/null 2>&1; then
             echo "nixWorkers.opkssh.archs guard did not fire on an architecture outside nixWorkers.archs" >&2
             exit 1
           fi
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-               --set nixWorkers.enabled=true \
-               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
+               "${nix_worker_args[@]}" \
                --set 'nixWorkers.opkssh.archs={amd64}' > /dev/null 2>&1; then
             echo "nixWorkers.opkssh.archs guard did not fire on a missing issuer" >&2
             exit 1
           fi
           # Three render-time refusals, the same idiom as the goModproxy
-          # guard below: enabling hostCertificate without its required
-          # OpenBao route, and a renewEvery at or past certificateTTL --
+          # guard below: enabling the workers (host certificates on by
+          # default) without the required OpenBao route, a renewEvery at
+          # or past certificateTTL, and a minRemaining at or past it --
           # a renewal that can never land before the current certificate
           # expires is a worker no client can still reach.
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
                --set nixWorkers.enabled=true \
-               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' \
-               --set nixWorkers.hostCertificate.enabled=true > /dev/null 2>&1; then
-            echo "hostCertificate guard did not fire on a missing OpenBao route" >&2
+               --set-string 'nixWorkers.ssh.trustedUserCAKeys[0]=ssh-ed25519 AAAATEST' > /dev/null 2>&1; then
+            echo "hostCertificate (on by default) guard did not fire on a missing OpenBao route" >&2
             exit 1
           fi
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
@@ -242,147 +248,10 @@ jobs:
             echo "hostCertificate guard did not fire on minRemaining >= certificateTTL" >&2
             exit 1
           fi
-          helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            --set githubConfigUrl=https://github.com/example \
-            --set runnerServiceAccountName=preview-runner \
-            --set nodeSelector."karpenter\.sh/nodepool"=ci \
-            --set nixBuilders.enabled=true \
-            --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=dev \
-            --set nixBuilders.openbao.caBundle=dGVzdA== \
-            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-dev \
-            --set nixBuilders.openbao.authRole=runner-example \
-            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-            > /dev/null
-          # Host certificates, phase 1: certAuthorities is ADDED to the
-          # pinned known_hosts Secret content, not a replacement for it --
-          # both stay valid during a migration, so the rendered
-          # known-hosts-cert-authorities key must actually carry the
-          # `@cert-authority` line the value asked for.
-          ca_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            --set githubConfigUrl=https://github.com/example \
-            --set runnerServiceAccountName=preview-runner \
-            --set nixBuilders.enabled=true \
-            --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=dev \
-            --set nixBuilders.openbao.caBundle=dGVzdA== \
-            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-dev \
-            --set nixBuilders.openbao.authRole=runner-example \
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.example.svc.cluster.local' \
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA')
-          if ! grep -qF -- '@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA' <<< "$ca_out"; then
-            echo "nixBuilders.knownHosts.certAuthorities render is missing its @cert-authority line" >&2
-            exit 1
-          fi
-          # And the refusal: an entry with no hosts is not a CA anyone
-          # could ever match.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               --set githubConfigUrl=https://github.com/example \
-               --set runnerServiceAccountName=preview-runner \
-               --set nixBuilders.enabled=true \
-               --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=dev \
-               --set nixBuilders.openbao.caBundle=dGVzdA== \
-               --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-               --set nixBuilders.knownHosts.revision=test-v1 \
-               --set nixBuilders.openbao.authMount=jwt-dev \
-               --set nixBuilders.openbao.authRole=runner-example \
-               --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA' > /dev/null 2>&1; then
-            echo "certAuthorities guard did not fire on a missing hosts list" >&2
-            exit 1
-          fi
-          # The ssh-ng cut-over: a distinct machine login (the worker's
-          # second account) and store protocol. The rendered machines
-          # file must actually carry both.
-          sshng_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            --set githubConfigUrl=https://github.com/example \
-            --set runnerServiceAccountName=preview-runner \
-            --set nixBuilders.enabled=true \
-            --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=dev \
-            --set nixBuilders.openbao.caBundle=dGVzdA== \
-            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixBuilders.knownHosts.revision=test-v1 \
-            --set nixBuilders.openbao.authMount=jwt-dev \
-            --set nixBuilders.openbao.authRole=ci-nix \
-            --set nixBuilders.openbao.sshRole=ci-nix \
-            --set nixBuilders.login.user=nix \
-            --set nixBuilders.login.principal=ci-nix \
-            --set nixBuilders.login.protocol=ssh-ng)
-          if ! grep -qF -- 'ssh-ng://nix@nix-worker-amd64.example.svc.cluster.local' <<< "$sshng_out"; then
-            echo "nixBuilders.login.protocol=ssh-ng render is missing its ssh-ng:// machines line" >&2
-            exit 1
-          fi
-          if ! grep -qF -- 'NIX_BUILDER_PRINCIPAL' <<< "$sshng_out" || ! grep -qF -- 'value: "ci-nix"' <<< "$sshng_out"; then
-            echo "nixBuilders.login.principal render is missing NIX_BUILDER_PRINCIPAL" >&2
-            exit 1
-          fi
-          # And the refusal: an unknown protocol is not "ssh" degraded,
-          # it is a typo that would otherwise render a machines file no
-          # store URI scheme understands.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               --set githubConfigUrl=https://github.com/example \
-               --set runnerServiceAccountName=preview-runner \
-               --set nixBuilders.enabled=true \
-               --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=dev \
-               --set nixBuilders.openbao.caBundle=dGVzdA== \
-               --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-               --set nixBuilders.knownHosts.revision=test-v1 \
-               --set nixBuilders.openbao.authMount=jwt-dev \
-               --set nixBuilders.openbao.authRole=runner-example \
-               --set nixBuilders.login.protocol=bogus > /dev/null 2>&1; then
-            echo "nixBuilders.login.protocol guard did not fire on an unknown protocol" >&2
-            exit 1
-          fi
-          # knownHosts.pinned: false -- the pinned Secret is not even
-          # mounted, and known_hosts is built from certAuthorities alone.
-          unpinned_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            --set githubConfigUrl=https://github.com/example \
-            --set runnerServiceAccountName=preview-runner \
-            --set nixBuilders.enabled=true \
-            --set nixBuilders.openbao.address=https://openbao.example \
-            --set nixBuilders.openbao.namespace=dev \
-            --set nixBuilders.openbao.caBundle=dGVzdA== \
-            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-            --set nixBuilders.openbao.authMount=jwt-dev \
-            --set nixBuilders.openbao.authRole=runner-example \
-            --set nixBuilders.knownHosts.pinned=false \
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.example.svc.cluster.local' \
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA')
-          if grep -qF -- 'name: nix-builder-known-hosts' <<< "$unpinned_out"; then
-            echo "knownHosts.pinned=false must not mount the pinned known_hosts Secret" >&2
-            exit 1
-          fi
-          if ! grep -qF -- 'NIX_BUILDER_KNOWN_HOSTS_PINNED' <<< "$unpinned_out" || ! grep -qF -- 'value: "false"' <<< "$unpinned_out"; then
-            echo "knownHosts.pinned=false render is missing NIX_BUILDER_KNOWN_HOSTS_PINNED" >&2
-            exit 1
-          fi
-          # And the refusal: unpinned with no CA to replace the pin would
-          # trust nothing and break every build.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               --set githubConfigUrl=https://github.com/example \
-               --set runnerServiceAccountName=preview-runner \
-               --set nixBuilders.enabled=true \
-               --set nixBuilders.openbao.address=https://openbao.example \
-               --set nixBuilders.openbao.namespace=dev \
-               --set nixBuilders.openbao.caBundle=dGVzdA== \
-               --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST' \
-               --set nixBuilders.openbao.authMount=jwt-dev \
-               --set nixBuilders.openbao.authRole=runner-example \
-               --set nixBuilders.knownHosts.pinned=false > /dev/null 2>&1; then
-            echo "knownHosts.pinned=false guard did not fire on an empty certAuthorities list" >&2
-            exit 1
-          fi
-          # nixBuilders.sshUser is DEPRECATED, not removed: the only
-          # existing consumer already sets it, and new releases are
-          # auto-promoted into that environment, so a guard that fails
-          # its render would break it on this chart's very next release.
-          sshuser_baseline_args=(
+          # Every nixBuilders render below starts from these: the OpenBao
+          # route, and the workers' host CA line -- known_hosts being
+          # unpinned (certAuthorities alone) by default since v5.0.0.
+          nix_builder_args=(
             --set githubConfigUrl=https://github.com/example
             --set runnerServiceAccountName=preview-runner
             --set nixBuilders.enabled=true
@@ -390,41 +259,85 @@ jobs:
             --set nixBuilders.openbao.namespace=dev
             --set nixBuilders.openbao.caBundle=dGVzdA==
             --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST'
-            --set nixBuilders.knownHosts.revision=test-v1
             --set nixBuilders.openbao.authMount=jwt-dev
             --set nixBuilders.openbao.authRole=runner-example
-            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
           )
-          # sshUser at its own default value (what the existing consumer
-          # sets today) must render byte-identical to not setting it at
-          # all.
-          without_sshuser=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml "${sshuser_baseline_args[@]}")
-          with_sshuser=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml "${sshuser_baseline_args[@]}" --set nixBuilders.sshUser=nixremote)
-          if [ "$without_sshuser" != "$with_sshuser" ]; then
-            echo "nixBuilders.sshUser=nixremote (today's value) must render byte-identical to leaving it unset" >&2
+          ca_args=(
+            --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.example.svc.cluster.local'
+            --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA'
+          )
+          helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+            "${nix_builder_args[@]}" "${ca_args[@]}" \
+            --set nodeSelector."karpenter\.sh/nodepool"=ci \
+            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+            > /dev/null
+          # The v5 defaults: `nix` / ci-nix over ssh-ng, signing on the
+          # ci-nix role, known_hosts the @cert-authority line alone -- the
+          # pinned Secret is not even mounted.
+          default_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+            "${nix_builder_args[@]}" "${ca_args[@]}")
+          for want in \
+            'ssh-ng://nix@nix-worker-amd64.example.svc.cluster.local' \
+            '@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA'; do
+            if ! grep -qF -- "$want" <<< "$default_out"; then
+              echo "the default nixBuilders render is missing: $want" >&2
+              exit 1
+            fi
+          done
+          for env in 'NIX_BUILDER_PRINCIPAL:ci-nix' 'NIX_BUILDER_PROTOCOL:ssh-ng' 'NIX_BUILDER_OPENBAO_SSH_ROLE:ci-nix' 'NIX_BUILDER_KNOWN_HOSTS_PINNED:false'; do
+            if ! grep -A1 -- "name: ${env%%:*}\$" <<< "$default_out" | grep -qF -- "value: \"${env#*:}\""; then
+              echo "the default nixBuilders render is missing ${env%%:*}=${env#*:}" >&2
+              exit 1
+            fi
+          done
+          if grep -qF -- 'name: nix-builder-known-hosts' <<< "$default_out"; then
+            echo "the default (unpinned) render must not mount the pinned known_hosts Secret" >&2
             exit 1
           fi
-          # sshUser and login.user set to the SAME non-default value: no
-          # conflict, that account is used.
-          agree_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml "${sshuser_baseline_args[@]}" \
-            --set nixBuilders.sshUser=myuser --set nixBuilders.login.user=myuser)
-          if ! grep -qF -- 'ssh://myuser@' <<< "$agree_out"; then
-            echo "sshUser and login.user agreeing on a custom value did not render that account" >&2
+          # And the refusal: unpinned (the default) with no CA to trust
+          # would trust nothing and break every build.
+          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+               "${nix_builder_args[@]}" > /dev/null 2>&1; then
+            echo "knownHosts guard did not fire on an empty certAuthorities list" >&2
             exit 1
           fi
-          # sshUser customized alone (login.user left at its default):
-          # the deprecated value is still honoured as the alias.
-          alias_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml "${sshuser_baseline_args[@]}" \
-            --set nixBuilders.sshUser=myuser)
-          if ! grep -qF -- 'ssh://myuser@' <<< "$alias_out"; then
-            echo "nixBuilders.sshUser alone did not render as the machine login (the deprecated alias)" >&2
+          # An entry with no hosts is not a CA anyone could ever match.
+          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+               "${nix_builder_args[@]}" \
+               --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA' > /dev/null 2>&1; then
+            echo "certAuthorities guard did not fire on a missing hosts list" >&2
             exit 1
           fi
-          # And the refusal: sshUser and login.user set to DIFFERENT
-          # non-default values must not silently pick one.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml "${sshuser_baseline_args[@]}" \
-               --set nixBuilders.sshUser=myuser --set nixBuilders.login.user=otheruser > /dev/null 2>&1; then
-            echo "sshUser/login.user conflict guard did not fire" >&2
+          # The explicit static-key path: pinned: true mounts the Secret,
+          # needs its revision, and ADDS any certAuthorities to it.
+          pinned_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+            "${nix_builder_args[@]}" "${ca_args[@]}" \
+            --set nixBuilders.knownHosts.pinned=true \
+            --set nixBuilders.knownHosts.revision=test-v1)
+          if ! grep -qF -- 'name: nix-builder-known-hosts' <<< "$pinned_out" \
+             || ! grep -qF -- '@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA' <<< "$pinned_out"; then
+            echo "knownHosts.pinned=true must mount the pinned Secret and keep the @cert-authority line" >&2
+            exit 1
+          fi
+          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+               "${nix_builder_args[@]}" --set nixBuilders.knownHosts.pinned=true > /dev/null 2>&1; then
+            echo "knownHosts.pinned=true guard did not fire on a missing revision" >&2
+            exit 1
+          fi
+          # An unknown protocol is not a degraded one, it is a typo that
+          # would render a machines file no store URI scheme understands.
+          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+               "${nix_builder_args[@]}" "${ca_args[@]}" \
+               --set nixBuilders.login.protocol=bogus > /dev/null 2>&1; then
+            echo "nixBuilders.login.protocol guard did not fire on an unknown protocol" >&2
+            exit 1
+          fi
+          # The removed deprecated alias: any nixBuilders.sshUser -- even
+          # the `nixremote` the last v4 consumer set -- is refused.
+          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
+               "${nix_builder_args[@]}" "${ca_args[@]}" \
+               --set nixBuilders.sshUser=nixremote > /dev/null 2>&1; then
+            echo "removed-values guard did not fire on nixBuilders.sshUser" >&2
             exit 1
           fi
           bash -n image/nix-worker-*.sh

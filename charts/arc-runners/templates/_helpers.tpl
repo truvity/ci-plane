@@ -54,37 +54,17 @@ never needs a rebuilt image to say so. */ -}}
 {{- end -}}
 
 {{- /*
-The effective machine-login user: `login.user`, absorbing the DEPRECATED
-top-level `sshUser` (kept for the one existing consumer that already
-sets it; see values.yaml). "nixremote" is the shared default for BOTH
-fields, so it is the sentinel for "not customized" -- there is no other
-way to tell "left at default" from "set back to the same string" in
-Helm. Only when `sshUser` is customized does it matter at all:
-
-  sshUser default, login.user anything  -> login.user (the normal path)
-  sshUser custom,  login.user default   -> sshUser (the alias)
-  sshUser custom,  login.user == sshUser -> either, they agree
-  sshUser custom,  login.user custom, different -> fail: an upgrade must
-    not silently pick one of two conflicting logins.
+The machine-login user: `login.user`. v5.0.0 removed the deprecated
+top-level `sshUser` alias it used to absorb (templates/removed-values.yaml
+refuses it).
 */ -}}
 {{- define "arc-runners.nixBuilderUser" -}}
-{{- $b := .Values.nixBuilders -}}
-{{- $sshUser := $b.sshUser -}}
-{{- $loginUser := $b.login.user -}}
-{{- if ne $sshUser "nixremote" -}}
-{{- if and (ne $loginUser "nixremote") (ne $loginUser $sshUser) -}}
-{{- fail (printf "nixBuilders.sshUser (%q) and nixBuilders.login.user (%q) disagree. nixBuilders.sshUser is DEPRECATED (removal in a later release) and only an alias for nixBuilders.login.user -- set login.user alone." $sshUser $loginUser) -}}
-{{- end -}}
-{{- $sshUser -}}
-{{- else -}}
-{{- $loginUser -}}
-{{- end -}}
+{{- .Values.nixBuilders.login.user -}}
 {{- end -}}
 
 {{- /*
-The store URI scheme is login.protocol -- "ssh" (default) or "ssh-ng" --
-so a cut-over to the modern protocol changes only this one token per
-line; the field layout (system, ssh-key path, maxjobs, speed-factor,
+The store URI scheme is login.protocol -- "ssh-ng" (default) or "ssh" --
+so the protocol changes only this one token per line; the field layout (system, ssh-key path, maxjobs, speed-factor,
 supported/mandatory features) is Nix's machine-file format and is the
 same for both schemes.
 */ -}}
@@ -101,12 +81,11 @@ same for both schemes.
 {{- end -}}
 
 {{- /*
-Host certificates, phase 1. Renders one `@cert-authority` line per
+Renders one `@cert-authority` line per
 nixBuilders.knownHosts.certAuthorities entry, joined with newlines; an
-empty list renders "". Appended by nix-worker-client's setup binary to
-the pinned known_hosts Secret content -- both stay valid at once during
-a migration from one static host key per worker to one CA line trusting
-every host it signs for.
+empty list renders "". nix-worker-client's setup binary makes this the
+WHOLE of known_hosts (knownHosts.pinned: false, the v5.0.0 default), or
+appends it to the pinned Secret content (pinned: true).
 */ -}}
 {{- define "arc-runners.nixKnownHostsCertAuthorities" -}}
 {{- $lines := list -}}

@@ -123,7 +123,28 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: runner-nix-config-3080e7c8428f
+  name: runner-nix-config-df8643f062aa
+  labels:
+    app.kubernetes.io/name: runner-nix-config
+    app.kubernetes.io/part-of: gha-rs
+data:
+  nix.conf: |
+    filetransfer-retry-attempts = 8
+    filetransfer-retry-delay = 5000
+    filetransfer-retry-delay-rate-limited = 10000
+    filetransfer-retry-max-delay = 60000
+    filetransfer-retry-jitter = true
+    connect-timeout = 30
+    stalled-download-timeout = 300
+    
+immutable: true
+
+---
+# Source: arc-runners/templates/nix-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner-nix-config-eaf2b093c138
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
@@ -138,27 +159,6 @@ data:
     stalled-download-timeout = 300
     sandbox = true
     sandbox-fallback = false
-    
-immutable: true
-
----
-# Source: arc-runners/templates/nix-config.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: runner-nix-config-df8643f062aa
-  labels:
-    app.kubernetes.io/name: runner-nix-config
-    app.kubernetes.io/part-of: gha-rs
-data:
-  nix.conf: |
-    filetransfer-retry-attempts = 8
-    filetransfer-retry-delay = 5000
-    filetransfer-retry-delay-rate-limited = 10000
-    filetransfer-retry-max-delay = 60000
-    filetransfer-retry-jitter = true
-    connect-timeout = 30
-    stalled-download-timeout = 300
     
 immutable: true
 
@@ -373,7 +373,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-3080e7c8428f
+                  name: runner-nix-config-eaf2b093c138
                   key: nix.conf
           resources:
             limits:

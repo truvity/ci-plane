@@ -1,0 +1,16 @@
+# refuses: nixWorkers.openbao.address is required when nixWorkers.hostCertificate is enabled
+# Host certificates are on by default (v5.0.0), so enabling the workers
+# without the OpenBao route they sign on is refused, not guessed.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

@@ -1,6 +1,6 @@
 // nix-worker-client signs an ephemeral SSH USER key for a runner pod with an
 // OpenBao SSH secrets engine, so the pod can reach the shared nix workers as
-// principal "nixremote" without a long-lived credential.
+// principal "ci-nix" (by default) without a long-lived credential.
 //
 // A SIBLING BINARY to nix-worker-host-cert (image/nix-worker-host-cert), not
 // a mode flag on it: see that binary's package comment for why the two stay
@@ -36,13 +36,14 @@ import (
 const (
 	maxResponseBytes = 1 << 20
 
-	// Today's shape, unchanged: the legacy account and principal, the
-	// classic ssh:// store protocol. A cut-over to ssh-ng picks a
-	// different principal (bound to the worker's second login,
-	// ci-builders' nixWorkers.accounts.nix) and protocol; both come in
-	// as NIX_BUILDER_PRINCIPAL / NIX_BUILDER_PROTOCOL and default to
-	// these.
-	defaultPrincipal = "nixremote"
+	// v5.0.0 defaults: the worker's `nix` account over ssh-ng
+	// (nix-daemon --stdio), for the principal ci-builders'
+	// nixWorkers.accounts.nix.principals admits by default. Both come in
+	// as NIX_BUILDER_PRINCIPAL / NIX_BUILDER_PROTOCOL (arc-runners always
+	// renders them) and default to these. The legacy `nixremote` principal
+	// over ssh:// is gone from the workers.
+	defaultPrincipal = "ci-nix"
+	defaultProtocol  = protocolSSHNG
 	protocolSSH      = "ssh"
 	protocolSSHNG    = "ssh-ng"
 
@@ -167,12 +168,15 @@ func loadConfig() (config, error) {
 		}
 	}
 
-	cfg.protocol = envOr("NIX_BUILDER_PROTOCOL", protocolSSH)
+	cfg.protocol = envOr("NIX_BUILDER_PROTOCOL", defaultProtocol)
 	if cfg.protocol != protocolSSH && cfg.protocol != protocolSSHNG {
 		return cfg, fmt.Errorf("NIX_BUILDER_PROTOCOL %q must be %q or %q", cfg.protocol, protocolSSH, protocolSSHNG)
 	}
 
-	knownHostsPinned := envOr("NIX_BUILDER_KNOWN_HOSTS_PINNED", "true")
+	// Unpinned by default (v5.0.0): known_hosts is the
+	// `@cert-authority` line(s) alone, trusting the workers' host
+	// certificates rather than any one worker's host key.
+	knownHostsPinned := envOr("NIX_BUILDER_KNOWN_HOSTS_PINNED", "false")
 	switch knownHostsPinned {
 	case "true":
 		cfg.knownHostsPinned = true

@@ -12,16 +12,12 @@ cores=${NIX_WORKER_CORES:-4}
 min_free=${NIX_WORKER_MIN_FREE_BYTES:-10737418240}
 max_free=${NIX_WORKER_MAX_FREE_BYTES:-21474836480}
 
-# Host certificates, phase 1. Both features are ADDITIVE and default
-# to their pre-existing behaviour: an install that sets neither renders
-# and runs exactly as before.
-#
-# `nix` is a second SSH login (ssh-ng via `nix-daemon --stdio`), gated by
+# `nix` is the machine login (ssh-ng via `nix-daemon --stdio`), gated by
 # AuthorizedPrincipalsFile content the chart renders from
-# nixWorkers.accounts.nix.principals -- an empty (the default) or absent
-# file means nobody. AllowUsers only needs to gain `nix` when that file
-# is non-empty; sshd_config bakes the Match block unconditionally, so
-# whether the account can ever be reached is decided entirely here.
+# nixWorkers.accounts.nix.principals -- an empty or absent file means
+# nobody. AllowUsers only gains `nix` when that file is non-empty;
+# sshd_config bakes the Match block unconditionally, so whether the
+# account can ever be reached is decided entirely here.
 #
 # The ConfigMap itself is mounted read-only at $principals_src_dir, NOT
 # at the path sshd is told to trust. Kubernetes' ConfigMap volume plugin
@@ -84,26 +80,56 @@ else
   install -o root -g opksshuser -m 0640 /dev/null "$opk_dir/auth_id"
 fi
 
-# The legacy `nixremote` login (`nix-store --serve`), on by default --
-# today's only way in. false makes it unreachable at once: it drops out
-# of AllowUsers below and out of allowed-users/trusted-users here,
-# nothing else changes. The image keeps the `nixremote` user and its
-# nix-worker-ssh-command shim either way -- removing either is a later,
-# separate step.
-nixremote_enabled=${NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED:-true}
+# v5.0.0 removed the legacy `nixremote` login (`nix-store --serve`) and
+# its shim from this image. An old chart still rendering the toggle on
+# would otherwise start a worker whose only machine login silently no
+# longer exists; refuse instead, naming the fix.
+if [[ "${NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED:-false}" == "true" ]]; then
+  echo "nix worker: NIX_WORKER_ACCOUNTS_NIXREMOTE_ENABLED=true, but this image (ci-plane >= 5.0.0) has no nixremote login; use a ci-builders chart of the same version as the image" >&2
+  exit 1
+fi
 
-# Host certificates: sign this worker's OWN SSH host key so a client's
-# known_hosts can trust one `@cert-authority` line instead of pinning one
-# host key Secret per architecture (charts/ci-builders values.nixWorkers.hostCertificate).
+# Host certificates: this worker's SSH host identity is certified by an
+# OpenBao SSH host CA, so a client's known_hosts trusts one
+# `@cert-authority` line instead of pinning a host key
+# (charts/ci-builders values.nixWorkers.hostCertificate).
+#
+# With a certificate, the host KEY is EPHEMERAL: generated here, per pod
+# (freshly on every container start), in the runtime emptyDir, and never
+# stored anywhere else -- no Kubernetes Secret, no secret manager row.
+# Nothing has to trust the key itself, only the CA's signature on it, so
+# a key that dies with the pod is strictly less to protect and nothing to
+# rotate. Without a certificate (hostCertificate.enabled: false) clients
+# can only pin the key, so it has to be stable: the static key the chart
+# mounts from nixWorkers.ssh.existingSecret, the one path that still
+# reads $ssh_dir.
 host_cert_enabled=${NIX_WORKER_HOST_CERTIFICATE_ENABLED:-false}
 host_cert_renew_every=${NIX_WORKER_HOST_CERTIFICATE_RENEW_EVERY:-12h}
+if [[ "$host_cert_enabled" == "true" ]]; then
+  host_key_file="$runtime_dir/ssh_host_ed25519_key"
+else
+  host_key_file="$ssh_dir/ssh_host_ed25519_key"
+fi
 host_pubkey_file="$runtime_dir/ssh_host_ed25519_key.pub"
 host_cert_file="$runtime_dir/ssh_host_ed25519_key-cert.pub"
 
 nix_daemon=$(<"$runtime_dir/nix-daemon-path")
 [[ -x "$nix_daemon" ]]
-[[ -s "$ssh_dir/ssh_host_ed25519_key" && -s "$trusted_user_ca" ]]
+[[ -s "$trusted_user_ca" ]]
 ssh-keygen -l -f "$trusted_user_ca" >/dev/null
+
+if [[ "$host_cert_enabled" == "true" ]]; then
+  # Whatever a previous container of this same pod left in the emptyDir
+  # (key, public half, certificate) is discarded first: a certificate
+  # for a key this process did not generate must never be the one the
+  # readiness probe finds.
+  rm -f "$host_key_file" "$host_pubkey_file" "$host_cert_file"
+  ssh-keygen -q -t ed25519 -N '' -C "nix-worker-${HOSTNAME:-unknown}" -f "$host_key_file"
+  chmod 0600 "$host_key_file"
+  echo "nix worker: generated an ephemeral host key $(ssh-keygen -l -f "$host_key_file.pub" | awk '{print $2}')"
+else
+  [[ -s "$host_key_file" ]]
+fi
 
 mkdir -p /build /nix/store /nix/var/nix/daemon-socket
 chown root:nixbld /build
@@ -114,26 +140,19 @@ rm -f /nix/var/nix/daemon-socket/socket
 
 # trusted-users grants IMPORT WITHOUT SIGNATURE VERIFICATION -- the whole
 # point of Nix's sandboxing model -- so `nix` joins it only when the
-# operator opted in (nixWorkers.accounts.nix.trusted); `allowed-users`
-# (what may talk to the daemon at all) always includes `nix`, whether or
-# not sshd will ever let anyone reach it, since sshd -- not nix-daemon --
-# is what actually decides whether an account is reachable. `nixremote`
-# joins both lists only while its own login is enabled
-# (nixWorkers.accounts.nixremote.enabled); disabled, nix-daemon simply
-# never hears from an account sshd no longer admits either.
+# operator asked (nixWorkers.accounts.nix.trusted, on by default since
+# v5.0.0 because a remote build worker needs it, exactly as the removed
+# `nixremote` login always had it); `allowed-users` (what may talk to
+# the daemon at all) always includes `nix`, whether or not sshd will ever
+# let anyone reach it, since sshd -- not nix-daemon -- is what actually
+# decides whether an account is reachable.
 trusted_users="root"
-allowed_users="root"
-if [[ "$nixremote_enabled" == "true" ]]; then
-  trusted_users="$trusted_users nixremote"
-  allowed_users="$allowed_users nixremote"
-fi
-allowed_users="$allowed_users nix"
+allowed_users="root nix"
 [[ "$nix_trusted" == "true" ]] && trusted_users="$trusted_users nix"
 
 # Preserve the image's cache-first substituters and add only worker
-# daemon policy. The remote account is trusted because Nix requires a
-# trusted SSH user for distributed builds; sshd separately restricts it
-# to the Nix store protocol.
+# daemon policy. sshd separately restricts `nix` to the Nix daemon
+# protocol (its ForceCommand).
 export NIX_CONFIG="$(cat /home/runner/.config/nix/nix.conf)
  sandbox = true
  build-users-group = nixbld
@@ -165,48 +184,40 @@ done
 # fails OPEN (a runner degrades to local builds); a worker's host identity
 # has no "degraded" mode a client can fall back to mid-connection.
 if [[ "$host_cert_enabled" == "true" ]]; then
-  ssh-keygen -y -f "$ssh_dir/ssh_host_ed25519_key" > "$host_pubkey_file"
+  ssh-keygen -y -f "$host_key_file" > "$host_pubkey_file"
   NIX_WORKER_HOST_PUBLIC_KEY_FILE="$host_pubkey_file" \
     NIX_WORKER_HOST_CERT_FILE="$host_cert_file" \
     /usr/local/bin/nix-worker-host-cert
   echo "nix worker: host certificate installed"
 fi
 
-# A runtime copy: the baked /etc/nix-worker/sshd_config never changes, so
-# an install using neither feature above runs the byte-identical file it
-# always did. `sed` targets the exact baked line, not a merge of repeated
-# AllowUsers directives -- OpenSSH does not document those as additive,
-# and this is the one line that decides whether `nix` can be reached at
+# A runtime copy: the baked /etc/nix-worker/sshd_config never changes.
+# `sed` targets the exact baked `AllowUsers nix` line, not a merge of
+# repeated AllowUsers directives -- OpenSSH does not document those as
+# additive, and this is the one line that decides who can be reached at
 # all, so it is worth being exact rather than convenient.
+#
+# `admin` (opkssh, the people pilot) is an independent second account;
+# with neither it nor `nix` reachable this worker would admit nobody.
+# The chart refuses that shape at render time (an empty
+# nixWorkers.accounts.nix.principals); refuse it here too, so this
+# script stays correct standalone (hack/nix-worker-principals-e2e.sh
+# drives it without the chart).
+allow_users=()
+[[ "$allow_nix_login" == "true" ]] && allow_users+=(nix)
+[[ "$opkssh_enabled" == "true" ]] && allow_users+=(admin)
+if (( ${#allow_users[@]} == 0 )); then
+  echo "nix worker: no login is configured (the nix principals file is empty and opkssh is off); refusing to start a worker nobody can reach" >&2
+  exit 1
+fi
 runtime_sshd_config="$runtime_dir/sshd_config"
 cp /etc/nix-worker/sshd_config "$runtime_sshd_config"
-if [[ "$nixremote_enabled" == "true" ]]; then
-  if [[ "$allow_nix_login" == "true" ]]; then
-    sed -i 's/^AllowUsers nixremote$/AllowUsers nixremote nix/' "$runtime_sshd_config"
-  fi
-  # else: the baked file already reads "AllowUsers nixremote" -- byte
-  # identical to before this toggle existed.
-elif [[ "$allow_nix_login" == "true" ]]; then
-  sed -i 's/^AllowUsers nixremote$/AllowUsers nix/' "$runtime_sshd_config"
-else
-  # Only reachable when the chart's own render-time refusal is bypassed
-  # (nixremote disabled and no nix principal configured either): kept
-  # so this script stays correct standalone, e.g. under
-  # hack/nix-worker-principals-e2e.sh, which drives it without the chart.
-  sed -i 's/^AllowUsers nixremote$/AllowUsers/' "$runtime_sshd_config"
-fi
-if [[ "$opkssh_enabled" == "true" ]]; then
-  # Layered onto whichever of the three shapes above the file now has
-  # (with or without nixremote/nix already listed), rather than folded
-  # into that if/elif/else: `admin` is a THIRD, independent dimension
-  # (opkssh's own account, no CA path at all), and combining three
-  # independent booleans into one sed pattern per combination does not
-  # get more readable. Both forms the block above can have produced
-  # ("AllowUsers <something>" and the bare "AllowUsers") are covered.
-  sed -i -e '/^AllowUsers .\+$/s/$/ admin/' \
-         -e 's/^AllowUsers$/AllowUsers admin/' \
-         "$runtime_sshd_config"
-fi
+sed -i "s/^AllowUsers nix\$/AllowUsers ${allow_users[*]}/" "$runtime_sshd_config"
+grep -qx "AllowUsers ${allow_users[*]}" "$runtime_sshd_config"
+# HostKey: the baked line names the static Secret mount; with a
+# certificate it is the ephemeral key generated above instead.
+sed -i "s|^HostKey .*\$|HostKey $host_key_file|" "$runtime_sshd_config"
+grep -qx "HostKey $host_key_file" "$runtime_sshd_config"
 if [[ "$host_cert_enabled" == "true" ]]; then
   # Inserted right after the `HostKey` line, NOT appended at the end of
   # the file: sshd_config's trailing `Match User nix` block extends to

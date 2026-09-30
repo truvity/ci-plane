@@ -1,5 +1,6 @@
-# Remote Nix builders over ssh-ng, with the worker hosts named explicitly
-# and known_hosts built from a certificate authority alone.
+# Remote Nix builders at the v5 defaults -- `nix` / ci-nix over ssh-ng,
+# known_hosts built from a certificate authority alone, no pinned Secret
+# mounted -- with the worker hosts named explicitly.
 githubConfigUrl: https://github.com/example
 controllerServiceAccount:
   namespace: arc-system
@@ -9,12 +10,7 @@ runnerImage:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 nixBuilders:
   enabled: true
-  login:
-    user: nix
-    principal: ci-nix
-    protocol: ssh-ng
   knownHosts:
-    pinned: false
     certAuthorities:
       - hosts: ["*.example.svc.cluster.local"]
         key: ssh-ed25519 AAAACA
@@ -26,7 +22,6 @@ nixBuilders:
       - ssh-ed25519 AAAATEST
     authMount: jwt-example
     authRole: ci-nix
-    sshRole: ci-nix
   builders:
     - host: nix-worker-amd64.example.svc.cluster.local
       system: x86_64-linux

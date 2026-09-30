@@ -171,21 +171,23 @@ sandboxed multi-user Nix daemon have incompatible security models, and
 sharing CPU, disk, GC and failure domains would let one cache evict or
 stall the other.
 
-The runner image also serves as the worker image when Kubernetes
-overrides its command. An init container imports the image's Nix
+The workers run their own image (`image/nix-worker`, split from the
+runner image on 2026-09-24). An init container imports the image's Nix
 closure into the persistent alternate-root store through Nix itself,
 including the validity database; raw copying or mounting an empty PVC
 over the baked store would produce an unusable image. The worker then
-runs `nix-daemon` with build users and exposes only the legacy Nix SSH
-store protocol. `sshd` forbids passwords, forwarding, TTYs and arbitrary
-commands; its force-command accepts only `nix-store --serve` and
-`nix-store --serve --write`.
+runs `nix-daemon` with build users and exposes one machine login: `nix`,
+over the ssh-ng protocol, forced to `nix-daemon --stdio`. `sshd` forbids
+passwords, forwarding, TTYs and arbitrary commands. (v5.0.0 removed the
+legacy `nixremote` login, whose force-command accepted only
+`nix-store --serve`.)
 
-The estate supplies only a stable server host key in ci-builders'
-namespace, public `known_hosts` in each ARC namespace, the OpenBao
-HTTPS CA, and one or more public keys of the environment's SSH user CA
-(exported, for example, as `sshUserCaPublicKeys`; the workers trust the
-same keys).
+The estate supplies only the OpenBao HTTPS CA, one or more public keys
+of the environment's SSH user CA (exported, for example, as
+`sshUserCaPublicKeys`; the workers trust the same keys), and the public
+key of its SSH HOST CA, which the runners trust as an `@cert-authority`
+line. No host key is stored anywhere: each worker pod generates its own
+(see [below](#worker-host-certificates-and-ephemeral-host-keys)).
 Client private keys never enter Helm, OpenBao KV, ESO or Kubernetes
 Secrets: the runner generates an Ed25519 key in its pod-local
 `emptyDir`, exchanges a narrowly projected ServiceAccount JWT for an
@@ -226,11 +228,13 @@ stores are caches, not artifact authorities or backups. Access by two
 organizations is an explicit shared-cache trust decision: either CI
 identity can submit writes to the same architecture store.
 
-### Worker host certificates (phase 1)
+### Worker host certificates and ephemeral host keys
 
-The pinned-host-key path above (`ssh.existingSecret`) does not go away;
-`nixWorkers.hostCertificate` is an ADDITIVE alternative, off by default.
-Enabling it signs the worker's own `ssh_host_ed25519_key` with an OpenBao
+`nixWorkers.hostCertificate` is ON by default since v5.0.0. The worker
+generates an **ephemeral ed25519 host key per pod** at container start
+(`nix-worker-entrypoint.sh`, into the memory-backed runtime `emptyDir`;
+a fresh one on every container start, whatever an earlier container of
+the same pod left there discarded first) and signs it with an OpenBao
 SSH secrets engine — `cert_type=host`, `valid_principals` set to the
 worker's own DNS name, COMPUTED by the chart from the release namespace
 (`nix-worker-<arch>.<namespace>.svc.cluster.local`) rather than taken as
@@ -238,8 +242,20 @@ a raw value, so a public repository never invites an estate-specific
 hostname into a values file. A client that trusts the signing CA's public
 key as an `@cert-authority` line (`arc-runners`'
 `nixBuilders.knownHosts.certAuthorities`) then trusts every worker that
-CA signs for, instead of pinning one host key Secret per architecture —
-both mechanisms stay valid at once during a migration.
+CA signs for. Nothing trusts the key itself, only the CA's signature on
+it, so a key that dies with its pod is strictly less to protect than a
+stable one in a Secret, and there is nothing to rotate: every restart is
+a rotation. The readiness probe (`nix-worker-healthcheck --readiness`)
+reports ready only while a certificate exists, parses, has at least
+`minRemaining` of validity left, AND certifies exactly this pod's host
+key — a fresh certificate for some other key is refused like a missing
+one.
+
+The static host key (`nixWorkers.ssh.existingSecret`, no default since
+v5.0.0) remains only as the explicit `hostCertificate.enabled: false`
+path: without a certificate a client can only pin the key, so it has to
+be stable, and the runners then set `nixBuilders.knownHosts.pinned:
+true`.
 
 Signing and renewal happen in the SAME container as sshd, not a separate
 init container: `nix-worker-entrypoint.sh` signs once before starting
@@ -265,10 +281,11 @@ fail-open there) and unrelated deployment targets (a persistent worker
 pod vs. an ephemeral runner pod). See that binary's own top-of-file
 comment for the full reasoning.
 
-A second SSH login, `nix`, exists in the image alongside `nixremote`'s
-legacy `nix-store --serve`: the modern ssh-ng protocol via `nix-daemon
---stdio`, gated by `AuthorizedPrincipalsFile` content the chart renders
-from `nixWorkers.accounts.nix.principals` (empty by default — nobody).
+The machine login, `nix` — the ssh-ng protocol via `nix-daemon
+--stdio` — is gated by `AuthorizedPrincipalsFile` content the chart
+renders from `nixWorkers.accounts.nix.principals` (`[ci-nix]` by default
+since v5.0.0; an empty list is refused, since it would leave no machine
+login at all).
 `sshd_config`'s `Match User nix` block is baked into every image
 unconditionally; whether the account is ever reachable is decided by
 whether `AllowUsers` gains `nix`, which `nix-worker-entrypoint.sh`
@@ -276,37 +293,26 @@ computes at container start from that principals file. `trusted-users`
 in the Nix daemon config gains `nix` only when
 `nixWorkers.accounts.nix.trusted` is set — trusted users can import
 store paths WITHOUT signature verification, which is what Nix's
-sandboxing model exists to prevent, so it is off by default.
+sandboxing model exists to prevent. A remote build worker needs it
+(runners upload unsigned derivation inputs), so it is on by default
+since v5.0.0 — the same trust the removed `nixremote` login always had.
 
-### Runners over ssh-ng (phase 2)
+### Runners over ssh-ng
 
-Phase 1 above built the worker's side of a second login; this phase is
-the runner's side of actually using it, and both are configurable, not
-mutually exclusive. `arc-runners`' `nixBuilders.login.{user, principal,
-protocol}` chooses the machine: today's unchanged default is the legacy
-`nixremote` account and `ssh://` (`nix-store --serve`); a cut-over sets
-`user: nix`, a `principal` that is in the worker's
-`nixWorkers.accounts.nix.principals` list (not necessarily `nix` itself
-— `AuthorizedPrincipalsFile` can require a narrower name than the
-account), and `protocol: ssh-ng`. `nixBuilders.openbao.sshRole` then
-names whichever signing role issues for that principal — there is no
-second role value, because the cut-over is which role `sshRole` points
-at, not a parallel setting.
-
-`login.user` absorbed the chart's former top-level `sshUser`, kept as a
-DEPRECATED, non-breaking alias (removal in a later release) rather than
-a hard rename: an existing installation that already sets `sshUser` — and
-is auto-promoted onto new chart releases without a values change of its
-own — must keep rendering exactly what it rendered before. Setting only
-`sshUser` (its default value or a custom one) is honoured as `login.user`;
-setting both to the SAME value is fine either way; setting both to
-DIFFERENT non-default values is a render-time failure rather than a
-silent pick of one (`arc-runners.nixBuilderUser` in `_helpers.tpl`). New
-installs should set `login.user` alone.
+`arc-runners`' `nixBuilders.login.{user, principal, protocol}` chooses
+the machine login; since v5.0.0 the defaults are the only one the
+workers have: `user: nix`, `principal: ci-nix` (which must be in the
+worker's `nixWorkers.accounts.nix.principals` list — not necessarily
+`nix` itself, `AuthorizedPrincipalsFile` can require a narrower name
+than the account), `protocol: ssh-ng`. `nixBuilders.openbao.sshRole`
+(default `ci-nix`) names the signing role that issues for that
+principal. v5.0.0 removed the legacy `nixremote`/`ssh://` login and the
+deprecated top-level `sshUser` alias of `login.user`; setting `sshUser`
+is a render-time failure (`templates/removed-values.yaml`), not a
+silently ignored key.
 
 `nix-worker-client` validates a returned certificate against the
-configured principal and protocol exactly as it always validated against
-the fixed `nixremote` principal: one principal, no extension but
+configured principal and protocol: one principal, no extension but
 `permit-pty`. Under `ssh-ng` it additionally allows ONE critical option,
 `force-command`, and only when its value is exactly `nix-daemon --stdio`
 — what the worker's `Match User nix` block already forces server-side
@@ -319,12 +325,14 @@ certificate forcing anything else is refused before any credential is
 published, the same fail-open contract as every other rejection here:
 local Nix builds remain available.
 
-`nixBuilders.knownHosts.pinned` (default `true`) is independent of the
-login: it decides whether the runner's `known_hosts` still pins each
-worker's static key (today's Secret) or is built ENTIRELY from
-`certAuthorities` (the phase 1 host-certificate CA line) when set to
-`false`. Setting it `false` with an empty `certAuthorities` list is
-refused at render time — that combination would trust nothing.
+`nixBuilders.knownHosts.pinned` (default `false` since v5.0.0) is
+independent of the login: unpinned, the runner's `known_hosts` is built
+ENTIRELY from `certAuthorities` (the workers' host CA line) and the
+pinned Secret is not mounted; `true` is the explicit static-key path,
+pinning each worker's static key from a Secret (for workers with
+`hostCertificate.enabled: false`). Unpinned with an empty
+`certAuthorities` list is refused at render time — that combination
+would trust nothing.
 
 **Verified directly**, no OpenBao involved: the real `nix-worker`
 image, a locally generated host key, a local CA standing in for the
@@ -393,9 +401,9 @@ default the principals ConfigMap already establishes.
 `admin` is the one account on this worker with a real interactive shell
 and `sudo` (passwordless: there is no password authentication method to
 enter one against). `Match User admin` in `image/sshd_config` sets
-`ForceCommand none` — overriding the GLOBAL `ForceCommand` (the legacy
-`nixremote` shim) that would otherwise force `admin`'s session through
-it too — and `PermitTTY yes`, the one place this worker grants a real
+`ForceCommand none` — overriding the GLOBAL `ForceCommand` (`nologin`
+since v5.0.0 removed the legacy `nixremote` shim it used to be) that
+would otherwise force `admin`'s session through it too — and `PermitTTY yes`, the one place this worker grants a real
 terminal. `nix` stays `ForceCommand nix-daemon --stdio` regardless of
 which credential (certificate or opkssh) reached it: opkssh only adds a
 SECOND way in, never a different account or a different forced command.

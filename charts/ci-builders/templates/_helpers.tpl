@@ -21,18 +21,17 @@ which worked, and meant neither half could be tuned for what it is: the
 worker carried a docker client, buildx, devbox, goreleaser and two cache
 clients it never used.
 
-Falls back to runnerImage when nixWorkerImage names no repository, so a
-consumer pinned to a chart version older than the split keeps rendering
-exactly what it rendered before. Remove the fallback once no supported
-values file sets only runnerImage.
+v5.0.0 removed the fallback to runnerImage: the runner image no longer
+carries sshd's config, the worker scripts or any machine login, so a
+worker on it could never start. A values file that empties
+nixWorkerImage.repository is refused instead.
 */ -}}
 {{- define "ci-builders.nixWorkerImage" -}}
 {{- $i := .Values.nixWorkerImage -}}
-{{- if and $i $i.repository -}}
-{{- include "ci-builders.pinnedImage" $i -}}
-{{- else -}}
-{{- include "ci-builders.runnerImage" . -}}
+{{- if not (and $i $i.repository) -}}
+{{- fail "nixWorkerImage.repository is required when nixWorkers is enabled: since v5.0.0 the workers no longer fall back to runnerImage, which carries no worker role" -}}
 {{- end -}}
+{{- include "ci-builders.pinnedImage" $i -}}
 {{- end -}}
 
 {{/*

@@ -1,0 +1,27 @@
+# refuses: removed `nixBuilders.sshUser`
+# v5.0.0 removed the deprecated alias together with the legacy login it
+# named; `sshUser: nixremote` is what the last v4 consumer set.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+nixBuilders:
+  enabled: true
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: ci-nix
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+  sshUser: nixremote
+  knownHosts:
+    certAuthorities:
+      - hosts: ["*.example.svc.cluster.local"]
+        key: ssh-ed25519 AAAACA

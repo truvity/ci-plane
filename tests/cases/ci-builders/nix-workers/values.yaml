@@ -1,5 +1,7 @@
-# Persistent Nix workers with host certificates, the ssh-ng login and the
-# opkssh pilot on one architecture: every optional path of nix-workers.yaml.
+# Persistent Nix workers at the v5 defaults -- an ephemeral host key per
+# pod signed as a host certificate, the `nix` ssh-ng login for ci-nix,
+# trusted -- plus the opkssh pilot on one architecture. No
+# nix-builder-server Secret is mounted anywhere in this render.
 buildkitd:
   networkPolicy:
     consumerNamespaces: [arc-runners-example]
@@ -13,18 +15,12 @@ nixWorkers:
       - ssh-ed25519 AAAATEST
   networkPolicy:
     consumerNamespaces: [arc-runners-example, arc-runners-other]
-  hostCertificate:
-    enabled: true
   openbao:
     address: https://openbao.example
     namespace: example
     caBundle: dGVzdA==
     authMount: jwt-example
     authRole: nix-worker
-  accounts:
-    nix:
-      principals: [ci@example]
-      trusted: true
   opkssh:
     archs: [amd64]
     issuer: https://access.example

@@ -196,7 +196,7 @@ func TestValidateCertificate(t *testing.T) {
 			// The legacy protocol never accepts a critical option, even
 			// one an ssh-ng role would consider correct: a certificate
 			// meant for the modern account must not also work as one
-			// for the legacy nixremote account.
+			// for a legacy ssh:// (nix-store --serve) login.
 			name:     "ssh: force-command is still refused",
 			protocol: protocolSSH,
 			cert: ca.sign(t, key, certOptions{
@@ -226,21 +226,21 @@ func TestValidateCertificate(t *testing.T) {
 	}
 }
 
-// A custom principal (an ssh-ng cut-over binds a principal distinct from
-// the account name, e.g. "ci-nix") is validated exactly like the default
-// one: only that principal, alone, is accepted.
+// A custom principal (one distinct from the default "ci-nix", e.g. a
+// second estate's own) is validated exactly like the default one: only
+// that principal, alone, is accepted.
 func TestValidateCertificateCustomPrincipal(t *testing.T) {
 	ca := newTestCA(t)
 	key := newUserKey(t)
 	publicKey := ssh.MarshalAuthorizedKey(key)
 	authorities := []ssh.PublicKey{ca.public}
 
-	cert := ca.sign(t, key, certOptions{principals: []string{"ci-nix"}})
-	if err := validateCertificate(cert, publicKey, authorities, "ci-nix", time.Hour, protocolSSHNG); err != nil {
+	cert := ca.sign(t, key, certOptions{principals: []string{"ci-other"}})
+	if err := validateCertificate(cert, publicKey, authorities, "ci-other", time.Hour, protocolSSHNG); err != nil {
 		t.Fatalf("want accepted, got %v", err)
 	}
 	if err := validateCertificate(cert, publicKey, authorities, defaultPrincipal, time.Hour, protocolSSHNG); err == nil {
-		t.Fatal("want refused: certificate is for ci-nix, not the configured principal")
+		t.Fatal("want refused: certificate is for ci-other, not the configured principal")
 	}
 }
 
@@ -364,7 +364,7 @@ func setupConfig(t *testing.T, server *httptest.Server, ca testCA) config {
 		// empty one -- nothing appended, known_hosts unchanged.
 		certAuthoritiesSource: filepath.Join(dir, "known-hosts-cert-authorities"),
 		sshConfigSource:       write("ssh_config", []byte("Host worker\n  BatchMode yes\n")),
-		machinesSource:        write("machines.template", []byte("ssh://nixremote@worker x86_64-linux /home/runner/.ssh/nix-builder 2 1 - -\n")),
+		machinesSource:        write("machines.template", []byte("ssh://nix@worker x86_64-linux /home/runner/.ssh/nix-builder 2 1 - -\n")),
 		sshDir:                filepath.Join(dir, "ssh"),
 		machinesDir:           filepath.Join(dir, "machines"),
 		podName:               "runner-0",
@@ -472,8 +472,8 @@ func TestSetupRefusesUnexpectedExtensionAndStaysLocal(t *testing.T) {
 	}
 }
 
-// The ssh-ng cut-over: a distinct principal ("ci-nix", bound to the
-// worker's second login rather than nixremote) and a signing role that
+// ssh-ng (the default since v5.0.0): the principal ("ci-nix", bound to
+// the worker's `nix` login) and a signing role that
 // adds force-command matching what the worker forces server-side. Both
 // end-to-end paths -- setup succeeding with the matching command, and
 // staying local when the role hands back the wrong one -- prove the
@@ -570,5 +570,43 @@ func TestPrepareOutputsRefusesUnpinnedWithNoCertAuthorities(t *testing.T) {
 	err := prepareOutputs(cfg)
 	if err == nil || !strings.Contains(err.Error(), "nothing to trust") {
 		t.Fatalf("want refused, got %v", err)
+	}
+}
+
+// v5.0.0: with nothing but the required routing set, the client asks for
+// the ci-nix principal over ssh-ng and trusts the workers through
+// @cert-authority lines alone (known_hosts unpinned) -- the same shape
+// arc-runners renders by default.
+func TestLoadConfigDefaultsToCINixOverSSHNGUnpinned(t *testing.T) {
+	for name, value := range map[string]string{
+		"NIX_BUILDER_OPENBAO_ADDRESS":    "https://openbao.example",
+		"NIX_BUILDER_OPENBAO_NAMESPACE":  "example",
+		"NIX_BUILDER_OPENBAO_AUTH_MOUNT": "jwt-example",
+		"NIX_BUILDER_OPENBAO_AUTH_ROLE":  "runner-example",
+		"NIX_BUILDER_OPENBAO_SSH_MOUNT":  "ssh",
+		"NIX_BUILDER_OPENBAO_SSH_ROLE":   "ci-nix",
+		"POD_NAME":                       "runner-0",
+		"POD_NAMESPACE":                  "example",
+		"POD_UID":                        "pod-uid-example",
+		"NIX_BUILDER_PRINCIPAL":          "",
+		"NIX_BUILDER_PROTOCOL":           "",
+		"NIX_BUILDER_KNOWN_HOSTS_PINNED": "",
+	} {
+		t.Setenv(name, value)
+	}
+	// The trailing `runner` account lookup fails on a machine without
+	// one; every default under test is decided before it.
+	cfg, err := loadConfig()
+	if err != nil && !strings.Contains(err.Error(), "runner") {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.principal != "ci-nix" {
+		t.Errorf("default principal = %q, want ci-nix", cfg.principal)
+	}
+	if cfg.protocol != protocolSSHNG {
+		t.Errorf("default protocol = %q, want %q", cfg.protocol, protocolSSHNG)
+	}
+	if cfg.knownHostsPinned {
+		t.Error("known_hosts is pinned by default; v5 trusts @cert-authority lines alone")
 	}
 }

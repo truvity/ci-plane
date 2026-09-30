@@ -2,17 +2,16 @@
 {{- if .Values.nixBuilders.enabled }}
 {{- if not .Values.runnerServiceAccountName }}{{ fail "runnerServiceAccountName is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.builders }}{{ fail "nixBuilders.builders is required when nixBuilders is enabled" }}{{ end }}
-{{- /* knownHosts.pinned (default true): today's Secret-pinned host key
-     stays required. false switches known_hosts over to certAuthorities
-     alone -- the Secret is neither required nor mounted -- but an empty
-     certAuthorities list would then trust nothing and break every
-     build, so THAT combination is refused instead. */}}
+{{- /* knownHosts.pinned (default false since v5.0.0): known_hosts is
+     certAuthorities alone -- the Secret is neither required nor
+     mounted -- so an empty certAuthorities list would trust nothing and
+     break every build, and that combination is refused. true is the
+     explicit static-key path: the Secret-pinned host key is required. */}}
 {{- if .Values.nixBuilders.knownHosts.pinned }}
-{{- if not .Values.nixBuilders.knownHosts.existingSecret }}{{ fail "nixBuilders.knownHosts.existingSecret is required when nixBuilders is enabled" }}{{ end }}
-{{- if not .Values.nixBuilders.knownHosts.key }}{{ fail "nixBuilders.knownHosts.key is required when nixBuilders is enabled" }}{{ end }}
-{{- if not .Values.nixBuilders.knownHosts.revision }}{{ fail "nixBuilders.knownHosts.revision is required when nixBuilders is enabled" }}{{ end }}
-{{- else if not .Values.nixBuilders.knownHosts.certAuthorities }}{{ fail "nixBuilders.knownHosts.pinned is false with no certAuthorities: this would trust nothing and break every build" }}{{ end }}
-{{- /* Also raises the sshUser/login.user conflict fail, if any. */}}
+{{- if not .Values.nixBuilders.knownHosts.existingSecret }}{{ fail "nixBuilders.knownHosts.existingSecret is required when nixBuilders.knownHosts.pinned is true" }}{{ end }}
+{{- if not .Values.nixBuilders.knownHosts.key }}{{ fail "nixBuilders.knownHosts.key is required when nixBuilders.knownHosts.pinned is true" }}{{ end }}
+{{- if not .Values.nixBuilders.knownHosts.revision }}{{ fail "nixBuilders.knownHosts.revision is required when nixBuilders.knownHosts.pinned is true" }}{{ end }}
+{{- else if not .Values.nixBuilders.knownHosts.certAuthorities }}{{ fail "nixBuilders.knownHosts.certAuthorities is empty and knownHosts.pinned is false (the v5 default): this would trust nothing and break every build. Set one @cert-authority entry for the workers' host CA (ci-builders' nixWorkers.hostCertificate), or pin static host keys with knownHosts.pinned: true" }}{{ end }}
 {{- if not (include "arc-runners.nixBuilderUser" .) }}{{ fail "nixBuilders.login.user is required when nixBuilders is enabled" }}{{ end }}
 {{- if not .Values.nixBuilders.login.principal }}{{ fail "nixBuilders.login.principal is required when nixBuilders is enabled" }}{{ end }}
 {{- if not (has .Values.nixBuilders.login.protocol (list "ssh" "ssh-ng")) }}{{ fail (printf "nixBuilders.login.protocol %q must be \"ssh\" or \"ssh-ng\"" .Values.nixBuilders.login.protocol) }}{{ end }}

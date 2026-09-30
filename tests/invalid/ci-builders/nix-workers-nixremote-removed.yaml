@@ -1,0 +1,25 @@
+# refuses: removed `nixWorkers.accounts.nixremote`
+# v5.0.0 removed the legacy login. Even `enabled: false` -- what the last
+# v4 consumer set -- is a caller who believes this chart still has it.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker
+  accounts:
+    nixremote:
+      enabled: false

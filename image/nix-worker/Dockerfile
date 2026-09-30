@@ -10,7 +10,7 @@
 # carries a runner's docker client, buildx, devbox, goreleaser and two
 # cache clients for nothing.
 #
-# This image is the worker half, alone: nix, sshd, and the four scripts
+# This image is the worker half, alone: nix, sshd, and the three scripts
 # the chart's containers and probes invoke. It is NOT built from the
 # actions-runner base, because none of that base is a worker's business.
 #
@@ -92,7 +92,8 @@ ARG TARGETARCH
 
 # tini is the chart's entrypoint (PID 1 reaps the daemon and sshd);
 # openssh-server IS the worker's job; openssh-client is ssh-keygen,
-# which the health check runs against the trusted CA file; xz-utils and
+# which the entrypoint generates the ephemeral host key with and the
+# health check runs against the CA and host certificate; xz-utils and
 # curl are the nix installer's; bash is what every script asks for by
 # shebang and what the health check's /dev/tcp probe needs; sudo is the
 # `admin` account's whole reason to exist (the people pilot).
@@ -114,22 +115,18 @@ RUN apt-get update -qq \
 # carrying less.
 #
 # 32 nixbld accounts are what a multi-user nix daemon builds as.
-# `nixremote` is the SSH login the runners present a CA-signed
-# certificate for; it has no password and sshd restricts what it may run.
 #
-# `nix` is a SECOND login (host certificates, phase 1): the modern
-# ssh-ng protocol via `nix-daemon --stdio`, alongside `nixremote`'s legacy
-# `nix-store --serve`. It needs a real shell, not nologin: sshd's
-# ForceCommand execs the forced command through the account's shell
-# (`$SHELL -c command`), and nologin ignores that argument and just
-# refuses the session -- the same reason nixremote is bash, not nologin.
-# Nobody can actually reach it yet: sshd_config's `Match User nix` block
+# `nix` is the machine login: the ssh-ng protocol via `nix-daemon
+# --stdio`. It needs a real shell, not nologin: sshd's ForceCommand execs
+# the forced command through the account's shell (`$SHELL -c command`),
+# and nologin ignores that argument and just refuses the session. Who can
+# reach it is decided at runtime: sshd_config's `Match User nix` block
 # gates on AuthorizedPrincipalsFile /run/nix-worker/principals/%u (a copy
 # the entrypoint makes at startup out of the ConfigMap mounted at
 # /etc/nix-worker/principals-src -- StrictModes refuses that mount
-# directly), and the chart renders that content EMPTY unless
-# nixWorkers.accounts.nix.principals
-# is set (values.yaml).
+# directly), rendered from nixWorkers.accounts.nix.principals
+# (values.yaml). v5.0.0 removed the legacy `nixremote` login
+# (`nix-store --serve`) and its shim.
 RUN groupadd --system nixbld \
  && for i in $(seq 1 32); do \
       useradd --system --gid nixbld --home-dir /var/empty \
@@ -137,9 +134,6 @@ RUN groupadd --system nixbld \
     done \
  && nixbld_members=$(for i in $(seq 1 32); do printf 'nixbld%s,' "$i"; done) \
  && gpasswd -M "${nixbld_members%,}" nixbld \
- && useradd --system --create-home --home-dir /home/nixremote \
-      --shell /bin/bash nixremote \
- && passwd -d nixremote \
  && useradd --system --create-home --home-dir /home/nix \
       --shell /bin/bash nix \
  && passwd -d nix \
@@ -173,7 +167,6 @@ RUN useradd --create-home --home-dir /home/admin --shell /bin/bash admin \
 
 COPY --chmod=0755 nix-worker-seed.sh /usr/local/bin/nix-worker-seed
 COPY --chmod=0755 nix-worker-entrypoint.sh /usr/local/bin/nix-worker-entrypoint
-COPY --chmod=0755 nix-worker-ssh-command.sh /usr/local/bin/nix-worker-ssh-command
 COPY --chmod=0755 nix-worker-healthcheck.sh /usr/local/bin/nix-worker-healthcheck
 COPY --chmod=0644 sshd_config /etc/nix-worker/sshd_config
 COPY --from=hostcert --chmod=0755 /out/nix-worker-host-cert /usr/local/bin/nix-worker-host-cert
@@ -211,17 +204,15 @@ RUN NIX_CONFIG="filter-syscalls = false" \
  && /home/runner/.nix-profile/bin/nix --version
 
 # The worker mounts its PVC at /nix, hiding the profile links the
-# installer made. These aliases live OUTSIDE /nix so they survive that
-# mount; their targets are in the closure nix-worker-seed copies onto the
-# PVC. Keep the multicall names -- resolving them to the underlying
-# `.../bin/nix` loses argv[0], and nix-daemon/nix-store would then behave
-# as the generic CLI instead of their legacy modes.
+# installer made. This alias lives OUTSIDE /nix so it survives that
+# mount; its target is in the closure nix-worker-seed copies onto the
+# PVC. Keep the multicall name -- resolving it to the underlying
+# `.../bin/nix` loses argv[0], and nix-daemon would then behave as the
+# generic CLI instead of the daemon.
 USER root
 RUN mkdir -p /usr/local/libexec/nix-worker \
  && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-daemon)" \
-      /usr/local/libexec/nix-worker/nix-daemon \
- && ln -s "$(readlink -f /home/runner/.nix-profile/bin/nix-store)" \
-      /usr/local/libexec/nix-worker/nix-store
+      /usr/local/libexec/nix-worker/nix-daemon
 
 # opkssh's own prebuilt per-arch binaries (linux-amd64, linux-arm64;
 # checksums from that release's own checksums.txt, verified above). No
