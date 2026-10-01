@@ -1,0 +1,9 @@
+# refuses: restricted must be true or false
+# A quoted "false" is a non-empty string, which a template's `if` reads as
+# true: the set would silently move onto the restricted profile.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+scaleSets:
+  preview-small:
+    restricted: "false"

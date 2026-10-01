@@ -275,6 +275,39 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  name: preview-restricted-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-restricted
+    app.kubernetes.io/component: manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    verbs: ["create", "delete", "get", "patch", "update"]
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+# The controller's per-scale-set manager Role — mirrors the upstream
+# chart: the controller SA needs these in the runner namespace to run
+# ephemeral runners here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
   name: preview-small-gha-rs-manager
   labels:
     app.kubernetes.io/part-of: gha-rs
@@ -348,6 +381,25 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: preview-medium-gha-rs-manager
+subjects:
+  - kind: ServiceAccount
+    name: arc-gha-rs-controller
+    namespace: arc-system
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: preview-restricted-gha-rs-manager
+  labels:
+    app.kubernetes.io/part-of: gha-rs
+    app.kubernetes.io/instance: preview-restricted
+    app.kubernetes.io/component: manager-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: preview-restricted-gha-rs-manager
 subjects:
   - kind: ServiceAccount
     name: arc-gha-rs-controller
@@ -772,6 +824,260 @@ spec:
         - name: runner
           image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
           command: ["/home/runner/run.sh"]
+          env:
+            - name: GOMAXPROCS
+              value: "4"
+            - name: NIX_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: runner-nix-config-f3023255fffb
+                  key: nix.conf
+            # Per-job signing: the runner runs this hook as `runner` before
+            # the job's first step (see arc-runners.nixJobStartedHook). The
+            # init container's certificate covers only a job that starts
+            # within the hour; a warm pod outlives it.
+            - name: ACTIONS_RUNNER_HOOK_JOB_STARTED
+              value: /var/run/nix-builder-config/job-started.sh
+            - name: NIX_BUILDER_SSH_DIR
+              value: /home/runner/.ssh
+            - name: NIX_BUILDER_MACHINES_DIR
+              value: /etc/nix-builders
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: NIX_BUILDER_OPENBAO_ADDRESS
+              value: "https://openbao.example"
+            - name: NIX_BUILDER_OPENBAO_NAMESPACE
+              value: "example"
+            - name: NIX_BUILDER_OPENBAO_AUTH_MOUNT
+              value: "jwt-example"
+            - name: NIX_BUILDER_OPENBAO_AUTH_ROLE
+              value: "ci-nix"
+            - name: NIX_BUILDER_OPENBAO_SSH_MOUNT
+              value: "ssh"
+            - name: NIX_BUILDER_OPENBAO_SSH_ROLE
+              value: "ci-nix"
+            - name: NIX_BUILDER_CERTIFICATE_TTL
+              value: "1h"
+            - name: NIX_BUILDER_REQUEST_TIMEOUT
+              value: "15s"
+            - name: NIX_BUILDER_PRINCIPAL
+              value: "ci-nix"
+            - name: NIX_BUILDER_PROTOCOL
+              value: "ssh-ng"
+            - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
+              value: "false"
+          resources:
+            limits:
+              cpu: "4"
+              ephemeral-storage: 30Gi
+              memory: 14Gi
+            requests:
+              cpu: "2"
+              memory: 14Gi
+          # Writable by `runner` (the init container chowns both emptyDirs to
+          # it): the job-started hook replaces the key, certificate and
+          # machines file. The projected token is here for the same hook, so
+          # workflow code can read it too — see docs/architecture.md.
+          volumeMounts:
+            - name: nix-builder-config
+              mountPath: /var/run/nix-builder-config
+              readOnly: true
+            - name: nix-builder-openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: nix-builder-ssh
+              mountPath: /home/runner/.ssh
+            - name: nix-builders
+              mountPath: /etc/nix-builders
+      volumes:
+        - name: nix-builder-config
+          configMap:
+            name: runner-nix-config-f3023255fffb
+            items:
+              - key: machines.template
+                path: machines.template
+              - key: ssh_config
+                path: ssh_config
+              - key: openbao-ca.crt
+                path: openbao-ca.crt
+              - key: ssh-user-ca.pub
+                path: ssh-user-ca.pub
+              - key: job-started.sh
+                path: job-started.sh
+                mode: 0555
+              - key: known-hosts-cert-authorities
+                path: known-hosts-cert-authorities
+        # 0444: the runner container runs as `runner`, not root, and its
+        # job-started hook must read the token. The boundary is which
+        # containers mount it, not the mode: every process in the runner
+        # container is the job's own user.
+        - name: nix-builder-openbao-token
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  audience: "openbao"
+                  expirationSeconds: 600
+                  path: token
+        - name: nix-builder-ssh
+          emptyDir: {}
+        - name: nix-builders
+          emptyDir: {}
+
+---
+# Source: arc-runners/templates/runnersets.yaml
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: preview-restricted
+  labels:
+    app.kubernetes.io/name: preview-restricted
+    app.kubernetes.io/instance: preview-restricted
+    app.kubernetes.io/component: autoscaling-runner-set
+    app.kubernetes.io/part-of: gha-rs
+    # The controller's compatibility gate — see values.arcVersion.
+    app.kubernetes.io/version: "0.14.2"
+    actions.github.com/organization: example
+    actions.github.com/scale-set-name: preview-restricted
+    actions.github.com/scale-set-namespace: example
+  annotations:
+    actions.github.com/runner-group-name: Default
+    actions.github.com/runner-scale-set-name: preview-restricted
+    actions.github.com/cleanup-manager-role-name: preview-restricted-gha-rs-manager
+    actions.github.com/cleanup-manager-role-binding: preview-restricted-gha-rs-manager
+    actions.github.com/values-hash: 8cf0332ff6d64b17e8c6feda1e4fcaa60560a8e338acfd5b1d12b2f4aebc9cd
+spec:
+  githubConfigUrl: https://github.com/example
+  githubConfigSecret: arc-github-app
+  runnerGroup: Default
+  minRunners: 0
+  maxRunners: 2
+  listenerTemplate:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+  template:
+    metadata:
+      # Pod-template labels reach the runner pod verbatim; this one is
+      # what every runner's packing affinity looks for (values.packing).
+      labels:
+        ci-plane.io/packing-group: runners
+    spec:
+      serviceAccountName: preview-runner
+      automountServiceAccountToken: false
+      # Pod Security `restricted`. The uid is numeric on purpose: the
+      # image's USER is the NAME `runner`, which the kubelet cannot check
+      # against runAsNonRoot. fsGroup is what lets the non-root init
+      # container write the two emptyDirs (they mount root-owned).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  ci-plane.io/packing-group: runners
+              namespaceSelector: {}
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      initContainers:
+        - name: prepare-nix-builder-ssh
+          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["/usr/local/bin/nix-worker-client-setup"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: NIX_BUILDER_OPENBAO_ADDRESS
+              value: "https://openbao.example"
+            - name: NIX_BUILDER_OPENBAO_NAMESPACE
+              value: "example"
+            - name: NIX_BUILDER_OPENBAO_AUTH_MOUNT
+              value: "jwt-example"
+            - name: NIX_BUILDER_OPENBAO_AUTH_ROLE
+              value: "ci-nix"
+            - name: NIX_BUILDER_OPENBAO_SSH_MOUNT
+              value: "ssh"
+            - name: NIX_BUILDER_OPENBAO_SSH_ROLE
+              value: "ci-nix"
+            - name: NIX_BUILDER_CERTIFICATE_TTL
+              value: "1h"
+            - name: NIX_BUILDER_REQUEST_TIMEOUT
+              value: "15s"
+            - name: NIX_BUILDER_PRINCIPAL
+              value: "ci-nix"
+            - name: NIX_BUILDER_PROTOCOL
+              value: "ssh-ng"
+            - name: NIX_BUILDER_KNOWN_HOSTS_PINNED
+              value: "false"
+          securityContext:
+            # Restricted: the same uid as the runner, no capabilities. The
+            # emptyDirs are group-writable through the pod's fsGroup, so
+            # nothing needs handing over; the setup binary skips the
+            # chmod/chown it may not do on a directory it does not own.
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: nix-builder-config
+              mountPath: /var/run/nix-builder-config
+              readOnly: true
+            - name: nix-builder-openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+            - name: nix-builder-ssh
+              mountPath: /var/run/nix-builder-ssh
+            - name: nix-builders
+              mountPath: /var/run/nix-builders
+      containers:
+        - name: runner
+          image: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github/truvity/ci-plane/runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["/home/runner/run.sh"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: GOMAXPROCS
               value: "4"

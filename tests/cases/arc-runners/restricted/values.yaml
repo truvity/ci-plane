@@ -1,0 +1,53 @@
+# v5.1.0: one scale set (preview-restricted) on the Pod Security
+# `restricted` profile next to the three default sets, which render
+# exactly as before. nixBuilders is on so the init container's
+# restricted shape is proved too, and preview-large is left alone to
+# prove the key is per set.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: preview-runner
+runnerImage:
+  registry: 123456789012.dkr.ecr.eu-example-1.amazonaws.com/github
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+scaleSets:
+  preview-restricted:
+    restricted: true
+    minRunners: 0
+    maxRunners: 2
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 14Gi
+      limits:
+        cpu: "4"
+        memory: 14Gi
+        ephemeral-storage: 30Gi
+nixBuilders:
+  enabled: true
+  knownHosts:
+    certAuthorities:
+      - hosts: ["*.example.svc.cluster.local"]
+        key: ssh-ed25519 AAAACA
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: ci-nix
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []
+    - host: nix-worker-arm64.example.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+      supportedFeatures: []
+      mandatoryFeatures: []

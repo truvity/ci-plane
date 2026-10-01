@@ -114,6 +114,20 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- if $nixSandbox.enabled }}
 {{- if not $nixSandbox.seccompProfile }}{{ fail (printf "scaleSets.%s.nixSandbox.seccompProfile is required when nixSandbox.enabled" $name) }}{{ end }}
 {{- end }}
+{{- /*
+restricted (v5.1.0) is per-set only, like nixSandbox: it moves ONE scale
+set's runner pods, their init container and their listener onto the
+Pod Security `restricted` profile (non-root with an explicit numeric
+uid, seccomp RuntimeDefault, no privilege escalation, every capability
+dropped). Off by default, and a set that leaves it off renders exactly
+as it did before the key existed. See docs/restricted-runners.md for
+what a job loses.
+*/}}
+{{- $restricted := false }}
+{{- if hasKey $p "restricted" }}
+{{- if not (kindIs "bool" $p.restricted) }}{{ fail (printf "scaleSets.%s.restricted must be true or false, not %q" $name (toString $p.restricted)) }}{{ end }}
+{{- $restricted = $p.restricted }}
+{{- end }}
 {{- $nixConfig := include "arc-runners.nixConfigFor" (dict "root" $root "p" $p) }}
 {{- $nixConfigName := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) }}
 {{- /* Disabled, the hash input is exactly the pre-nixBuilders one, so a
@@ -136,6 +150,7 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- if hasKey $p "extraEnvFrom" }}{{ $_ := set $spec "extraEnvFrom" $extraEnvFrom }}{{ end }}
 {{- if $p.extraNixConfig }}{{ $_ := set $spec "extraNixConfig" $p.extraNixConfig }}{{ end }}
 {{- if $nixSandbox.enabled }}{{ $_ := set $spec "nixSandbox" $nixSandbox }}{{ end }}
+{{- if $restricted }}{{ $_ := set $spec "restricted" $root.Values.runnerUser }}{{ end }}
 {{- if $root.Values.awsConfig.enabled }}{{ $_ := set $spec "awsConfig" $root.Values.awsConfig }}{{ end }}
 {{- if $root.Values.projectedServiceAccountTokens }}{{ $_ := set $spec "projectedServiceAccountTokens" $root.Values.projectedServiceAccountTokens }}{{ end }}
 {{- if $root.Values.extraVolumes }}{{ $_ := set $spec "extraVolumes" $root.Values.extraVolumes }}{{ end }}
@@ -185,8 +200,21 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $restricted }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: listener
+          {{- if $restricted }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
   template:
     metadata:
       {{- if $root.Values.packing.enabled }}
@@ -218,6 +246,19 @@ spec:
       {{- if $nixSandbox.enabled }}
       hostUsers: false
       {{- end }}
+      {{- if $restricted }}
+      # Pod Security `restricted`. The uid is numeric on purpose: the
+      # image's USER is the NAME `runner`, which the kubelet cannot check
+      # against runAsNonRoot. fsGroup is what lets the non-root init
+      # container write the two emptyDirs (they mount root-owned).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $root.Values.runnerUser.uid }}
+        runAsGroup: {{ $root.Values.runnerUser.gid }}
+        fsGroup: {{ $root.Values.runnerUser.gid }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       {{- with $nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -239,6 +280,19 @@ spec:
           env:
             {{- include "arc-runners.nixBuilderEnv" $root | nindent 12 }}
           securityContext:
+            {{- if $restricted }}
+            # Restricted: the same uid as the runner, no capabilities. The
+            # emptyDirs are group-writable through the pod's fsGroup, so
+            # nothing needs handing over; the setup binary skips the
+            # chmod/chown it may not do on a directory it does not own.
+            runAsNonRoot: true
+            runAsUser: {{ $root.Values.runnerUser.uid }}
+            runAsGroup: {{ $root.Values.runnerUser.gid }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            {{- else }}
             runAsUser: 0
             runAsGroup: 0
             allowPrivilegeEscalation: false
@@ -251,6 +305,7 @@ spec:
             capabilities:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE"]
+            {{- end }}
           volumeMounts:
             {{- if $root.Values.nixBuilders.knownHosts.pinned }}
             - name: nix-builder-known-hosts
@@ -297,11 +352,23 @@ spec:
           # and, ideally, be fenced so only this set's pods can name it
           # (values.nixSandbox.fence.enabled) -- baseline PSA allows ANY
           # Localhost profile to ANY pod on the node that has the file.
+          {{- end }}
+          {{- if or $nixSandbox.enabled $restricted }}
           securityContext:
+            {{- if $restricted }}
+            runAsNonRoot: true
+            runAsUser: {{ $root.Values.runnerUser.uid }}
+            runAsGroup: {{ $root.Values.runnerUser.gid }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            {{- end }}
+            {{- if $nixSandbox.enabled }}
             procMount: Unmasked
             seccompProfile:
               type: Localhost
               localhostProfile: {{ $nixSandbox.seccompProfile | quote }}
+            {{- end }}
           {{- end }}
           env:
             - name: GOMAXPROCS
