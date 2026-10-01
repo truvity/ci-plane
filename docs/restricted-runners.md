@@ -12,7 +12,12 @@ that does not ask for it renders exactly as before.
 | runner container | no `securityContext`; the image's `USER runner` (a name) | `runAsNonRoot`, `runAsUser`/`runAsGroup` from `runnerUser` (1001), `allowPrivilegeEscalation: false`, capabilities dropped |
 | pod | none | `fsGroup` = `runnerUser.gid`, `seccompProfile: RuntimeDefault` |
 | `prepare-nix-builder-ssh` init container (only with `nixBuilders`) | uid 0, adds `CHOWN` and `DAC_OVERRIDE` | the runner's uid, no capabilities |
-| listener pod (controller namespace) | none | non-root, `RuntimeDefault`, no escalation, capabilities dropped |
+
+Every scale set's listener pod (in the controller namespace) is restricted by
+default, whatever this key says: non-root, `RuntimeDefault`, no privilege
+escalation, capabilities dropped. The listener image's user is already the
+numeric 65532 and it needs nothing more, so there is no switch for it. The key
+is for the runner pods only.
 
 The runner container already ran as the non-root `runner` user. What the
 profile removes is what that user could still do: gain privilege through a
@@ -31,7 +36,7 @@ built on a different uid.
 
 The janitor CronJob carries `seccompProfile: RuntimeDefault` for every release
 (its container was already restricted), so a namespace can enforce the profile
-once every set in it is restricted.
+once every set in it is restricted (the listeners and the janitor already are).
 
 ## What a job loses
 

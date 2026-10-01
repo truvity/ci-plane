@@ -508,8 +508,20 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is
@@ -736,8 +748,20 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is
@@ -964,6 +988,9 @@ spec:
   maxRunners: 2
   listenerTemplate:
     spec:
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -1218,8 +1245,20 @@ spec:
   maxRunners: 8
   listenerTemplate:
     spec:
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is

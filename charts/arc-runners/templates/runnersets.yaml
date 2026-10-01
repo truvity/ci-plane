@@ -116,7 +116,7 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- end }}
 {{- /*
 restricted (v5.1.0) is per-set only, like nixSandbox: it moves ONE scale
-set's runner pods, their init container and their listener onto the
+set's runner pods and their init container onto the
 Pod Security `restricted` profile (non-root with an explicit numeric
 uid, seccomp RuntimeDefault, no privilege escalation, every capability
 dropped). Off by default, and a set that leaves it off renders exactly
@@ -200,21 +200,20 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if $restricted }}
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      {{- end }}
       containers:
         - name: listener
-          {{- if $restricted }}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          {{- end }}
   template:
     metadata:
       {{- if $root.Values.packing.enabled }}
