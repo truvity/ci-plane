@@ -650,9 +650,32 @@ func atomicWrite(path string, data []byte, mode os.FileMode, uid, gid int) error
 	return nil
 }
 
+// secureDir makes path a directory with the given mode and owner.
+//
+// The pod's root-run init container does that by chmod and chown. A pod
+// on the Pod Security restricted profile runs it as the runner's own
+// user, which may do neither on a mount point that arrived root-owned
+// (an emptyDir mounts root:fsGroup, mode 0777): there the directory is
+// already group-writable through the pod's fsGroup, so the only thing to
+// check is that this process can write to it. Every file written below
+// it is still created 0600/0644 by this user, which is what ssh checks;
+// ssh does not inspect the mode of ~/.ssh itself.
 func secureDir(path string, mode os.FileMode, uid, gid int) error {
 	if err := os.MkdirAll(path, mode); err != nil {
 		return err
+	}
+	if euid := os.Geteuid(); euid != 0 {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != euid {
+			// W_OK|X_OK: create, rename and remove entries.
+			if err := syscall.Access(path, 0x2|0x1); err != nil {
+				return fmt.Errorf("%s is owned by uid %d and this process (uid %d) cannot write to it: %w", path, st.Uid, euid, err)
+			}
+			return nil
+		}
 	}
 	if err := os.Chmod(path, mode); err != nil {
 		return err
