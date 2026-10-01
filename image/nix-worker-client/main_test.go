@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -608,5 +609,64 @@ func TestLoadConfigDefaultsToCINixOverSSHNGUnpinned(t *testing.T) {
 	}
 	if cfg.knownHostsPinned {
 		t.Error("known_hosts is pinned by default; v5 trusts @cert-authority lines alone")
+	}
+}
+
+// A directory the process does not own (an emptyDir mount point, root-owned
+// and group-writable through fsGroup) is accepted when it is writable and
+// left exactly as found: a non-root process may neither chmod nor chown it.
+func TestSecureDirLeavesAnUnownedWritableDirectoryAlone(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root owns everything it can write to")
+	}
+	before, err := os.Stat(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := before.Sys().(*syscall.Stat_t); !ok || int(st.Uid) == os.Geteuid() {
+		t.Skip("the temp directory is owned by this user")
+	}
+	if err := secureDir(os.TempDir(), 0o700, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatalf("an unowned, writable directory must be accepted: %v", err)
+	}
+	after, err := os.Stat(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode() != before.Mode() {
+		t.Fatalf("mode changed from %v to %v", before.Mode(), after.Mode())
+	}
+}
+
+func TestSecureDirRefusesAnUnownedDirectoryItCannotWrite(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	info, err := os.Stat("/usr")
+	if err != nil {
+		t.Skip("no /usr")
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); !ok || st.Uid == 0 && info.Mode().Perm()&0o022 != 0 {
+		t.Skip("/usr is writable here")
+	}
+	if err := secureDir("/usr", 0o700, os.Geteuid(), os.Getegid()); err == nil {
+		t.Fatal("a directory this process cannot write to must be refused")
+	}
+}
+
+func TestSecureDirChmodsADirectoryItOwns(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ssh")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := secureDir(dir, 0o700, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode = %v, want 0700", info.Mode().Perm())
 	}
 }
