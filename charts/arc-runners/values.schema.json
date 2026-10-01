@@ -42,6 +42,20 @@
     "runnerServiceAccountName": {
       "type": "string"
     },
+    "runnerUser": {
+      "type": "object",
+      "description": "The numeric login of the runner image's user, rendered for scale sets with restricted: true.",
+      "properties": {
+        "uid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gid": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "runnerImage": {
       "type": "object",
       "properties": {

@@ -166,6 +166,9 @@ spec:
           serviceAccountName: arc-runner-janitor
           restartPolicy: Never
           enableServiceLinks: false
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: sweep
               image: {{ include "arc-runners.image" $j.image }}

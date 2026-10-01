@@ -5,6 +5,28 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v5.1.0
+
+Not yet released.
+
+### arc-runners: `scaleSets.<name>.restricted`
+
+- **A scale set can run on the Pod Security `restricted` profile.**
+  `scaleSets.<name>.restricted: true` renders that set's runner pods, the
+  `prepare-nix-builder-ssh` init container and the set's listener pod as
+  non-root (numeric `runnerUser`, default 1001:1001), seccomp
+  `RuntimeDefault`, no privilege escalation, every capability dropped, with
+  the pod's `fsGroup` making the init container's `emptyDir` mounts
+  writable. Off by default; a set that leaves it off renders exactly as in
+  v5.0.0. What a job loses (`sudo`, setuid binaries, file capabilities,
+  user-namespace syscalls) is in `docs/restricted-runners.md`.
+- **The janitor's pod carries `seccompProfile: RuntimeDefault`** for every
+  release (its container was already restricted). The only rendered change for
+  a release that does not use the new key.
+- **The runner image's `nix-worker-client-setup` accepts a mount point it does
+  not own** when it can write to it, instead of failing on the `chmod` and
+  `chown` a non-root process may not do. Behaviour as root is unchanged.
+
 ## v5.0.0
 
 Released 2026-09-30.

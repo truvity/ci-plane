@@ -350,6 +350,9 @@ spec:
           serviceAccountName: arc-runner-janitor
           restartPolicy: Never
           enableServiceLinks: false
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: sweep
               image: docker.io/alpine/k8s:1.37.0

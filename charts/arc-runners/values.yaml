@@ -39,6 +39,16 @@ controllerServiceAccount:
 # means the namespace default SA.
 runnerServiceAccountName: ""
 
+# The runner image's login, for scale sets with `restricted: true` (v5.1.0).
+# Pod Security's runAsNonRoot needs a NUMERIC uid, and the image's USER is
+# the name `runner`. 1001:1001 is what the upstream actions-runner base
+# image gives that user; an estate building its own runner image on a
+# different uid says so here. Unused by a set that does not ask for
+# `restricted`.
+runnerUser:
+  uid: 1001
+  gid: 1001
+
 # The runner image. `digest` is stamped by the release workflow;
 # consumers override `registry` (e.g. an ECR pull-through prefix) and
 # inherit the digest — transitively digest-pinned by the chart version.
@@ -479,6 +489,20 @@ listenerTolerations: []
 # `helm.values` (a string) or a values file. Truvity's own fleet and a
 # consumer estate hit this independently, which is why it is written down
 # rather than left to be rediscovered.
+#
+# scaleSets.<name>.restricted (v5.1.0), off by default, runs THIS set on the
+# Pod Security `restricted` profile: its runner pods (and their init
+# container, and the set's listener pod in the controller namespace) run
+# as the numeric `runnerUser`, with seccomp RuntimeDefault,
+# allowPrivilegeEscalation false and every capability dropped. What it
+# costs a job is in docs/restricted-runners.md: no `sudo`, no setuid
+# binaries, no file capabilities. Meant for a canary set first.
+#
+#   scaleSets:
+#     preview-restricted:
+#       restricted: true
+#       gomaxprocs: 4
+#       resources: {...}
 #
 # scaleSets.<name>.nixSandbox (v4.1.0), off by default, turns Nix's own
 # build sandbox on for THIS set's runner pods. See docs/nix-sandbox.md
