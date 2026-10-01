@@ -7,7 +7,7 @@ line is summarised in one section.
 
 ## v5.1.0
 
-Not yet released.
+Released 2026-10-02.
 
 ### arc-runners: `scaleSets.<name>.restricted`
 
