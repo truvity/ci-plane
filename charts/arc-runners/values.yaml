@@ -492,11 +492,13 @@ listenerTolerations: []
 #
 # scaleSets.<name>.restricted (v5.1.0), off by default, runs THIS set on the
 # Pod Security `restricted` profile: its runner pods (and their init
-# container, and the set's listener pod in the controller namespace) run
+# container) run
 # as the numeric `runnerUser`, with seccomp RuntimeDefault,
 # allowPrivilegeEscalation false and every capability dropped. What it
 # costs a job is in docs/restricted-runners.md: no `sudo`, no setuid
-# binaries, no file capabilities. Meant for a canary set first.
+# binaries, no file capabilities. Meant for a canary set first. Every
+# set's listener pod (controller namespace) is restricted regardless of
+# this key, from v5.1.0.
 #
 #   scaleSets:
 #     preview-restricted:

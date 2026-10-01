@@ -12,14 +12,23 @@ Not yet released.
 ### arc-runners: `scaleSets.<name>.restricted`
 
 - **A scale set can run on the Pod Security `restricted` profile.**
-  `scaleSets.<name>.restricted: true` renders that set's runner pods, the
-  `prepare-nix-builder-ssh` init container and the set's listener pod as
+  `scaleSets.<name>.restricted: true` renders that set's runner pods and the
+  `prepare-nix-builder-ssh` init container as
   non-root (numeric `runnerUser`, default 1001:1001), seccomp
   `RuntimeDefault`, no privilege escalation, every capability dropped, with
   the pod's `fsGroup` making the init container's `emptyDir` mounts
   writable. Off by default; a set that leaves it off renders exactly as in
-  v5.0.0. What a job loses (`sudo`, setuid binaries, file capabilities,
+  v5.0.0 (the listener is the exception, see below). What a job loses (`sudo`, setuid binaries, file capabilities,
   user-namespace syscalls) is in `docs/restricted-runners.md`.
+- **Behaviour change: every scale set's listener is restricted, whatever
+  `restricted` says.** Each `AutoscalingRunnerSet`'s `listenerTemplate` now
+  carries pod `runAsNonRoot` and seccomp `RuntimeDefault`, and on the
+  `listener` container `runAsNonRoot`, `allowPrivilegeEscalation: false` and
+  every capability dropped. The listener image already runs as the numeric uid
+  65532, so nothing it does changes, but a changed template recycles every
+  listener pod on the next pin bump (a few seconds of job-pickup pause per
+  set). The `restricted` key keeps meaning the runner pods only, and stays off
+  by default.
 - **The janitor's pod carries `seccompProfile: RuntimeDefault`** for every
   release (its container was already restricted). The only rendered change for
   a release that does not use the new key.

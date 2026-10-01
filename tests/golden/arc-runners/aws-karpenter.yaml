@@ -413,8 +413,20 @@ spec:
       tolerations:
         - key: arch
           operator: Exists
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is
@@ -494,8 +506,20 @@ spec:
       tolerations:
         - key: arch
           operator: Exists
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is
@@ -575,8 +599,20 @@ spec:
       tolerations:
         - key: arch
           operator: Exists
+      # Every listener runs on the Pod Security `restricted` profile,
+      # whatever the set's `restricted` key says (that key is for the runner
+      # pods). The image's own user is numeric, so runAsNonRoot is checkable.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: listener
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
   template:
     metadata:
       # Pod-template labels reach the runner pod verbatim; this one is
