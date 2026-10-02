@@ -610,6 +610,10 @@ spec:
               drop: ["ALL"]
       securityContext:
         fsGroup: 101
+        # Pod Security `restricted` needs seccomp set; nginx needs nothing
+        # beyond the runtime's default syscall filter.
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: conf
           configMap:

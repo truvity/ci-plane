@@ -5,6 +5,15 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### ci-builders: nix-cache seccomp
+
+- **The `nix-cache` pod sets seccomp `RuntimeDefault`.** It already ran
+  non-root with no escalation, every capability dropped and a read-only
+  root filesystem; the missing seccomp profile was the only thing keeping
+  it off Pod Security `restricted`.
+
 ## v5.1.0
 
 Released 2026-10-02.
