@@ -546,7 +546,7 @@ jobs:
   # is not a required context, so an advisory published overnight cannot
   # turn every pull request red.
   recipes:
-    uses: truvity/ci-workflows/.github/workflows/check.yaml@30b989fdd77b99af4be1a4b04e6353aa58aa3923 # v3.21.0
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@58d470dff71c732e208f47a80bb6c5d741e016a7 # v3.25.0
     with:
       # Required: the component contract (C1-C13) is judged, shown in the
       # job summary, and fails this job when a rule fails.
