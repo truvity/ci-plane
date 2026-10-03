@@ -164,7 +164,7 @@ COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-clien
 # renovate: datasource=docker depName=docker versioning=semver
 ARG DOCKER_VERSION=29.8.0
 # renovate: datasource=github-releases depName=docker/buildx
-ARG BUILDX_VERSION=v0.37.1
+ARG BUILDX_VERSION=v0.37.2
 RUN ARCH=$(dpkg --print-architecture) \
  && DOCKER_ARCH=$([ "$ARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
  && curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz" \

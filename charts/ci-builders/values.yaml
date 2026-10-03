@@ -69,7 +69,7 @@ buildkitd:
     registry: docker.io
     repository: moby/buildkit
     # renovate: datasource=docker depName=moby/buildkit
-    tag: v0.33.0-rootless
+    tag: v0.33.1-rootless
   initImage:
     registry: docker.io
     repository: library/busybox
