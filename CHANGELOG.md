@@ -5,7 +5,7 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
-## Unreleased
+## v5.1.2
 
 ### ci-builders: nix-cache seccomp
 
