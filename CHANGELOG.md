@@ -5,6 +5,16 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### runner image: `sluisctl`
+
+- **The runner image bakes `sluisctl`** (truvity/sluis v1.71.0,
+  checksum-verified), so `awsConfig.credentialProcess` can name
+  `sluisctl r2` with the same flags as `accessctl r2`. `accessctl` and
+  `r2broker` stay in the image, so a consumer can move back by changing
+  its manifest alone.
+
 ## v5.1.2
 
 ### ci-builders: nix-cache seccomp
