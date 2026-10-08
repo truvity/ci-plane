@@ -236,6 +236,24 @@ RUN ARCH=$(dpkg --print-architecture) \
  && accessctl --version \
  && r2broker --version
 
+# sluisctl (truvity/sluis's CLI). `sluisctl r2` takes the same flags as
+# `accessctl r2` (--audience, --role, --issuer, --service-url) and is the
+# successor for an `awsConfig.credentialProcess` line. accessctl and
+# r2broker stay above, so a manifest that still names `accessctl r2`
+# keeps working and moving a consumer back is a manifest-only rollback.
+# Verified against the release's own checksums.txt, as above.
+# renovate: datasource=github-releases depName=truvity/sluis
+ARG SLUISCTL_VERSION=1.71.0
+RUN ARCH=$(dpkg --print-architecture) \
+ && cd /tmp \
+ && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
+ && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" \
+ && grep -F "  sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" checksums.txt | sha256sum -c - \
+ && tar -xzf "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
+ && install -m 0755 sluisctl /usr/local/bin/sluisctl \
+ && rm -f checksums.txt "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
+ && sluisctl --version
+
 # The nixbld accounts are what a multi-user nix daemon builds as; kept
 # from the days this manifest also served the Nix workers (split into
 # image/nix-worker on 2026-09-24), because the single-user install below
