@@ -218,7 +218,7 @@ half of).
 `extraEnvFrom`/`extraEnv` above are for a store the runner reaches with
 a long-lived key in a Secret. For a short-lived one instead —
 Cloudflare R2 through `truvity/cloudflare`'s r2broker, fronted by
-`accessctl r2` (access-roster v1.39+, baked into this image) — set
+`sluisctl r2` (truvity/sluis, baked into this image) — set
 `awsConfig` and grant the calling workflow `id-token: write`; see
 [architecture.md#an-aws-profile-for-a-broker](architecture.md#an-aws-profile-for-a-broker)
 for the worked example and what it renders.

@@ -347,9 +347,10 @@ projectedServiceAccountTokens: []
 # go-cache-plugin in this image) reads the ordinary AWS SDK credential
 # chain, and on a store with no pod identity (Cloudflare R2, MinIO,
 # Ceph) that chain previously had no way to reach a credential shorter-
-# lived than a static key in a Secret (extraEnvFrom, above). `accessctl
-# r2` (access-roster v1.39+), fronting truvity/cloudflare's r2broker, is
-# the broker this image ships the client pair for
+# lived than a static key in a Secret (extraEnvFrom, above). `sluisctl
+# r2` (truvity/sluis, formerly access-roster's `accessctl r2`), fronting
+# truvity/cloudflare's r2broker, is the broker this image ships the
+# client pair for
 # (image/runner/Dockerfile); see docs/architecture.md for the worked
 # example.
 #
@@ -373,11 +374,12 @@ awsConfig:
   profile: ci-cache
   # The full `credential_process` command line, exactly as it would be
   # typed at a shell — this chart does not parse it, only writes it
-  # after the `=`. `accessctl r2 --service-url <broker> -- credentials
-  # --bucket <bucket> --prefix <prefix>` is the shape
-  # access-roster/docs/connect/r2-storage.md documents; both `accessctl`
-  # and `r2broker` are baked into this image so nothing further needs to
-  # arrive per job.
+  # after the `=`. `sluisctl r2 --service-url <broker> -- credentials
+  # --bucket <bucket> --prefix <prefix>` is the shape sluis documents;
+  # both `sluisctl` and `r2broker` are baked into this image so nothing
+  # further needs to arrive per job. (`accessctl`, the old name, is a
+  # symlink to sluisctl for one more release; it prints a deprecation
+  # notice on stderr.)
   credentialProcess: ""
 
 nodeSelector: {}

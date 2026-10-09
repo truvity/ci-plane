@@ -1,5 +1,5 @@
 # v4.2.0: the generic pod-template hooks, and the one they exist for --
-# a runner pod whose Go cache reaches Cloudflare R2 through accessctl r2
+# a runner pod whose Go cache reaches Cloudflare R2 through sluisctl r2
 # / r2broker rather than a static key. Exercises every new key in one
 # render: awsConfig (a ConfigMap + AWS_CONFIG_FILE/AWS_PROFILE),
 # projectedServiceAccountTokens (a second identity, a different
@@ -13,7 +13,7 @@ awsConfig:
   enabled: true
   profile: ci-cache
   credentialProcess: >-
-    accessctl r2 --service-url https://r2-broker.example.com --
+    sluisctl r2 --service-url https://r2-broker.example.com --
     credentials --bucket example-ci-cache --prefix go/
 projectedServiceAccountTokens:
   - audience: r2-broker

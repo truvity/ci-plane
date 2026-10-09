@@ -13,4 +13,4 @@ extraEnv:
 awsConfig:
   enabled: true
   profile: ci-cache
-  credentialProcess: "accessctl r2 -- credentials --bucket example --prefix go/"
+  credentialProcess: "sluisctl r2 -- credentials --bucket example --prefix go/"

@@ -44,7 +44,7 @@ data:
   # credentialProcess value after the `=` verbatim and does not parse it.
   config: |
     [profile ci-cache]
-    credential_process = accessctl r2 --service-url https://r2-broker.example.com -- credentials --bucket example-ci-cache --prefix go/
+    credential_process = sluisctl r2 --service-url https://r2-broker.example.com -- credentials --bucket example-ci-cache --prefix go/
 
 ---
 # Source: arc-runners/templates/janitor.yaml
@@ -429,7 +429,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-large
     actions.github.com/cleanup-manager-role-name: preview-large-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-large-gha-rs-manager
-    actions.github.com/values-hash: ef03a73768c0d88bfff83e00fbf6d469214e84753a1870651bc05783235b801
+    actions.github.com/values-hash: 050ee81a31454fa6893897f1a516f1f0f02c9c22c28e29ece1c793731056f57
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -559,7 +559,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-medium
     actions.github.com/cleanup-manager-role-name: preview-medium-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-medium-gha-rs-manager
-    actions.github.com/values-hash: 5bcdc16dce5ca68d7fc03c300879f304875ebbe36c63864d1f726da60ecacb6
+    actions.github.com/values-hash: 7b190bb953df893b8667d33ad9addd766a543d4893008ee091b385bee62360a
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -689,7 +689,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-small
     actions.github.com/cleanup-manager-role-name: preview-small-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-small-gha-rs-manager
-    actions.github.com/values-hash: 43695d63b4cf3712086235fb73adaa83898c0939d2489341c436fbc4217b9c9
+    actions.github.com/values-hash: 28a49ac3d4516d6ef5175b882b09bbe4970d2e6fd9183fd7dcefe3d09b4aff8
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
