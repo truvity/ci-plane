@@ -5,6 +5,22 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### runner image: `sluisctl` 1.74.0, `accessctl` is a symlink to it
+
+- **`sluisctl` is truvity/sluis v1.74.0** (was v1.71.0), still verified
+  against the release's own `checksums.txt`, now matched on the whole
+  file name: from v1.74.0 that file also lists each archive's SBOM, which
+  the old substring match caught too.
+- **`accessctl` is now `sluisctl` under its old name** (a symlink), no
+  longer access-roster v1.39.2. Every subcommand and flag a job used
+  works the same; each call also prints a deprecation notice on stderr
+  (stdout, which a credential helper's caller parses, is unchanged).
+  Move `awsConfig.credentialProcess` lines and scripts to `sluisctl`;
+  the symlink goes in a later release.
+- `r2broker` stays, since `sluisctl r2` execs it.
+
 ## v5.1.3
 
 ### runner image: `sluisctl`

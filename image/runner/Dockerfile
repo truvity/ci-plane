@@ -190,24 +190,24 @@ RUN ARCH=$(dpkg --print-architecture) \
  && rm /tmp/devbox.tgz \
  && devbox version
 
-# accessctl (truvity/access-roster's CLI) and r2broker (truvity/
-# cloudflare's R2 temporary-credentials broker CLI). `accessctl r2`
-# authenticates against the estate's access-roster issuer and execs the
-# real `r2broker` binary unchanged
-# (access-roster docs/reference/accessctl.md#r2) -- accessctl alone has
-# nothing to run, so the two ship together or not at all. Together they
-# are what an `awsConfig.credentialProcess` line (arc-runners v4.2.0)
-# names: `accessctl r2 --service-url <broker> -- credentials --bucket
-# <bucket> --prefix <prefix>`, so the Go build cache's S3-compatible
-# client can read a short-lived, prefix-scoped credential instead of a
-# static key in a Secret.
+# sluisctl (truvity/sluis's CLI, formerly access-roster's accessctl) and
+# r2broker (truvity/cloudflare's R2 temporary-credentials broker CLI).
+# `sluisctl r2` authenticates against the estate's sluis issuer and execs
+# the real `r2broker` binary unchanged (sluis
+# docs/reference/sluis/sluisctl.md) -- it has nothing to run without it,
+# so the two ship together or not at all. Together they are what an
+# `awsConfig.credentialProcess` line (arc-runners v4.2.0) names:
+# `sluisctl r2 --service-url <broker> -- credentials --bucket <bucket>
+# --prefix <prefix>`, so the Go build cache's S3-compatible client can
+# read a short-lived, prefix-scoped credential instead of a static key in
+# a Secret. Jobs also call sluisctl directly (token exchange, OpenBao
+# secrets) through truvity/ci-actions.
 #
 # BAKED, same reasoning as go-cache-plugin above: the credential_process
 # the AWS SDK execs is invoked BY that client, which already has to
 # pre-exist the first `go` invocation of a job -- so whatever it in turn
 # execs has to pre-exist it too. Neither binary is required by a job that
-# never sets AWS_CONFIG_FILE at a line naming `accessctl r2`: idle
-# binaries on PATH, invoked by nothing.
+# never names sluisctl: idle binaries on PATH, invoked by nothing.
 #
 # Verified against that release's own checksums.txt rather than a
 # hand-pinned digest (contrast image/nix-worker/Dockerfile's opkssh,
@@ -215,44 +215,40 @@ RUN ARCH=$(dpkg --print-architecture) \
 # file): a Renovate version bump here downloads the NEW release's
 # checksums.txt in the same build, so the version pin and its checksum
 # can never desync the way two separately hand-maintained values could.
-# renovate: datasource=github-releases depName=truvity/access-roster
-ARG ACCESSCTL_VERSION=1.39.2
+# The checksum line is matched on the whole file name (awk, not grep -F):
+# sluis's checksums.txt also lists each archive's `.sbom.spdx.json`, whose
+# name a substring match catches too, and `sha256sum -c` then fails on a
+# file that was never downloaded. `grep .` fails the build on no match.
+#
+# `accessctl` is a symlink to sluisctl: the same binary under its old
+# name, which still works and prints a deprecation notice on stderr
+# (stdout, which a credential helper's caller parses, is untouched). It
+# keeps a manifest, kubeconfig or script that still names `accessctl`
+# working while consumers move to `sluisctl`.
+# TODO(remove): drop the accessctl symlink in the release after this one,
+# once nothing in the estate names `accessctl` any more.
+# renovate: datasource=github-releases depName=truvity/sluis
+ARG SLUISCTL_VERSION=1.74.0
 # renovate: datasource=github-releases depName=truvity/cloudflare
 ARG R2BROKER_VERSION=2.7.1
 RUN ARCH=$(dpkg --print-architecture) \
  && cd /tmp \
- && curl -fsSLO "https://github.com/truvity/access-roster/releases/download/v${ACCESSCTL_VERSION}/access-roster_${ACCESSCTL_VERSION}_checksums.txt" \
- && curl -fsSLO "https://github.com/truvity/access-roster/releases/download/v${ACCESSCTL_VERSION}/accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" \
- && grep -F "  accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" "access-roster_${ACCESSCTL_VERSION}_checksums.txt" | sha256sum -c - \
- && tar -xzf "accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" accessctl \
- && install -m 0755 accessctl /usr/local/bin/accessctl \
- && rm -f "access-roster_${ACCESSCTL_VERSION}_checksums.txt" "accessctl_${ACCESSCTL_VERSION}_linux_${ARCH}.tar.gz" accessctl \
+ && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
+ && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" \
+ && awk -v f="sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" '$2 == f' checksums.txt | grep . | sha256sum -c - \
+ && tar -xzf "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
+ && install -m 0755 sluisctl /usr/local/bin/sluisctl \
+ && ln -s sluisctl /usr/local/bin/accessctl \
+ && rm -f checksums.txt "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
  && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/cloudflare_${R2BROKER_VERSION}_checksums.txt" \
  && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" \
  && grep -F "  r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" "cloudflare_${R2BROKER_VERSION}_checksums.txt" | sha256sum -c - \
  && tar -xzf "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
  && install -m 0755 r2broker /usr/local/bin/r2broker \
  && rm -f "cloudflare_${R2BROKER_VERSION}_checksums.txt" "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
+ && sluisctl --version \
  && accessctl --version \
  && r2broker --version
-
-# sluisctl (truvity/sluis's CLI). `sluisctl r2` takes the same flags as
-# `accessctl r2` (--audience, --role, --issuer, --service-url) and is the
-# successor for an `awsConfig.credentialProcess` line. accessctl and
-# r2broker stay above, so a manifest that still names `accessctl r2`
-# keeps working and moving a consumer back is a manifest-only rollback.
-# Verified against the release's own checksums.txt, as above.
-# renovate: datasource=github-releases depName=truvity/sluis
-ARG SLUISCTL_VERSION=1.71.0
-RUN ARCH=$(dpkg --print-architecture) \
- && cd /tmp \
- && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
- && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" \
- && grep -F "  sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" checksums.txt | sha256sum -c - \
- && tar -xzf "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
- && install -m 0755 sluisctl /usr/local/bin/sluisctl \
- && rm -f checksums.txt "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
- && sluisctl --version
 
 # The nixbld accounts are what a multi-user nix daemon builds as; kept
 # from the days this manifest also served the Nix workers (split into
