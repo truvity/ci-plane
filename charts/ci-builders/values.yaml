@@ -69,7 +69,7 @@ buildkitd:
     registry: docker.io
     repository: moby/buildkit
     # renovate: datasource=docker depName=moby/buildkit
-    tag: v0.33.0-rootless
+    tag: v0.33.1-rootless
   initImage:
     registry: docker.io
     repository: library/busybox
@@ -390,7 +390,7 @@ npmCache:
     registry: docker.io
     repository: verdaccio/verdaccio
     # renovate: datasource=docker depName=verdaccio/verdaccio
-    tag: "6.10.4"
+    tag: "6.10.5"
   size: 20Gi
   resources:
     requests:
