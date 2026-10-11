@@ -348,7 +348,7 @@ projectedServiceAccountTokens: []
 # chain, and on a store with no pod identity (Cloudflare R2, MinIO,
 # Ceph) that chain previously had no way to reach a credential shorter-
 # lived than a static key in a Secret (extraEnvFrom, above). `sluisctl
-# r2` (truvity/sluis, formerly access-roster's `accessctl r2`), fronting
+# r2` (truvity/sluis), fronting
 # truvity/cloudflare's r2broker, is the broker this image ships the
 # client pair for
 # (image/runner/Dockerfile); see docs/architecture.md for the worked
@@ -377,9 +377,7 @@ awsConfig:
   # after the `=`. `sluisctl r2 --service-url <broker> -- credentials
   # --bucket <bucket> --prefix <prefix>` is the shape sluis documents;
   # both `sluisctl` and `r2broker` are baked into this image so nothing
-  # further needs to arrive per job. (`accessctl`, the old name, is a
-  # symlink to sluisctl for one more release; it prints a deprecation
-  # notice on stderr.)
+  # further needs to arrive per job.
   credentialProcess: ""
 
 nodeSelector: {}
