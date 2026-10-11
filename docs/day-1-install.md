@@ -41,9 +41,20 @@ Order matters: caches before runners, controller before both charts.
    hosting account, so image pulls are same-region and unthrottled. The
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
-5. Nothing here for Go any more. The module proxy left in 2.0.0 for
-   [truvity/ci-cache](https://github.com/truvity/ci-cache). Setting
-   `goModproxy` here fails the render rather than being ignored.
+5. Optional: the Go module proxy (`goModproxy.enabled: true`), a
+   caching module + sumdb proxy (`go-cache-plugin serve --modproxy`) over
+   an S3 prefix. It needs `goModproxy.s3.bucket` and `region`, the
+   runner namespaces allowed to reach it in
+   `goModproxy.networkPolicy.consumerNamespaces`, and a ServiceAccount
+   (`goModproxy.serviceAccount.name`, default `go-modproxy`) carrying
+   the pod's own object-store identity. The identity must exist BEFORE
+   the pod starts (EKS Pod Identity injects its environment at pod
+   creation). Point runners at it with
+   `GOPROXY=http://go-modproxy.<ns>.svc/mod,https://proxy.golang.org,direct`.
+   Use a comma, not a pipe: with a comma Go falls through only on
+   404/410, so a down proxy fails the job instead of silently costing
+   the cache. Module zips and Go toolchain downloads both travel through
+   it, so a cluster's egress to the public proxy shrinks to cache misses.
 6. For persistent Nix workers:
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
      signing role (default `ci-nix`) that allows the principal `ci-nix`

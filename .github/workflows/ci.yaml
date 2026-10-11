@@ -208,7 +208,7 @@ jobs:
             echo "nixWorkers.opkssh.archs guard did not fire on a missing issuer" >&2
             exit 1
           fi
-          # Three render-time refusals, the same idiom as the goModproxy
+          # Three render-time refusals, the same idiom as the removed-values
           # guard below: enabling the workers (host certificates on by
           # default) without the required OpenBao route, a renewEvery at
           # or past certificateTTL, and a minRemaining at or past it --
@@ -341,14 +341,6 @@ jobs:
             exit 1
           fi
           bash -n image/nix-worker-*.sh
-          # The removed-values guard has to FAIL, and a guard nobody
-          # ever proves failing is a comment. An estate porting values
-          # from the old chart name is exactly the caller it protects.
-          if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
-               --set goModproxy.enabled=false > /dev/null 2>&1; then
-            echo "removed-values guard did not fire on goModproxy" >&2
-            exit 1
-          fi
           # bazel-remote S3: flipped on, the flags must actually carry
           # the values given, not just appear as booleans.
           bazel_s3_out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
@@ -380,7 +372,7 @@ jobs:
             exit 1
           fi
           # And the render-time refusal: enabling S3 without a bucket
-          # (or a region) must fail, the same idiom as the goModproxy
+          # (or a region) must fail, the same idiom as the removed-values
           # guard above.
           if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
                --set bazelRemote.s3.enabled=true > /dev/null 2>&1; then

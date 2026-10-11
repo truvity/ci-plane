@@ -158,6 +158,35 @@
       },
       "description": "Persistent remote Nix builders, one per architecture."
     },
+    "goModproxy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "networkPolicy": {
+          "$ref": "#/definitions/networkPolicy"
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "$ref": "#/definitions/requiredPolicy"
+          }
+        }
+      },
+      "description": "The caching Go module and sumdb proxy."
+    },
     "npmCache": {
       "type": "object",
       "properties": {

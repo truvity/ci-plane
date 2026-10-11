@@ -5,8 +5,7 @@ description: >-
   buildkit builders and nix remote workers (both per-arch), plus the
   nix, npm and Bazel-API caches they and the runners read through.
   Every component is DISPOSABLE — no backups; losing one costs a
-  re-warm. The Go module proxy used to live here and is now
-  truvity/ci-cache.
+  re-warm. The optional Go module proxy is here too (off by default).
 type: application
 # Placeholders: the git tag is the sole version authority. The release
 # workflow (.github/workflows/release.yaml) overwrites both fields from

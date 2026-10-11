@@ -12,13 +12,13 @@ transitively digest-pinned.
 |---|---|---|
 | [`image/runner`](image/runner/Dockerfile) | The runner: nix + devbox bootstrap, the daemonless docker client + buildx, `go-cache-plugin` | `ghcr.io/truvity/ci-plane/runner:vX.Y.Z` |
 | [`image/nix-worker`](image/nix-worker/Dockerfile) | A persistent remote Nix builder: nix-daemon behind sshd | `ghcr.io/truvity/ci-plane/nix-worker:vX.Y.Z` |
-| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the Nix, npm and Bazel read-through caches | `oci://ghcr.io/truvity/charts/ci-builders` |
+| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the Nix, npm and Bazel read-through caches; the optional S3-backed Go module proxy | `oci://ghcr.io/truvity/charts/ci-builders` |
 | [`charts/arc-runners`](charts/arc-runners) | AutoscalingRunnerSet CRs per measured profile, the stuck-runner janitor, remote Nix builders per job | `oci://ghcr.io/truvity/charts/arc-runners` |
 
 Up to 1.5.0, `ci-builders` was published as
 `oci://ghcr.io/truvity/charts/ci-cache` and carried a Go module proxy;
-2.0.0 renamed it and moved the proxy to
-[truvity/ci-cache](https://github.com/truvity/ci-cache).
+2.0.0 renamed it and dropped the proxy; it returned, off by default, as
+`goModproxy` (the module proxy only, S3-backed).
 
 ## Who it is for
 
