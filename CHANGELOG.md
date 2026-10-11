@@ -7,6 +7,15 @@ line is summarised in one section.
 
 ## Unreleased
 
+### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)
+
+- **New: `buildkitd.maxParallelism`.** A positive integer, rendered as
+  `--oci-max-parallelism=<n>` in the buildkitd args. Unset by default,
+  so existing renders are byte-identical. It bounds the build steps a
+  daemon runs at once, so a burst of concurrent builds queues instead of
+  OOM-killing the daemon. A value below 1 or a non-integer is refused by
+  the schema.
+
 ## v5.3.0
 
 ### ci-builders chart: the Go module proxy is back (`goModproxy`)

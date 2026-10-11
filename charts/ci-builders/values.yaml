@@ -75,6 +75,14 @@ buildkitd:
     repository: library/busybox
     tag: "1.38"
   cacheSize: 50Gi
+  # Cap on the build steps one daemon runs at once, rendered as
+  # `--oci-max-parallelism=<n>`. UNSET by default: no flag, buildkitd
+  # runs as many steps as its clients send. Without a cap, a burst of
+  # concurrent builds multiplies the working set until the container
+  # limit OOM-kills the daemon and every build on it fails together
+  # (12 concurrent builds, 2026-10-11). Set a positive integer sized to
+  # the memory limit below; excess steps queue instead of dying.
+  # maxParallelism: 4
   resources:
     # No CPU limit: builds burst to whatever the node has free; the
     # request is scheduling headroom only.

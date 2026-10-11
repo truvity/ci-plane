@@ -1,0 +1,9 @@
+# refuses: /buildkitd/maxParallelism
+# Zero is not "unlimited": leave the key unset for that.
+buildkitd:
+  maxParallelism: 0
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

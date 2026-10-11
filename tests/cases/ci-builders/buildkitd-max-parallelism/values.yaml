@@ -1,0 +1,10 @@
+# The builders with their parallelism capped: the daemon gets
+# --oci-max-parallelism, so a burst of builds queues instead of
+# exhausting the memory limit.
+buildkitd:
+  maxParallelism: 4
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

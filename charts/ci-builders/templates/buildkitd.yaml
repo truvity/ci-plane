@@ -85,6 +85,9 @@ spec:
             - --addr
             - tcp://0.0.0.0:1234
             - --oci-worker-no-process-sandbox
+            {{- if $b.maxParallelism }}
+            - {{ printf "--oci-max-parallelism=%d" (int $b.maxParallelism) }}
+            {{- end }}
           ports:
             - name: grpc
               containerPort: 1234
