@@ -1,6 +1,6 @@
 module github.com/truvity/ci-plane/nix-worker-host-cert
 
-go 1.27.0
+go 1.27.2
 
 require golang.org/x/crypto v0.57.0
 
