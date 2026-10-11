@@ -5,6 +5,23 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### ci-builders chart: the Go module proxy is back (`goModproxy`)
+
+- **`goModproxy` returns, off by default.** `go-cache-plugin serve
+  --modproxy` as a Deployment + Service (`go-modproxy`, port 80, path
+  `/mod`) over an S3 prefix, with the same values as before the 2.0.0
+  removal (`s3.bucket`, `s3.region`, `s3.keyPrefix`, `s3.endpoint`,
+  `s3.pathStyle`, `s3.existingSecret`, `sumdb`, `serviceAccount`,
+  `stagingSize`, `resources`). The runner image already carries the
+  v5.2.1 `go-cache-plugin`, so the truncated-zip fix applies to it.
+- **New: `goModproxy.networkPolicy`.** An ingress policy admitting only
+  `consumerNamespaces`, required and non-empty while the proxy is on,
+  like the other components.
+- **`goModproxy` is no longer refused.** The 2.0.0 render guard on the key
+  is gone; the guard on `nixWorkers.accounts.nixremote` stays.
+
 ## v5.2.1
 
 ### runner image: `go-cache-plugin` no longer serves truncated module zips
