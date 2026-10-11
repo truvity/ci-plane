@@ -91,6 +91,11 @@
         "networkPolicy": {
           "$ref": "#/definitions/networkPolicy"
         },
+        "maxParallelism": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Cap on concurrent build steps per daemon (--oci-max-parallelism). Unset = no flag."
+        },
         "archs": {
           "type": "array",
           "items": {
