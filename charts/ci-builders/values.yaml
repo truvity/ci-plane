@@ -364,6 +364,11 @@ goModproxy:
     name: go-modproxy
     annotations: {}
   stagingSize: 10Gi
+  # Pod annotations, e.g. karpenter.sh/do-not-disrupt: "true". A proxy
+  # restart mid-job fails the jobs that hit it when GOPROXY uses a comma,
+  # so an estate that cares keeps the single replica off voluntary
+  # disruption.
+  podAnnotations: {}
   resources:
     requests:
       cpu: 250m

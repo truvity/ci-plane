@@ -45,6 +45,10 @@ spec:
       labels:
         app.kubernetes.io/name: go-modproxy
         app.kubernetes.io/part-of: ci-builders
+      {{- with $g.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $g.serviceAccount.name }}
       enableServiceLinks: false

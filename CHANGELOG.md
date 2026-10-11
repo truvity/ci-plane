@@ -14,7 +14,7 @@ line is summarised in one section.
   `/mod`) over an S3 prefix, with the same values as before the 2.0.0
   removal (`s3.bucket`, `s3.region`, `s3.keyPrefix`, `s3.endpoint`,
   `s3.pathStyle`, `s3.existingSecret`, `sumdb`, `serviceAccount`,
-  `stagingSize`, `resources`). The runner image already carries the
+  `stagingSize`, `podAnnotations`, `resources`). The runner image already carries the
   v5.2.1 `go-cache-plugin`, so the truncated-zip fix applies to it.
 - **New: `goModproxy.networkPolicy`.** An ingress policy admitting only
   `consumerNamespaces`, required and non-empty while the proxy is on,
