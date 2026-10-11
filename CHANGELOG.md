@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v5.4.0
+
 ### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)
 
 - **New: `buildkitd.maxParallelism`.** A positive integer, rendered as
