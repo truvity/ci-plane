@@ -458,7 +458,7 @@ credentials ...` (`arc-runners`' new `awsConfig` value, below). That
 credential_process is invoked BY the cache client, and the cache client
 already has to pre-exist the first `go` invocation of a job — so
 whatever it in turn execs has to pre-exist it too, by the same ordering
-rule. `sluisctl` (truvity/sluis, formerly access-roster's `accessctl`)
+rule. `sluisctl` (truvity/sluis)
 authenticates against the estate's issuer and execs the real `r2broker`
 (truvity/cloudflare) binary unchanged; neither is required by a job that
 never names `sluisctl r2` in a credential_process line — idle binaries

@@ -190,7 +190,7 @@ RUN ARCH=$(dpkg --print-architecture) \
  && rm /tmp/devbox.tgz \
  && devbox version
 
-# sluisctl (truvity/sluis's CLI, formerly access-roster's accessctl) and
+# sluisctl (truvity/sluis's CLI) and
 # r2broker (truvity/cloudflare's R2 temporary-credentials broker CLI).
 # `sluisctl r2` authenticates against the estate's sluis issuer and execs
 # the real `r2broker` binary unchanged (sluis
@@ -220,13 +220,6 @@ RUN ARCH=$(dpkg --print-architecture) \
 # name a substring match catches too, and `sha256sum -c` then fails on a
 # file that was never downloaded. `grep .` fails the build on no match.
 #
-# `accessctl` is a symlink to sluisctl: the same binary under its old
-# name, which still works and prints a deprecation notice on stderr
-# (stdout, which a credential helper's caller parses, is untouched). It
-# keeps a manifest, kubeconfig or script that still names `accessctl`
-# working while consumers move to `sluisctl`.
-# TODO(remove): drop the accessctl symlink in the release after this one,
-# once nothing in the estate names `accessctl` any more.
 # renovate: datasource=github-releases depName=truvity/sluis
 ARG SLUISCTL_VERSION=1.74.0
 # renovate: datasource=github-releases depName=truvity/cloudflare
@@ -238,7 +231,6 @@ RUN ARCH=$(dpkg --print-architecture) \
  && awk -v f="sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" '$2 == f' checksums.txt | grep . | sha256sum -c - \
  && tar -xzf "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
  && install -m 0755 sluisctl /usr/local/bin/sluisctl \
- && ln -s sluisctl /usr/local/bin/accessctl \
  && rm -f checksums.txt "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
  && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/cloudflare_${R2BROKER_VERSION}_checksums.txt" \
  && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" \
@@ -247,7 +239,6 @@ RUN ARCH=$(dpkg --print-architecture) \
  && install -m 0755 r2broker /usr/local/bin/r2broker \
  && rm -f "cloudflare_${R2BROKER_VERSION}_checksums.txt" "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
  && sluisctl --version \
- && accessctl --version \
  && r2broker --version
 
 # The nixbld accounts are what a multi-user nix daemon builds as; kept
