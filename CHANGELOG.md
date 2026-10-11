@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v5.3.0
+
 ### ci-builders chart: the Go module proxy is back (`goModproxy`)
 
 - **`goModproxy` returns, off by default.** `go-cache-plugin serve
