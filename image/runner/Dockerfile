@@ -87,15 +87,29 @@ ARG NIX_VERSION=2.35.2
 # renovate: datasource=docker depName=golang
 FROM --platform=$BUILDPLATFORM golang:1.27 AS gocache
 ARG TARGETARCH
-# go install rejects GOBIN for cross-builds and drops the binary in
-# /go/bin/linux_$GOARCH/ instead of /go/bin/ — normalize to /out for
-# the COPY below (native case: build platform == target platform).
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
-    # renovate: datasource=github-tags depName=tailscale/go-cache-plugin
-    go install github.com/tailscale/go-cache-plugin/cmd/go-cache-plugin@v0.1.1 \
- && mkdir -p /out \
- && cp "/go/bin/linux_${TARGETARCH}/go-cache-plugin" /out/ 2>/dev/null \
- || cp /go/bin/go-cache-plugin /out/
+# Built through a throwaway wrapper module, NOT `go install ...@v0.1.1`:
+# v0.1.1 ships creachadair/atomicfile v0.3.7, whose WriteAll renamed the
+# half-written temp file into place when its reader failed. A CI run
+# cancelled while the proxy faulted a module in from S3 left a truncated
+# zip in the local cache, which was then served with HTTP 200 -- every run
+# failed `zip: not a valid zip file` (2026-09-13). atomicfile v0.4.2 aborts
+# the write instead. Upstream has fixed this on master (3031b5d) but not
+# tagged a release, so the commit is pinned. Master also pulls a
+# go-json-experiment that does not compile on Go 1.27, hence the second
+# pin. Return to a plain tag once upstream tags a release after 3031b5d
+# (then restore a `# renovate: datasource=github-tags` annotation; the
+# regex custom manager for `go install` cannot see this form, on purpose:
+# a commit pin must not be bumped by a bot).
+# go build, unlike go install, takes -o, so no GOBIN/linux_$GOARCH dance.
+RUN mkdir -p /out /w && cd /w \
+ && go mod init gocacheplugin \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go get \
+      github.com/tailscale/go-cache-plugin/cmd/go-cache-plugin@3031b5d01c50 \
+      github.com/go-json-experiment/json@v0.0.0-20260820222146-c27c302e5fc3 \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -trimpath -o /out/go-cache-plugin \
+      github.com/tailscale/go-cache-plugin/cmd/go-cache-plugin
 
 # The OpenBao bootstrap is a static standard-library binary: JSON and TLS
 # handling are security boundaries, not shell parsing. It invokes only the

@@ -5,6 +5,19 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### runner image: `go-cache-plugin` no longer serves truncated module zips
+
+- **go-cache-plugin is built from upstream commit 3031b5d** (was v0.1.1),
+  which carries creachadair/atomicfile v0.4.2. v0.1.1's atomicfile
+  committed a half-written file when the read failed, so a request
+  cancelled while `go-modproxy` faulted a module in from S3 left a
+  truncated zip in the local cache, served afterwards with HTTP 200
+  (`zip: not a valid zip file`, 2026-09-13). The write is now aborted.
+  Needs a release plus a promotion of the ci-cache chart's image tag to
+  take effect on `go-modproxy`.
+
 ## v5.2.0
 
 ### runner image: `sluisctl` 1.74.0, `accessctl` is a symlink to it
