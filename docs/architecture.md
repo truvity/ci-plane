@@ -449,24 +449,23 @@ exactly the kind of thing devbox cannot deliver in time. What it talks
 to, and everything about the cache itself, belongs to that repository
 and is not described here.
 
-**`sluisctl` and `r2broker` ship for the same reason** (v4.2.0;
-`sluisctl` replaced `accessctl` in v5.2.0). On a store with no pod
-identity (Cloudflare R2, MinIO, Ceph), the Go cache client above reads
-its credential through the ordinary AWS SDK chain — an `AWS_CONFIG_FILE`
-naming a profile whose `credential_process` is `sluisctl r2 --
-credentials ...` (`arc-runners`' new `awsConfig` value, below). That
-credential_process is invoked BY the cache client, and the cache client
-already has to pre-exist the first `go` invocation of a job — so
-whatever it in turn execs has to pre-exist it too, by the same ordering
-rule. `sluisctl` (truvity/sluis)
-authenticates against the estate's issuer and execs the real `r2broker`
-(truvity/cloudflare) binary unchanged; neither is required by a job that
-never names `sluisctl r2` in a credential_process line — idle binaries
-on PATH, invoked by nothing. Both are pinned and verified against that
-release's own `checksums.txt`, downloaded at build time rather than
-hand-pinned per architecture — see `image/runner/Dockerfile`'s own
-comment for why that is safer under a Renovate-driven version bump, not
-just shorter.
+**`sluisctl` ships for the same reason** (v4.2.0; `sluisctl` replaced
+`accessctl` in v5.2.0). On a store with no pod identity (Cloudflare R2,
+MinIO, Ceph), the Go cache client above reads its credential through
+the ordinary AWS SDK chain — an `AWS_CONFIG_FILE` naming a profile
+whose `credential_process` is `sluisctl cloudflare r2 <preset>`
+(`arc-runners`' `awsConfig` value, below). That credential_process is
+invoked BY the cache client, and the cache client already has to
+pre-exist the first `go` invocation of a job — so whatever it in turn
+execs has to pre-exist it too, by the same ordering rule. `sluisctl`
+(truvity/sluis) asks the estate's sluis for a credential its Cloudflare
+module mints; a job that never names it leaves it idle on PATH. It is
+pinned and verified against that release's own `checksums.txt`,
+downloaded at build time rather than hand-pinned per architecture — see
+`image/runner/Dockerfile`'s own comment for why that is safer under a
+Renovate-driven version bump, not just shorter. Earlier releases of the image
+also carried truvity/cloudflare's `r2broker`, which `sluisctl r2`
+fronted; the broker is retired and sluis mints R2 credentials itself.
 
 Every version pin in the Dockerfile carries a `# renovate:` annotation
 — a pin without one is invisible, and invisible is indistinguishable
@@ -474,14 +473,16 @@ from current. That includes the upstream runner base: `latest` was
 replaced with an annotated pin precisely so CVE pickups become renovate
 PRs instead of side effects.
 
-## An AWS profile for a broker (v4.2.0)
+## An AWS profile for a credential helper (v4.2.0)
 
 The shape from ["Runner pod expectations"](day-1-install.md) upward,
-worked through for one store: Cloudflare R2, reached through
-`truvity/cloudflare`'s r2broker, fronted by `sluisctl r2`
-(truvity/sluis) so the estate's own issuer — not a static key —
-decides who gets a credential and for how long
-(sluis documents the full authentication shape).
+worked through for one store: Cloudflare R2, with the credential minted
+by the Cloudflare module of sluis (truvity/sluis,
+`docs/guides/sluis/cloudflare-tokens.md`), so the estate's own sluis —
+not a static key — decides who gets a credential and for how long. The
+estate declares an R2 preset (a disabled prototype token scoped to the
+bucket, an `endpoint`, a `lifetime` and a `rotation`) and grants it to
+a group its CI jobs earn through `github` matchers.
 
 **Nothing extra runs the credential helper.** A GitHub Actions job
 granted `permissions: id-token: write` already has
@@ -498,9 +499,7 @@ onto `PATH`, in a place `AWS_CONFIG_FILE` names.
 awsConfig:
   enabled: true
   profile: ci-cache
-  credentialProcess: >-
-    sluisctl r2 --service-url https://r2-broker.<estate>.example --
-    credentials --bucket <bucket> --prefix go/
+  credentialProcess: sluisctl cloudflare r2 <preset>
 ```
 
 ```yaml
@@ -519,9 +518,20 @@ holding one INI profile, mounted read-only on the runner container at
 never `envFrom`, never the pod. `go-cache-plugin` (or any other AWS
 SDK/CLI call in the same job) then resolves credentials the ordinary
 way: no profile named explicitly falls through to this one, which execs
-`sluisctl r2`, which exchanges the job's own GitHub identity token at
-the issuer and hands `r2broker` the result — a credential scoped to one
-bucket, one prefix, minutes long, never written to a Secret.
+`sluisctl cloudflare r2`, which exchanges the job's own GitHub identity
+token at sluis for an R2 access key pair that expires within the
+preset's lifetime, never written to a Secret. The preset is
+bucket-wide: sluis cannot scope an R2 credential to a prefix, so one
+prefix per cache tool is a naming convention, not a boundary.
+
+**A pool-wide credential instead.** When the jobs should not each sign
+in, a secrets operator can project the credential sluis stores for the
+preset (`external/cloudflare/<preset>`, a `cloudflare/v1` document,
+replaced on every rotation) into a Secret, mounted through
+`extraVolumes`/`extraVolumeMounts`, and the line becomes
+`sluisctl cloudflare r2 <preset> --file <mounted path>`, which signs in
+to nothing and refuses an expired document. Every job of the pool then
+shares one credential.
 
 **This is JOB-scoped, not CLIENT-scoped.** An ephemeral runner's
 `runner` container is the one place every step of one job runs, so
@@ -536,7 +546,7 @@ call, the same way it would override any other inherited default.
 `AWS_ACCESS_KEY_ID` fails to render: the AWS SDK's credential chain
 checks environment variables *before* a config file's
 `credential_process`, so a static key left over from the old
-`extraEnvFrom` Secret pattern would keep winning and the broker would
+`extraEnvFrom` Secret pattern would keep winning and sluis would
 never be consulted — exactly the migration this feature exists for, not
 happening, with nothing in a job log to say so. Drop the static key (and
 its Secret) first.
@@ -548,5 +558,5 @@ calls a SAME-CLUSTER service by presenting a ServiceAccount token
 projected for that service's own audience instead
 (sluis documents the service-to-service shape), which is a
 different identity path than a GitHub Actions job's own token. Use it
-when something in the pod needs that shape; the R2-via-r2broker path
-above needs only `awsConfig` and the workflow's own `id-token: write`.
+when something in the pod needs that shape; the R2 path above needs
+only `awsConfig` and the workflow's own `id-token: write`.

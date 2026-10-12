@@ -7,7 +7,7 @@ githubConfigUrl: https://github.com/example
 controllerServiceAccount:
   namespace: arc-system
 projectedServiceAccountTokens:
-  - audience: r2-broker
+  - audience: example-service
     path: token
   - audience: some-other-service
     path: token

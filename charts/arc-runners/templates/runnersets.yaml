@@ -53,7 +53,7 @@ projected tokens sharing a mount path).
 {{- if not .Values.awsConfig.profile }}{{ fail "awsConfig.profile is required when awsConfig.enabled" }}{{ end }}
 {{- if not .Values.awsConfig.credentialProcess }}{{ fail "awsConfig.credentialProcess is required when awsConfig.enabled" }}{{ end }}
 {{- range $e := .Values.extraEnv }}
-{{- if eq $e.name "AWS_ACCESS_KEY_ID" }}{{ fail "awsConfig.enabled with an extraEnv entry named AWS_ACCESS_KEY_ID: the AWS SDK's own credential chain checks environment variables BEFORE a config file's credential_process, so this static key would silently keep winning over the broker-minted one -- drop it (and its extraEnvFrom Secret, if that is where it comes from) before enabling awsConfig; the two are alternatives for the same job-scoped credential, never both at once" }}{{ end }}
+{{- if eq $e.name "AWS_ACCESS_KEY_ID" }}{{ fail "awsConfig.enabled with an extraEnv entry named AWS_ACCESS_KEY_ID: the AWS SDK's own credential chain checks environment variables BEFORE a config file's credential_process, so this static key would silently keep winning over the one credential_process mints -- drop it (and its extraEnvFrom Secret, if that is where it comes from) before enabling awsConfig; the two are alternatives for the same job-scoped credential, never both at once" }}{{ end }}
 {{- end }}
 {{- end }}
 {{- if .Values.projectedServiceAccountTokens }}

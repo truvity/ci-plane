@@ -7,6 +7,10 @@ line is summarised in one section.
 
 ## Unreleased
 
+### Runner image: `r2broker` removed
+
+- **Breaking: the runner image no longer ships `r2broker`.** truvity/cloudflare retires its R2 credentials broker; sluis's Cloudflare module mints R2 credentials itself, so `sluisctl cloudflare r2 <preset>` (already in the image) replaces `sluisctl r2 --service-url <broker> -- credentials ...` in an `awsConfig.credentialProcess` line. A caller whose `credentialProcess` still names `sluisctl r2` or `r2broker` must move to an R2 preset first. `docs/architecture.md` ("An AWS profile for a credential helper") shows both shapes: a job signing in with its own GitHub token, and a credential a secrets operator projected (`--file`, mounted through `extraVolumes`). The arc-runners test case `r2-broker` is now `r2-credential-process`. No chart value changes.
+
 ## v5.4.0
 
 ### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)
