@@ -228,10 +228,11 @@ half of).
 
 `extraEnvFrom`/`extraEnv` above are for a store the runner reaches with
 a long-lived key in a Secret. For a short-lived one instead —
-Cloudflare R2 through `truvity/cloudflare`'s r2broker, fronted by
-`sluisctl r2` (truvity/sluis, baked into this image) — set
-`awsConfig` and grant the calling workflow `id-token: write`; see
-[architecture.md#an-aws-profile-for-a-broker](architecture.md#an-aws-profile-for-a-broker)
+Cloudflare R2 minted by the Cloudflare module of sluis, through
+`sluisctl cloudflare r2 <preset>` (truvity/sluis, baked into this
+image) — set `awsConfig` and grant the calling workflow
+`id-token: write`; see
+[architecture.md#an-aws-profile-for-a-credential-helper-v420](architecture.md#an-aws-profile-for-a-credential-helper-v420)
 for the worked example and what it renders.
 
 ## Wiring workflows

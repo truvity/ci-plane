@@ -1,0 +1,42 @@
+# v4.2.0: the generic pod-template hooks, and the one they exist for --
+# a runner pod whose Go cache reaches Cloudflare R2 through a
+# credential_process (sluisctl cloudflare r2, reading the credential a
+# secrets operator projected) rather than a static key. Exercises every
+# key in one render: awsConfig (a ConfigMap + AWS_CONFIG_FILE/AWS_PROFILE),
+# projectedServiceAccountTokens (a second identity, a different
+# audience), and extraVolumes/extraVolumeMounts/extraInitContainers (the
+# projected credential's Secret, plus an unrelated scratch volume and
+# init container so the hooks read as generic and not as more R2
+# plumbing).
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+awsConfig:
+  enabled: true
+  profile: ci-cache
+  credentialProcess: >-
+    sluisctl cloudflare r2 example-ci-cache
+    --file /var/run/secrets/cloudflare/example-ci-cache.json
+projectedServiceAccountTokens:
+  - audience: example-service
+    path: example-service-token
+    expirationSeconds: 3600
+extraVolumes:
+  - name: cloudflare-r2
+    secret:
+      secretName: example-ci-cache-r2
+      items:
+        - key: document
+          path: example-ci-cache.json
+  - name: scratch
+    emptyDir: {}
+extraVolumeMounts:
+  - name: cloudflare-r2
+    mountPath: /var/run/secrets/cloudflare
+    readOnly: true
+  - name: scratch
+    mountPath: /var/run/scratch
+extraInitContainers:
+  - name: warm-something
+    image: busybox
+    command: ["true"]

@@ -204,24 +204,19 @@ RUN ARCH=$(dpkg --print-architecture) \
  && rm /tmp/devbox.tgz \
  && devbox version
 
-# sluisctl (truvity/sluis's CLI) and
-# r2broker (truvity/cloudflare's R2 temporary-credentials broker CLI).
-# `sluisctl r2` authenticates against the estate's sluis issuer and execs
-# the real `r2broker` binary unchanged (sluis
-# docs/reference/sluis/sluisctl.md) -- it has nothing to run without it,
-# so the two ship together or not at all. Together they are what an
-# `awsConfig.credentialProcess` line (arc-runners v4.2.0) names:
-# `sluisctl r2 --service-url <broker> -- credentials --bucket <bucket>
-# --prefix <prefix>`, so the Go build cache's S3-compatible client can
-# read a short-lived, prefix-scoped credential instead of a static key in
-# a Secret. Jobs also call sluisctl directly (token exchange, OpenBao
-# secrets) through truvity/ci-actions.
+# sluisctl (truvity/sluis's CLI). Jobs call it directly (token exchange,
+# OpenBao secrets) through truvity/ci-actions, and an
+# `awsConfig.credentialProcess` line (arc-runners v4.2.0) can name it so
+# the Go build cache's S3-compatible client reads a short-lived R2
+# credential instead of a static key in a Secret: `sluisctl cloudflare
+# r2 <preset>` (sluis's Cloudflare module mints the credential, no
+# broker in between; see docs/architecture.md).
 #
 # BAKED, same reasoning as go-cache-plugin above: the credential_process
 # the AWS SDK execs is invoked BY that client, which already has to
 # pre-exist the first `go` invocation of a job -- so whatever it in turn
-# execs has to pre-exist it too. Neither binary is required by a job that
-# never names sluisctl: idle binaries on PATH, invoked by nothing.
+# execs has to pre-exist it too. A job that never names sluisctl leaves
+# it idle on PATH.
 #
 # Verified against that release's own checksums.txt rather than a
 # hand-pinned digest (contrast image/nix-worker/Dockerfile's opkssh,
@@ -236,8 +231,6 @@ RUN ARCH=$(dpkg --print-architecture) \
 #
 # renovate: datasource=github-releases depName=truvity/sluis
 ARG SLUISCTL_VERSION=1.74.0
-# renovate: datasource=github-releases depName=truvity/cloudflare
-ARG R2BROKER_VERSION=2.7.1
 RUN ARCH=$(dpkg --print-architecture) \
  && cd /tmp \
  && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
@@ -246,14 +239,7 @@ RUN ARCH=$(dpkg --print-architecture) \
  && tar -xzf "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
  && install -m 0755 sluisctl /usr/local/bin/sluisctl \
  && rm -f checksums.txt "sluisctl_${SLUISCTL_VERSION}_linux_${ARCH}.tar.gz" sluisctl \
- && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/cloudflare_${R2BROKER_VERSION}_checksums.txt" \
- && curl -fsSLO "https://github.com/truvity/cloudflare/releases/download/v${R2BROKER_VERSION}/r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" \
- && grep -F "  r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" "cloudflare_${R2BROKER_VERSION}_checksums.txt" | sha256sum -c - \
- && tar -xzf "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
- && install -m 0755 r2broker /usr/local/bin/r2broker \
- && rm -f "cloudflare_${R2BROKER_VERSION}_checksums.txt" "r2broker_${R2BROKER_VERSION}_linux_${ARCH}.tar.gz" r2broker \
- && sluisctl --version \
- && r2broker --version
+ && sluisctl --version
 
 # The nixbld accounts are what a multi-user nix daemon builds as; kept
 # from the days this manifest also served the Nix workers (split into
