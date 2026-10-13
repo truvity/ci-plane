@@ -5,7 +5,7 @@
 # own jobs.
 
 charts := "arc-runners ci-builders"
-modules := "image/nix-worker-client image/nix-worker-host-cert"
+modules := "image/nix-worker-client image/nix-worker-host-cert image/runner-watchdog"
 
 # Lint the charts, from the CI base values (neither renders bare: each
 # refuses to guess the estate facts it needs), and the shell scripts'
@@ -32,7 +32,7 @@ golden-update:
 leak-canary:
     bash hack/leak-canary.sh
 
-# The two helper modules under image/, each its own Go module.
+# The helper modules under image/, each its own Go module.
 test:
     #!/usr/bin/env bash
     set -euo pipefail

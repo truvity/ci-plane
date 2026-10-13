@@ -1,0 +1,10 @@
+# refuses: does not match pattern
+# The grace period is handed to the watchdog as a Go duration; a bare
+# number (seconds? minutes?) would stop the runner container at start.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runner:
+  watchdog:
+    enabled: true
+    grace: "45"

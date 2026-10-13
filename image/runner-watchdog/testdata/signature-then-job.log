@@ -1,0 +1,3 @@
+2026-10-13 02:41:50Z: Listening for Jobs
+[RUNNER 2026-10-13 02:42:38Z INFO Runner] Skipping message Job. Unprocessable job '269c5bb1-9d88-5672-9f70-5522ca917969'. job assignment is invalid
+2026-10-13 02:42:41Z: Running job: build

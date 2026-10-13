@@ -461,12 +461,13 @@ jobs:
   # critical options at all, fail-CLOSED on the first sign) signs a
   # worker's own HOST key. A matrix, not one job for both: see
   # nix-worker-host-cert's top-of-file comment for why they are siblings
-  # rather than one binary.
+  # rather than one binary. runner-watchdog is the runner container's
+  # optional entrypoint wrapper (arc-runners `runner.watchdog`).
   go:
     strategy:
       fail-fast: false
       matrix:
-        module: [nix-worker-client, nix-worker-host-cert]
+        module: [nix-worker-client, nix-worker-host-cert, runner-watchdog]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

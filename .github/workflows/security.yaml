@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  # govulncheck over the two Go helper modules under image/
-  # (nix-worker-client, nix-worker-host-cert). The shared check workflow
+  # govulncheck over the Go helper modules under image/
+  # (nix-worker-client, nix-worker-host-cert, runner-watchdog). The shared check workflow
   # takes recipes, not module paths, so the Justfile's `vuln` recipe walks
   # the modules itself.
   #

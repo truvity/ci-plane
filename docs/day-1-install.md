@@ -223,6 +223,11 @@ half of).
 - The `#4307` janitor CronJob ships enabled — it deletes only runners
   that hold no job, match a stuck-log signature, and outlived a grace
   period.
+- `runner.watchdog.enabled: true` (off by default) runs the runner under
+  `runner-watchdog`, which reports a stuck runner as a failing readiness
+  probe. The janitor then also deletes an idle runner whose `runner`
+  container is NotReady. It needs a runner image from the same release
+  or later. See docs/architecture.md ("Runner watchdog").
 
 ## A Go cache credential with no pod identity
 
