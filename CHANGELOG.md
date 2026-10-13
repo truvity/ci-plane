@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v6.2.0
+
 ### arc-runners chart: the janitor runs every minute and reads the readiness verdict
 
 - **`janitor.schedule` defaults to `* * * * *`** (was every 3 minutes). A consumer that sets its own schedule keeps it.
