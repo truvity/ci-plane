@@ -5,12 +5,14 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
-## v6.1.0
+## Unreleased
 
 ### arc-runners chart: the janitor runs every minute and reads the readiness verdict
 
 - **`janitor.schedule` defaults to `* * * * *`** (was every 3 minutes). A consumer that sets its own schedule keeps it.
 - **New: `janitor.notReadySeconds`** (default 60). The janitor deletes an EphemeralRunner that holds no job when its pod's `runner` container has a readiness probe (the `runner.watchdog` probe), is running, and the pod's Ready condition has been False for at least this long. It keys on the POD: a pod whose runner container has no readiness probe never matches, so with `runner.watchdog.enabled` off this changes nothing. This replaces the earlier `runner.watchdog.enabled` template gate and the age-grace wait for that criterion; the log-signature sweep stays, unchanged, as the backstop. The janitor ConfigMap is now `arc-runner-janitor-v3`.
+
+## v6.1.0
 
 ### Runner image and arc-runners chart: the runner watchdog (`runner.watchdog`)
 
