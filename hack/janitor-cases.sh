@@ -129,51 +129,49 @@ else
   bad "the summary counts what it actually did: $(grep 'sweep complete' "$work/out")"
 fi
 
-# ── runner.watchdog on: the readiness verdict ───────────────────────────
+# ── the readiness verdict (runner.watchdog) ─────────────────────────────
 #
-# The same sweep, rendered with runner.watchdog.enabled. A runner's own
-# watchdog reports STUCK as a failing readiness probe; the janitor reads
-# that from the pods and deletes the runner without needing the signature
-# in the last 200 log lines. What it must still leave alone: a runner
-# holding a job (whatever its readiness), a ready one, a container that is
-# not running (waiting / crash-looping is not the watchdog's verdict), and
-# one younger than the grace period.
-helm template t "$here/charts/arc-runners" \
-  --set githubConfigUrl=https://github.com/example \
-  --set controllerServiceAccount.namespace=arc-system \
-  --set janitor.enabled=true \
-  --set runner.watchdog.enabled=true > "$work/rendered-wd.yaml" || {
-    echo "::error::the chart did not render with runner.watchdog.enabled" >&2; exit 1; }
-python3 - "$work/rendered-wd.yaml" "$work/sweep-wd.sh" <<'PY'
-import sys, yaml
-src, dst = sys.argv[1], sys.argv[2]
-for d in yaml.safe_load_all(open(src)):
-    if d and d.get("kind") == "ConfigMap" and "sweep.sh" in d.get("data", {}):
-        open(dst, "w").write(d["data"]["sweep.sh"])
-        sys.exit(0)
-sys.exit(1)
-PY
-sh -n "$work/sweep-wd.sh" || { echo "::error::rendered watchdog sweep is not valid sh" >&2; exit 1; }
+# The same sweep, rendered with the defaults (watchdog OFF): the criterion
+# is gated on the PODS, not on a chart value, so it must match nothing
+# where no runner container has a readiness probe -- and the cases below
+# prove both halves. A runner's own watchdog reports STUCK as a failing
+# readiness probe; the janitor deletes the runner once the pod has been
+# NotReady for notReadySeconds (60), without needing the signature in the
+# last 200 log lines. What it must still leave alone: a runner holding a
+# job (whatever its readiness), a ready one, a container that is not
+# running (waiting / crash-looping is not the watchdog's verdict), one
+# NotReady for less than notReadySeconds, and one with no readiness probe
+# at all.
+ago() { date -u -d "@$((now - $1))" +%Y-%m-%dT%H:%M:%SZ; }
+t120=$(ago 120)
+t30=$(ago 30)
 
 cat > "$work/runners-wd.json" <<JSON
 {"items":[
  {"metadata":{"name":"wd-stuck","creationTimestamp":"$old"},"status":{}},
+ {"metadata":{"name":"wd-stuck-young","creationTimestamp":"$(ago 150)"},"status":{}},
  {"metadata":{"name":"wd-ready","creationTimestamp":"$old"},"status":{}},
  {"metadata":{"name":"wd-busy-notready","creationTimestamp":"$old"},"status":{"jobRepositoryName":"example/repo"}},
  {"metadata":{"name":"wd-waiting","creationTimestamp":"$old"},"status":{}},
- {"metadata":{"name":"wd-young-notready","creationTimestamp":"$recent"},"status":{}},
+ {"metadata":{"name":"wd-flipping","creationTimestamp":"$old"},"status":{}},
+ {"metadata":{"name":"wd-noprobe","creationTimestamp":"$old"},"status":{}},
  {"metadata":{"name":"wd-old-image","creationTimestamp":"$old"},"status":{}}
 ]}
 JSON
 running='"state":{"running":{"startedAt":"'"$old"'"}}'
+probe='"spec":{"containers":[{"name":"runner","readinessProbe":{"httpGet":{"path":"/healthz","port":"watchdog"}}}]}'
+noprobe='"spec":{"containers":[{"name":"runner"}]}'
+cond() { printf '"conditions":[{"type":"Ready","status":"%s","lastTransitionTime":"%s"}]' "$1" "$2"; }
 cat > "$work/pods-wd.json" <<JSON
 {"items":[
- {"metadata":{"name":"wd-stuck"},"status":{"containerStatuses":[{"name":"runner","ready":false,$running}]}},
- {"metadata":{"name":"wd-ready"},"status":{"containerStatuses":[{"name":"runner","ready":true,$running}]}},
- {"metadata":{"name":"wd-busy-notready"},"status":{"containerStatuses":[{"name":"runner","ready":false,$running}]}},
- {"metadata":{"name":"wd-waiting"},"status":{"containerStatuses":[{"name":"runner","ready":false,"state":{"waiting":{"reason":"CrashLoopBackOff"}}}]}},
- {"metadata":{"name":"wd-young-notready"},"status":{"containerStatuses":[{"name":"runner","ready":false,$running}]}},
- {"metadata":{"name":"wd-old-image"},"status":{"containerStatuses":[{"name":"runner","ready":true,$running}]}}
+ {"metadata":{"name":"wd-stuck"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":false,$running}],$(cond False "$t120")}},
+ {"metadata":{"name":"wd-stuck-young"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":false,$running}],$(cond False "$t120")}},
+ {"metadata":{"name":"wd-ready"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":true,$running}],$(cond True "$t120")}},
+ {"metadata":{"name":"wd-busy-notready"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":false,$running}],$(cond False "$t120")}},
+ {"metadata":{"name":"wd-waiting"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":false,"state":{"waiting":{"reason":"CrashLoopBackOff"}}}],$(cond False "$t120")}},
+ {"metadata":{"name":"wd-flipping"},$probe,"status":{"containerStatuses":[{"name":"runner","ready":false,$running}],$(cond False "$t30")}},
+ {"metadata":{"name":"wd-noprobe"},$noprobe,"status":{"containerStatuses":[{"name":"runner","ready":false,$running}],$(cond False "$t120")}},
+ {"metadata":{"name":"wd-old-image"},$noprobe,"status":{"containerStatuses":[{"name":"runner","ready":true,$running}],$(cond True "$t120")}}
 ]}
 JSON
 
@@ -195,16 +193,22 @@ esac
 STUB
 chmod +x "$work/bin/kubectl"
 : > "$work/calls-wd"
-PATH="$work/bin:$PATH" sh "$work/sweep-wd.sh" > "$work/out-wd" 2>&1
+PATH="$work/bin:$PATH" sh "$work/sweep.sh" > "$work/out-wd" 2>&1
 
 wd_acted_on() { grep -q "$1" "$work/calls-wd"; }
 
 if wd_acted_on 'delete ephemeralrunner .* wd-stuck '; then
-  ok "watchdog: an idle runner whose runner container is NotReady is deleted"
+  ok "watchdog: an idle runner NotReady for >= 60s is deleted"
 else
-  bad "watchdog: an idle runner whose runner container is NotReady is deleted"
+  bad "watchdog: an idle runner NotReady for >= 60s is deleted"
 fi
-for keep in wd-ready wd-busy-notready wd-waiting wd-young-notready; do
+# Younger than the 180s age grace but NotReady for 120s: the shorter clock.
+if wd_acted_on 'delete ephemeralrunner .* wd-stuck-young '; then
+  ok "watchdog: the 60s NotReady clock is not held back by the 180s age grace"
+else
+  bad "watchdog: the 60s NotReady clock is not held back by the 180s age grace"
+fi
+for keep in wd-ready wd-busy-notready wd-waiting wd-flipping wd-noprobe; do
   if wd_acted_on "$keep"; then
     bad "watchdog: $keep is left alone"
   else
@@ -212,11 +216,11 @@ for keep in wd-ready wd-busy-notready wd-waiting wd-young-notready; do
   fi
 done
 if wd_acted_on 'delete ephemeralrunner .* wd-old-image '; then
-  ok "watchdog: the log-signature sweep still runs as the fallback"
+  ok "watchdog: the log-signature sweep still runs as the backstop"
 else
-  bad "watchdog: the log-signature sweep still runs as the fallback"
+  bad "watchdog: the log-signature sweep still runs as the backstop"
 fi
-if grep -q 'sweep complete (2 released)' "$work/out-wd"; then
+if grep -q 'sweep complete (3 released)' "$work/out-wd"; then
   ok "watchdog: the summary counts what it actually did"
 else
   bad "watchdog: the summary counts what it actually did: $(grep 'sweep complete' "$work/out-wd")"
@@ -224,7 +228,7 @@ fi
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "janitor holds (13 cases checked)"
+  echo "janitor holds (15 cases checked)"
 else
   echo "::error::janitor cases failed"
 fi

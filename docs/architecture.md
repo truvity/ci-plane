@@ -186,11 +186,15 @@ answers 200, or 503 while stuck. A liveness failure would restart the
 container, and a restarted runner cannot register again: its JIT
 registration is single-use, and the restart ends in the "Registration …
 was not found" crash loop instead. The remedy is deleting the
-EphemeralRunner, which ARC then replaces. With `runner.watchdog.enabled`,
-the janitor deletes any runner that holds no job, is past its grace
-period, and whose `runner` container is running but NotReady. The log
-grep stays as the fallback, for a runner whose watchdog cannot answer.
-`hack/janitor-cases.sh` runs both against a stub `kubectl`.
+EphemeralRunner, which ARC then replaces. The janitor (every minute)
+deletes any runner that holds no job and whose pod has a readiness probe on
+its `runner` container, that container is running, and the pod has been
+NotReady for `janitor.notReadySeconds` (60). The criterion keys on the pod,
+not on a chart value: a pod without the probe (the watchdog off, or an
+older pod) never matches, so it is inert until `runner.watchdog.enabled` is
+on. The log grep stays as the backstop (idle, past `graceSeconds`), for a
+runner whose watchdog cannot answer. `hack/janitor-cases.sh` runs both
+against a stub `kubectl`.
 
 `/metrics` is the Prometheus text format, on a container port named
 `watchdog` (`runner.watchdog.port`, 8091 by default). The chart renders no
