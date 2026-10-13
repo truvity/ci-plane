@@ -9,9 +9,10 @@ line is summarised in one section.
 
 ### Pulumi package: `deploy/pulumi/runneridentity` v0.1.1
 
-- **Fix: the module declares `go 1.27.0`** (v0.1.0 said 1.27.2), so a
-  consumer pinned to an older `go` line is not forced to raise it by
-  adding the package.
+- **Fix: the module declares `go 1.27.0` with `toolchain go1.27.2`** (v0.1.0
+  said `go 1.27.2`), so a consumer on an older `go` line is not forced to
+  raise it by adding the package, while the module itself still builds and
+  is vulnerability-checked with the fixed standard library.
 
 ## v6.0.0
 
