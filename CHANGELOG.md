@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v6.5.0
+
 ### runner-watchdog: a drill of the stuck-runner remedy (`runner.watchdog.drillFile`)
 
 - **New: `-drill-file PATH`** on `runner-watchdog`, and **`runner.watchdog.drillFile`** in the arc-runners chart (default `""`; unset renders byte-identical to before: the key is left out of the values-hash, every existing golden unchanged). Set, the watchdog feeds itself one simulated stuck line each time that file appears, counted under its own signature `drill` (`runner_watchdog_signature_lines_total{signature="drill"}`), never as a real #4307 one. `kubectl exec <idle runner> -- touch <path>` then exercises the whole remedy: `/healthz` 503 after `grace`, the pod NotReady, the janitor deleting the runner, ARC replacing it, `ARCRunnerStuck` firing. During a job the line is only counted. The schema requires an absolute path. New golden `runner-watchdog-drill`; new refusal `runner-watchdog-drill-relative`. Requires the runner image of this release.
