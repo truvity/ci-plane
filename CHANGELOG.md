@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v6.4.0
+
 ### arc-runners chart: `networkPolicy.containment.metricsFrom`, a narrow ingress rule for the metrics agent
 
 - **New: `networkPolicy.containment.metricsFrom`** (`namespaceSelector` and/or `podSelector`; unset by default, and an unset render is byte-identical to before, every existing golden unchanged). The containment policy admits ingress from its own namespace only, so a metrics agent in another namespace cannot reach the runner watchdog's `/metrics` (`monitoring.enabled`). Set, the policy gains ONE ingress rule: TCP on the watchdog's port (`runner.watchdog.port`, default 8091) from exactly that selector, nothing else; with both selectors set they match the same pod (namespace AND pod). At least one selector is required: an empty one would admit every pod, and the schema and the template refuse it. New golden `containment-metrics`.
