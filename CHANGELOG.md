@@ -7,6 +7,11 @@ line is summarised in one section.
 
 ## v6.1.0
 
+### arc-runners chart: the janitor runs every minute and reads the readiness verdict
+
+- **`janitor.schedule` defaults to `* * * * *`** (was every 3 minutes). A consumer that sets its own schedule keeps it.
+- **New: `janitor.notReadySeconds`** (default 60). The janitor deletes an EphemeralRunner that holds no job when its pod's `runner` container has a readiness probe (the `runner.watchdog` probe), is running, and the pod's Ready condition has been False for at least this long. It keys on the POD: a pod whose runner container has no readiness probe never matches, so with `runner.watchdog.enabled` off this changes nothing. This replaces the earlier `runner.watchdog.enabled` template gate and the age-grace wait for that criterion; the log-signature sweep stays, unchanged, as the backstop. The janitor ConfigMap is now `arc-runner-janitor-v3`.
+
 ### Runner image and arc-runners chart: the runner watchdog (`runner.watchdog`)
 
 - **New in the runner image: `/usr/local/bin/runner-watchdog`.** An optional entrypoint wrapper for `/home/runner/run.sh` (image/runner-watchdog, standard library only). It runs the runner as its child and copies the runner's output to the log unchanged. It forwards signals to the runner's process group, reaps orphans, and exits with the runner's code. It reports a runner stranded by upstream ARC #4307 on `/healthz` (503 while stuck). STUCK means no job is running and an idle stuck signature (`Skipping message Job. Job message already acquired` / `Job message not found` / `Unprocessable job`, or `Registration <id> was not found`) has persisted for the grace period. Prometheus metrics are on `/metrics`. See docs/architecture.md ("Runner watchdog").

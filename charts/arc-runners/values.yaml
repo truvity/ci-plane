@@ -670,8 +670,17 @@ janitor:
   # person cleared it by hand. Remove 1 when #4307 ships a fix; 2 stands
   # until a JIT registration survives a container restart.
   enabled: true
-  schedule: "*/3 * * * *"
+  # Every minute (was every 3): a stuck runner holds the queue, and the
+  # sweep is a handful of kubectl calls.
+  schedule: "* * * * *"
   graceSeconds: 180
+  # A runner whose READINESS probe (runner.watchdog) has failed this long,
+  # while it holds no job, is deleted without reading its log. Inert for a
+  # pod whose runner container has no readiness probe, i.e. until
+  # runner.watchdog.enabled is on. The watchdog waits its own grace
+  # (runner.watchdog.grace, 45s) before the probe starts failing, so the
+  # runner is gone about two minutes after it got stuck.
+  notReadySeconds: 60
   image:
     registry: docker.io
     repository: alpine/k8s
