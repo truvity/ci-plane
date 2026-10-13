@@ -40,6 +40,22 @@ line is summarised in one section.
   without naming sets. A set's own key wins; the values hash a set carries is
   the one an explicit per-set `restricted: true` produced.
 
+### Pulumi package: `deploy/pulumi/runneridentity`
+
+- **New: the runner pools' AWS identities as a Go Pulumi package.** Its own
+  module (`github.com/truvity/ci-plane/deploy/pulumi/runneridentity`),
+  versioned by tags of the form `deploy/pulumi/runneridentity/vX.Y.Z`, so a
+  chart release does not publish it and it does not ride a chart version.
+  It builds, through `github.com/truvity/k8s/pkg/aws/podidentity`, the Pod
+  Identity role of a runner pool (`Pool`: pull its runner images, read the
+  registry's pull-through caches and the chart repositories, use the CI
+  cache bucket, optionally share the BuildKit warm cache) and of the Go
+  module proxy (`Modproxy`: one prefix of the cache bucket). Every name is
+  an input; functional options (`WithArgs`, `WithNames`,
+  `WithLegacyTopLevel`, `WithIgnoreAssociationTags`) let an estate that
+  already runs these roles keep their logical names and URNs. Nothing
+  deploy-shaped (cluster access, publishing) can be granted through it.
+
 ## v5.4.0
 
 ### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)
