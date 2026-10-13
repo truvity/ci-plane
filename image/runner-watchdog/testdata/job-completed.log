@@ -1,0 +1,6 @@
+2026-10-13 02:41:50Z: Listening for Jobs
+2026-10-13 02:41:59Z: Running job: test
+[RUNNER 2026-10-13 02:44:01Z INFO JobDispatcher] finish job request for job 1234 with result: Succeeded
+[RUNNER 2026-10-13 02:44:01Z INFO Terminal] WRITE LINE: 2026-10-13 02:44:01Z: Job test completed with result: Succeeded
+2026-10-13 02:44:01Z: Job test completed with result: Succeeded
+[RUNNER 2026-10-13 02:44:02Z INFO Runner] Job has finished at backend, the runner will exit since it is running under onetime use mode.

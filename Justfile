@@ -5,7 +5,7 @@
 # own jobs.
 
 charts := "arc-runners ci-builders"
-modules := "image/nix-worker-client image/nix-worker-host-cert deploy/pulumi/runneridentity"
+modules := "image/nix-worker-client image/nix-worker-host-cert image/runner-watchdog deploy/pulumi/runneridentity"
 
 # Lint the charts, from the CI base values (neither renders bare: each
 # refuses to guess the estate facts it needs), and the shell scripts'

@@ -1,0 +1,13 @@
+# runner.watchdog on, with a non-default port and grace: the runner
+# container runs run.sh under runner-watchdog, carries a readiness probe on
+# its /healthz and a `watchdog` container port, and the janitor deletes an
+# idle runner whose runner container is NotReady. Off (every other case),
+# none of this renders.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runner:
+  watchdog:
+    enabled: true
+    port: 9091
+    grace: 1m30s
