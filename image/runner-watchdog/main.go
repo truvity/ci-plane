@@ -54,7 +54,7 @@ func realMain(args []string) int {
 	port := fs.Int("port", 8091, "TCP port for /healthz and /metrics (0 disables the server)")
 	grace := fs.Duration("grace", 45*time.Second, "how long an idle stuck signature must persist before the runner is reported stuck")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: runner-watchdog [-port N] [-grace D] -- command [args...]")
+		_, _ = fmt.Fprintln(fs.Output(), "usage: runner-watchdog [-port N] [-grace D] -- command [args...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
