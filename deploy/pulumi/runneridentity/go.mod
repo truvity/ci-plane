@@ -2,6 +2,8 @@ module github.com/truvity/ci-plane/deploy/pulumi/runneridentity
 
 go 1.27.0
 
+toolchain go1.27.2
+
 require (
 	github.com/pulumi/pulumi/sdk/v3 v3.268.0
 	github.com/truvity/k8s v0.28.0
