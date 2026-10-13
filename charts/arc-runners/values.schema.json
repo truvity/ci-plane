@@ -376,6 +376,10 @@
         "graceSeconds": {
           "type": "integer",
           "minimum": 0
+        },
+        "notReadySeconds": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

@@ -7,9 +7,11 @@
 # every later runner logs "Job message already acquired" or "job
 # assignment is invalid", then idles forever. The queue stalls beside
 # idle capacity — a signature that reads like a capacity problem and is
-# not one. Namespace-scoped RBAC; deletes ONLY runners that (a) hold no
-# job, (b) match a stuck signature, (c) are older than the grace
-# period. Remove when #4307 ships a fix.
+# not one. Namespace-scoped RBAC; deletes ONLY runners that hold no job
+# and either (a) match a stuck signature in their log and are older than
+# the grace period, or (b) have a readiness probe (runner.watchdog) that
+# has been failing for notReadySeconds. Runs every minute. Remove when
+# #4307 ships a fix.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,12 +25,13 @@ metadata:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: arc-runner-janitor-v2
+  name: arc-runner-janitor-v3
 data:
   sweep.sh: |
     #!/bin/sh
     set -eu
     GRACE_SECONDS=180
+    NOTREADY_SECONDS=60
     NOW=$(date -u +%s)
     STUCK='Job message already acquired|job assignment is invalid|invalid job assignment'
     swept=0
@@ -47,9 +50,40 @@ data:
       | jq -r '.items[] | select((.status.jobRepositoryName // "") == "")
                | "\(.metadata.name)\t\(.metadata.creationTimestamp|fromdateiso8601)"')
 
+    # A runner with the watchdog (runner.watchdog.enabled) judges itself,
+    # job-aware, and reports STUCK as a failing READINESS probe on its
+    # `runner` container. This reads that verdict, and only that: a pod
+    # whose runner container has NO readiness probe (the watchdog is off,
+    # or the pod predates it) is never selected, so with the watchdog off
+    # this criterion matches nothing. Selected: the probe exists, the
+    # container is running (waiting or crash-looping is not the watchdog's
+    # verdict) and the pod's Ready condition has been False for at least
+    # notReadySeconds. The pod is named after its EphemeralRunner. The log
+    # grep below still runs for everything else, as the backstop for a
+    # runner whose watchdog cannot answer (an older image, a server that
+    # could not bind).
+    notready=$(kubectl get pods -n example -o json \
+      | jq -r --argjson now "$NOW" --argjson min "$NOTREADY_SECONDS" '.items[]
+               | select(any(.spec.containers[]?; .name == "runner" and .readinessProbe != null))
+               | select(any(.status.containerStatuses[]?;
+                            .name == "runner" and .ready == false and .state.running != null))
+               | select(any(.status.conditions[]?;
+                            .type == "Ready" and .status == "False"
+                            and ($now - (.lastTransitionTime | fromdateiso8601)) >= $min))
+               | .metadata.name')
+
     while IFS="$(printf '\t')" read -r name created_epoch; do
         [ -z "$name" ] && continue
         age=$(( NOW - created_epoch ))
+        # NotReady for notReadySeconds is its own, shorter clock: the
+        # watchdog already waited its grace before failing the probe, and a
+        # runner NotReady that long cannot be a pod still starting.
+        if printf '%s\n' "$notready" | grep -qxF "$name"; then
+          echo "STUCK $name (age ${age}s, no job, runner NotReady >= ${NOTREADY_SECONDS}s: watchdog reports stuck) — deleting"
+          kubectl delete ephemeralrunner -n example "$name" --wait=false || true
+          swept=$((swept+1))
+          continue
+        fi
         if [ "$age" -lt "$GRACE_SECONDS" ]; then
           echo "skip $name: age ${age}s < grace"
           continue
@@ -359,7 +393,7 @@ metadata:
     app.kubernetes.io/name: arc-runner-janitor
     app.kubernetes.io/part-of: arc-runners
 spec:
-  schedule: "*/3 * * * *"
+  schedule: "* * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -400,7 +434,7 @@ spec:
           volumes:
             - name: script
               configMap:
-                name: arc-runner-janitor-v2
+                name: arc-runner-janitor-v3
                 defaultMode: 0555
 
 ---
