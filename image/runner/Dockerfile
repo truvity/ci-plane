@@ -55,7 +55,7 @@
 # moves this pin within days of upstream, which is faster than the
 # controller chart stream moves.
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
-ARG RUNNER_VERSION=2.337.0
+ARG RUNNER_VERSION=2.338.0
 
 # The nix substituter list baked into the image. Default unchanged, so a
 # rebuild produces what it always did; a fleet whose cache lives
@@ -121,6 +121,15 @@ RUN cd /src/nix-worker-client \
     go build -trimpath -ldflags='-s -w' \
       -o /out/nix-worker-client-setup .
 
+# The runner's optional entrypoint wrapper (arc-runners
+# `runner.watchdog`): reports a runner stranded by upstream ARC #4307 on
+# a readiness endpoint. Standard library only, so nothing to download.
+COPY runner-watchdog/ /src/runner-watchdog/
+RUN cd /src/runner-watchdog \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags='-s -w' \
+      -o /out/runner-watchdog .
+
 # ── the runner ──
 FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 ARG GORELEASER_VERSION
@@ -166,6 +175,7 @@ RUN ln -sf /bin/bash /bin/sh \
 # -- after which the image carries no cache client at all.
 COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
+COPY --from=gocache /out/runner-watchdog /usr/local/bin/runner-watchdog
 
 # docker client + buildx plugin (daemonless: CLIENT ONLY, builds go to
 # the shared rootless builders over --driver remote). Static binaries,

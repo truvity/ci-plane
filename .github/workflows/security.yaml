@@ -13,7 +13,8 @@ permissions:
 
 jobs:
   # govulncheck over the Go modules (image/nix-worker-client,
-  # image/nix-worker-host-cert, deploy/pulumi/runneridentity). The shared check workflow
+  # image/nix-worker-host-cert, image/runner-watchdog,
+  # deploy/pulumi/runneridentity). The shared check workflow
   # takes recipes, not module paths, so the Justfile's `vuln` recipe walks
   # the modules itself.
   #

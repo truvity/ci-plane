@@ -615,6 +615,36 @@ nixSandbox:
   fence:
     enabled: false
 
+# The runner container's entrypoint wrapper, `runner-watchdog` (in the
+# runner image from this release on). OFF by default: the container then
+# runs /home/runner/run.sh exactly as before.
+#
+# On, it becomes the container's PID 1 and runs run.sh as its child:
+# the runner's output reaches the log unchanged, signals are forwarded,
+# orphans are reaped, and it exits with the runner's own exit code. It
+# reads the runner's log for the upstream #4307 signatures (the janitor
+# below describes them) and, ONLY while no job is running and a signature
+# has persisted for `grace`, answers 503 on /healthz. The pod gets a
+# READINESS probe on it -- never a liveness probe: a restarted runner
+# cannot register again (its JIT registration is single-use), so the
+# remedy is deleting the EphemeralRunner, which the janitor then does for
+# an idle runner whose `runner` container is NotReady, without waiting to
+# find the signature in its log. Prometheus metrics are on /metrics, on a
+# container port named `watchdog`. See docs/architecture.md ("Runner
+# watchdog").
+#
+# The image must carry the binary: enable it only with a runner image of
+# the same release or later, or the container cannot start.
+runner:
+  watchdog:
+    enabled: false
+    # /healthz and /metrics. A job step that binds the same port inside
+    # the runner container fails with "address already in use".
+    port: 8091
+    # How long an idle stuck signature must persist before the runner is
+    # reported stuck (a Go duration: 45s, 2m).
+    grace: 45s
+
 janitor:
   # Sweeps ephemeral runners that have stopped making progress. TWO
   # signatures, because they strand a runner in opposite ways and one
