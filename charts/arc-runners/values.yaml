@@ -596,6 +596,19 @@ networkPolicy:
     serviceCidr: ""
     vpcCidr: ""
     cacheNamespace: ""
+    # One extra INGRESS rule for a metrics agent: TCP on the runner
+    # watchdog's port (runner.watchdog.port) from exactly the pods this
+    # selects, nothing else. Unset by default (the policy then admits its
+    # own namespace only and the watchdog's /metrics cannot be scraped).
+    # At least one of the two selectors is required; set together they
+    # match the same pod (namespace AND pod).
+    #metricsFrom:
+    #  namespaceSelector:
+    #    matchLabels:
+    #      kubernetes.io/metadata.name: monitoring
+    #  podSelector:
+    #    matchLabels:
+    #      app.kubernetes.io/name: vmagent
 
 # Release-wide only; a scale set's own nixSandbox.enabled lives under
 # scaleSets.<name> above. Off by default: a scale set's sandbox mutation

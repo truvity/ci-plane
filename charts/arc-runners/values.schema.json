@@ -100,6 +100,22 @@
             },
             "cacheNamespace": {
               "type": "string"
+            },
+            "metricsFrom": {
+              "type": "object",
+              "properties": {
+                "namespaceSelector": {
+                  "type": "object"
+                },
+                "podSelector": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                { "required": ["namespaceSelector"] },
+                { "required": ["podSelector"] }
+              ]
             }
           }
         }

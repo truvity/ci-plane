@@ -10,6 +10,12 @@ THE FIRST NetworkPolicy THAT SELECTS A POD IS A DEFAULT DENY OF IT. This one
 selects every pod of the release namespace (listeners are in the controller's
 namespace and are not touched), so it is a decision, not a default: the chart
 refuses to render it without the three addresses it cannot know.
+
+`metricsFrom` (a namespaceSelector and/or a podSelector, both matching the
+SAME pod when both are set) adds ONE ingress rule: TCP on the runner
+watchdog's port (`runner.watchdog.port`) from exactly that selector, so a
+metrics agent can scrape `runner_watchdog_*` without opening the runners to
+the rest of the cluster. Unset (the default) renders nothing extra.
 */ -}}
 {{- $c := (.Values.networkPolicy | default dict).containment | default dict }}
 {{- if $c.enabled }}
@@ -31,6 +37,14 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+{{- with $c.metricsFrom }}
+{{- if not (or .namespaceSelector .podSelector) }}{{ fail "networkPolicy.containment.metricsFrom needs a namespaceSelector or a podSelector: an empty selector would admit every pod of the cluster" }}{{ end }}
+    - from:
+        - {{ toYaml (pick . "namespaceSelector" "podSelector") | nindent 10 | trim }}
+      ports:
+        - port: {{ ($.Values.runner | default dict).watchdog | default dict | dig "port" 8091 }}
+          protocol: TCP
+{{- end }}
   egress:
     - to:
         - namespaceSelector:
