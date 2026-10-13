@@ -1,0 +1,47 @@
+{{- /*
+Extra ingress for the builders and the Nix workers, one NetworkPolicy per
+entry of `<component>.networkPolicy.additionalIngress`. Policies UNION, so
+an entry only ever ADDS a way in beside the consumerNamespaces policy; it
+cannot narrow it. For a peer the consumer namespaces do not describe --
+developers reaching a builder through a tailnet router, say. The peers are
+NetworkPolicyPeer objects, rendered as given: which namespace or CIDR may
+call is an estate fact, never a default. Empty by default (renders nothing).
+
+An entry's `arch` (optional) narrows the policy to one architecture's pods.
+The port is the component's own (buildkitd 1234, workers 2222).
+*/ -}}
+{{- define "ci-builders.additionalIngress" -}}
+{{- range $i, $e := .entries }}
+{{- if not $e.name }}{{ fail (printf "%s.networkPolicy.additionalIngress[%d].name is required" $.component $i) }}{{ end }}
+{{- if not $e.from }}{{ fail (printf "%s.networkPolicy.additionalIngress[%d].from is required and non-empty: an entry that admits nobody is not a policy worth rendering" $.component $i) }}{{ end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $e.name }}
+  {{- with $e.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $.component }}
+      {{- with $e.arch }}
+      ci-plane.io/arch: {{ . }}
+      {{- end }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- toYaml $e.from | nindent 8 }}
+      ports:
+        - port: {{ $.port }}
+          protocol: TCP
+{{- end }}
+{{- end -}}
+{{- if .Values.buildkitd.enabled }}
+{{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.networkPolicy.additionalIngress "component" "buildkitd" "port" 1234) }}
+{{- end }}
+{{- if .Values.nixWorkers.enabled }}
+{{- include "ci-builders.additionalIngress" (dict "entries" .Values.nixWorkers.networkPolicy.additionalIngress "component" "nix-worker" "port" 2222) }}
+{{- end }}

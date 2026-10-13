@@ -578,6 +578,25 @@ scaleSets:
         memory: 6Gi
         ephemeral-storage: 20Gi
 
+# Opt-in egress containment for this release's runner pods (v6.0.0): one
+# NetworkPolicy selecting every pod of the release namespace, allowing
+# cluster DNS, the cache plane's namespace, the namespace itself, the
+# network's CIDR on 443 (VPC endpoints) and the internet, and denying the
+# rest of the cluster, the rest of the network and the cloud metadata
+# address. Off by default. A release tier that builds with real
+# credentials nearby turns it on. The first NetworkPolicy to select a pod
+# is a default deny of it, so the three addresses below are REQUIRED while
+# enabled and have no default.
+networkPolicy:
+  containment:
+    enabled: false
+    name: runner-containment
+    # Annotations on the policy, e.g. an Argo CD guard or sync wave.
+    annotations: {}
+    serviceCidr: ""
+    vpcCidr: ""
+    cacheNamespace: ""
+
 # Release-wide only; a scale set's own nixSandbox.enabled lives under
 # scaleSets.<name> above. Off by default: a scale set's sandbox mutation
 # (hostUsers, procMount, seccompProfile) works without this, but nothing

@@ -1,0 +1,37 @@
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+    additionalIngress:
+      - name: buildkitd-from-router
+        annotations:
+          example.com/guard: "true"
+        from:
+          - namespaceSelector:
+              matchLabels:
+                example.com/router: "true"
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: router
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+    additionalIngress:
+      - name: nix-worker-amd64-from-router
+        arch: amd64
+        from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: router
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker

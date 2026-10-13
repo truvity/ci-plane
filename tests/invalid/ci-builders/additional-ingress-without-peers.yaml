@@ -1,0 +1,13 @@
+# refuses: additionalIngress/0/from
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+    additionalIngress:
+      - name: admits-nobody
+        from: []
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

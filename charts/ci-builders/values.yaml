@@ -123,6 +123,19 @@ buildkitd:
     # `enabled: false` to run without a policy.
     enabled: true
     consumerNamespaces: []
+    # Extra ingress beside consumerNamespaces, one additive NetworkPolicy
+    # per entry (policies union), for a peer the consumer namespaces do not
+    # describe. Empty by default. Each entry: `name` (the policy's name),
+    # `from` (NetworkPolicyPeer objects, as given), optional `annotations`
+    # and `arch` (one architecture's pods only). The port is the builder's.
+    #
+    #   additionalIngress:
+    #     - name: buildkitd-from-router
+    #       annotations: {}
+    #       from:
+    #         - namespaceSelector: {matchLabels: {example.com/router: "true"}}
+    #           podSelector: {matchLabels: {app.kubernetes.io/name: router}}
+    additionalIngress: []
   # Annotations for the builder pods. Empty by default (C13); a
   # Karpenter estate sets `karpenter.sh/do-not-disrupt: "true"` here --
   # a builder mid-build is not migratable state.
@@ -299,6 +312,11 @@ nixWorkers:
     # namespaces that may reach the workers (see buildkitd.networkPolicy).
     enabled: true
     consumerNamespaces: []
+    # Extra ingress beside consumerNamespaces, one additive NetworkPolicy
+    # per entry, exactly as buildkitd.networkPolicy.additionalIngress; the
+    # port is the workers' SSH port. `arch` narrows an entry to one
+    # architecture's worker (a pilot on a single worker).
+    additionalIngress: []
   # Empty by default (C13); a Karpenter estate sets
   # `karpenter.sh/do-not-disrupt: "true"` here, same as buildkitd's
   # podAnnotations above.
