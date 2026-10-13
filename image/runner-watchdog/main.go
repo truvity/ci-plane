@@ -7,7 +7,7 @@
 // on "Skipping message Job. Job message already acquired" (or "...not
 // found", or "Registration ... was not found").
 //
-//	runner-watchdog [-port 8091] [-grace 45s] -- /home/runner/run.sh
+//	runner-watchdog [-port 8091] [-grace 45s] [-drill-file PATH] -- /home/runner/run.sh
 //
 // It is a transparent PID 1: the child runs in its own process group,
 // its stdout and stderr reach the container's unchanged (kubectl logs
@@ -53,8 +53,9 @@ func realMain(args []string) int {
 	fs := flag.NewFlagSet("runner-watchdog", flag.ContinueOnError)
 	port := fs.Int("port", 8091, "TCP port for /healthz and /metrics (0 disables the server)")
 	grace := fs.Duration("grace", 45*time.Second, "how long an idle stuck signature must persist before the runner is reported stuck")
+	drillFile := fs.String("drill-file", "", "when this file appears, feed one simulated stuck signature (a drill of the whole remedy); empty disables")
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "usage: runner-watchdog [-port N] [-grace D] -- command [args...]")
+		_, _ = fmt.Fprintln(fs.Output(), "usage: runner-watchdog [-port N] [-grace D] [-drill-file PATH] -- command [args...]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -80,6 +81,9 @@ func realMain(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go report(ctx, m)
+	if *drillFile != "" {
+		go drill(ctx, *drillFile, 2*time.Second, lines, &dropped)
+	}
 	if *port != 0 {
 		go serve(ctx, net.JoinHostPort("", strconv.Itoa(*port)), handler(m, &dropped, time.Now))
 	}

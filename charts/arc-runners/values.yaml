@@ -657,6 +657,16 @@ runner:
     # How long an idle stuck signature must persist before the runner is
     # reported stuck (a Go duration: 45s, 2m).
     grace: 45s
+    # A DRILL of the whole remedy. Empty (the default) renders nothing.
+    # Set to an absolute path inside the runner container (e.g.
+    # /tmp/runner-watchdog-drill): when that file appears, the watchdog
+    # feeds itself one simulated stuck signature (counted as signature
+    # `drill`, never as a real one), so `kubectl exec <runner> -- touch
+    # <path>` on an IDLE runner proves the chain end to end: /healthz 503
+    # after `grace`, the pod NotReady, the janitor deleting the runner,
+    # ARC replacing it, ARCRunnerStuck firing. During a job it is only
+    # counted. Turn it on for a drill, then back off.
+    drillFile: ""
 
 # Scrapes for the metrics the fleet exports, as PodMonitor objects
 # (monitoring.coreos.com/v1: the Prometheus operator's, which the

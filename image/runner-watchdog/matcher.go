@@ -33,11 +33,19 @@ type signature struct {
 	re   *regexp.Regexp
 }
 
+// drillLine is the synthetic signature a drill feeds the matcher
+// (drill.go). The runner never prints it.
+const drillLine = "runner-watchdog drill: simulated stuck signature"
+
 var signatures = []signature{
 	{"job-message-already-acquired", regexp.MustCompile(`Skipping message Job\. Job message already acquired `)},
 	{"job-message-not-found", regexp.MustCompile(`Skipping message Job\. Job message not found `)},
 	{"job-unprocessable", regexp.MustCompile(`Skipping message Job\. Unprocessable job `)},
 	{"registration-not-found", regexp.MustCompile(`Registration [0-9A-Fa-f-]+ was not found`)},
+	// Never printed by the runner: the watchdog feeds it itself when the
+	// -drill-file appears (drill.go), so a drill is counted under its own
+	// name and never mistaken for a real #4307 detection.
+	{"drill", regexp.MustCompile(`^` + regexp.QuoteMeta(drillLine) + `$`)},
 }
 
 // The job lifecycle as the listener prints it to the terminal

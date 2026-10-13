@@ -378,6 +378,10 @@
             "grace": {
               "type": "string",
               "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
+            },
+            "drillFile": {
+              "type": "string",
+              "pattern": "^(/[A-Za-z0-9._/-]+)?$"
             }
           }
         }

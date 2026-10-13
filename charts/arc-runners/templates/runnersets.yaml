@@ -167,7 +167,9 @@ what a job loses.
      and from the pod spec, so a release that leaves it off renders
      byte-identically to one built before the key existed. */}}
 {{- $watchdog := $root.Values.runner.watchdog }}
-{{- if $watchdog.enabled }}{{ $_ := set $spec "watchdog" $watchdog }}{{ end }}
+{{- /* An unset drillFile stays out of the hash too: the key's arrival (v6.5.0)
+     must not recycle every watchdog-enabled listener. */}}
+{{- if $watchdog.enabled }}{{ $_ := set $spec "watchdog" (ternary $watchdog (omit $watchdog "drillFile") (not (empty $watchdog.drillFile))) }}{{ end }}
 {{- /*
 Whether the pod spec carries an initContainers/volumeMounts/volumes key
 at all — each stays OMITTED, not rendered empty, when none of its
@@ -348,7 +350,7 @@ spec:
           # READINESS probe, never liveness -- a restarted runner cannot
           # register again, so the remedy is deleting the EphemeralRunner,
           # which the janitor does for an idle runner that is NotReady.
-          command: ["/usr/local/bin/runner-watchdog", {{ printf "-port=%d" (int $watchdog.port) | quote }}, {{ printf "-grace=%s" $watchdog.grace | quote }}, "--", "/home/runner/run.sh"]
+          command: ["/usr/local/bin/runner-watchdog", {{ printf "-port=%d" (int $watchdog.port) | quote }}, {{ printf "-grace=%s" $watchdog.grace | quote }},{{ with $watchdog.drillFile }} {{ printf "-drill-file=%s" . | quote }},{{ end }} "--", "/home/runner/run.sh"]
           ports:
             - name: watchdog
               containerPort: {{ int $watchdog.port }}
