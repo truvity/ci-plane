@@ -1,0 +1,6 @@
+2026-10-13 02:41:50Z: Listening for Jobs
+[RUNNER 2026-10-13 02:42:07Z INFO GitHubActionsService] AAD Correlation ID for this token request: Unknown
+[RUNNER 2026-10-13 02:42:22Z WARN GitHubActionsService] Attempt 1 of POST request to https://run-actions.example.invalid/119/acquirejob failed (HTTP Status: GatewayTimeout). The operation will be retried in 11.082 seconds.
+[RUNNER 2026-10-13 02:42:38Z ERR  GitHubActionsService] POST request to https://run-actions.example.invalid/119/acquirejob failed. HTTP Status: Conflict
+[RUNNER 2026-10-13 02:42:38Z INFO Runner] Skipping message Job. Job message already acquired '269c5bb1-9d88-5672-9f70-5522ca917969'. job assignment is invalid: MissingKey
+[RUNNER 2026-10-13 02:43:30Z INFO BrokerServer] Get runner message

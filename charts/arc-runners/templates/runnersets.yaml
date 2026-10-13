@@ -163,6 +163,11 @@ what a job loses.
 {{- if $root.Values.extraVolumes }}{{ $_ := set $spec "extraVolumes" $root.Values.extraVolumes }}{{ end }}
 {{- if $root.Values.extraVolumeMounts }}{{ $_ := set $spec "extraVolumeMounts" $root.Values.extraVolumeMounts }}{{ end }}
 {{- if $root.Values.extraInitContainers }}{{ $_ := set $spec "extraInitContainers" $root.Values.extraInitContainers }}{{ end }}
+{{- /* runner.watchdog is release-wide. Off, it is absent from the hash
+     and from the pod spec, so a release that leaves it off renders
+     byte-identically to one built before the key existed. */}}
+{{- $watchdog := $root.Values.runner.watchdog }}
+{{- if $watchdog.enabled }}{{ $_ := set $spec "watchdog" $watchdog }}{{ end }}
 {{- /*
 Whether the pod spec carries an initContainers/volumeMounts/volumes key
 at all — each stays OMITTED, not rendered empty, when none of its
@@ -336,7 +341,28 @@ spec:
       containers:
         - name: runner
           image: {{ include "arc-runners.runnerImage" $root }}
+          {{- if $watchdog.enabled }}
+          # runner-watchdog (runner.watchdog) is PID 1 and runs run.sh as its
+          # child, logging its output unchanged. /healthz answers 503 only
+          # while the runner is idle and stuck (upstream ARC #4307): a
+          # READINESS probe, never liveness -- a restarted runner cannot
+          # register again, so the remedy is deleting the EphemeralRunner,
+          # which the janitor does for an idle runner that is NotReady.
+          command: ["/usr/local/bin/runner-watchdog", {{ printf "-port=%d" (int $watchdog.port) | quote }}, {{ printf "-grace=%s" $watchdog.grace | quote }}, "--", "/home/runner/run.sh"]
+          ports:
+            - name: watchdog
+              containerPort: {{ int $watchdog.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: watchdog
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- else }}
           command: ["/home/runner/run.sh"]
+          {{- end }}
           {{- with $extraEnvFrom }}
           # Credentials the runner needs that this chart must not know: an
           # object store with no pod identity wants an access key, and the

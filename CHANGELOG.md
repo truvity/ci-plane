@@ -14,6 +14,12 @@ line is summarised in one section.
   raise it by adding the package, while the module itself still builds and
   is vulnerability-checked with the fixed standard library.
 
+### Runner image and arc-runners chart: the runner watchdog (`runner.watchdog`)
+
+- **New in the runner image: `/usr/local/bin/runner-watchdog`.** An optional entrypoint wrapper for `/home/runner/run.sh` (image/runner-watchdog, standard library only). It runs the runner as its child and copies the runner's output to the log unchanged. It forwards signals to the runner's process group, reaps orphans, and exits with the runner's code. It reports a runner stranded by upstream ARC #4307 on `/healthz` (503 while stuck). STUCK means no job is running and an idle stuck signature (`Skipping message Job. Job message already acquired` / `Job message not found` / `Unprocessable job`, or `Registration <id> was not found`) has persisted for the grace period. Prometheus metrics are on `/metrics`. See docs/architecture.md ("Runner watchdog").
+- **New: `runner.watchdog.enabled` / `.port` / `.grace`** in arc-runners. Off by default, and an off render is byte-identical to before. On (port 8091 and grace 45s by default), the runner container runs `runner-watchdog -- /home/runner/run.sh`, exposes a `watchdog` container port, and gets a READINESS probe on `/healthz`. It gets no liveness probe: a restarted runner cannot register again. The janitor then also deletes an idle runner, past its grace period, whose `runner` container is running but NotReady; the log grep stays as the fallback. Enable it only with a runner image from this release or later. A `grace` that is not a Go duration is refused by the schema.
+- **The runner image is on actions/runner 2.338.0** (was 2.337.0).
+
 ## v6.0.0
 
 ### Runner image: `r2broker` removed

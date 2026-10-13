@@ -131,6 +131,90 @@ own `affinity` is kept, and the packing term is appended to it.
 a broken preference fails nothing: the runners would simply spread
 again.
 
+## Runner watchdog: a stuck runner says so itself
+
+Upstream ARC
+[#4307](https://github.com/actions/actions-runner-controller/issues/4307)
+strands an ephemeral runner after a cancelled or interrupted job: the
+runner stays registered and idle, and never takes another job. The
+janitor finds such runners by grepping the last 200 lines of each idle
+runner's log every few minutes. `runner.watchdog` (off by default) lets
+each runner judge itself, with job state the janitor cannot see from
+outside.
+
+`runner-watchdog` (image/runner-watchdog, in the runner image at
+`/usr/local/bin/runner-watchdog`) becomes the runner container's PID 1
+and runs `/home/runner/run.sh` as its child:
+
+- **Transparent.** The child runs in its own process group. Its stdout
+  and stderr are copied to the container's byte for byte, so
+  `kubectl logs` reads the same. SIGTERM, SIGINT, SIGHUP, SIGQUIT and
+  SIGUSR1/2 are forwarded to the child's group (run.sh traps INT/TERM
+  and hands them to the listener, as it does as PID 1). Every orphan
+  reparented to the wrapper is reaped, and the wrapper exits with the
+  child's code (128+N if signal N killed it). It never exits while the
+  child runs.
+- **Never in the runner's way.** Lines go to the matcher through a
+  bounded queue. When the matcher falls behind, lines are dropped and
+  counted (`runner_watchdog_lines_dropped_total`), and the runner never
+  waits. If the HTTP server cannot bind, the watchdog says so on stderr
+  and the runner runs on.
+- **Job-aware.** STUCK means no job is running AND a stuck signature,
+  first seen while idle, has persisted for `grace` (45s by default). A
+  signature during a job is counted and never acted on. A job starting
+  clears it.
+
+The lines it reads, from actions/runner v2.338.0 (the upstream image sets
+`ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1`, so the listener's trace reaches
+stdout):
+
+| Line | Source | Meaning |
+|---|---|---|
+| `<ts>Z: Running job: <name>` | `Runner.Listener/JobDispatcher.cs` | a job started |
+| `<ts>Z: Job <name> completed with result: <result>` | `Runner.Listener/JobDispatcher.cs` | the job ended |
+| `Skipping message Job. Job message already acquired '<id>'. …` (e.g. `job assignment is invalid: MissingKey`) | `Runner.Listener/Runner.cs`, HTTP 409 from `acquirejob` | stuck signature |
+| `Skipping message Job. Job message not found '<id>'. …` (e.g. `job was canceled`) | the same, HTTP 404 | stuck signature |
+| `Skipping message Job. Unprocessable job '<id>'. …` | the same, HTTP 422 | stuck signature |
+| `Registration <id> was not found.` | the broker session's token refresh (`BrokerServer`) | stuck signature |
+
+The job lines are matched only at the start of a line. The listener also
+traces each of them as `[RUNNER … INFO Terminal] WRITE LINE: …`, and
+counting that copy would count every job twice.
+
+**The verdict is a readiness probe, never a liveness probe.** `/healthz`
+answers 200, or 503 while stuck. A liveness failure would restart the
+container, and a restarted runner cannot register again: its JIT
+registration is single-use, and the restart ends in the "Registration …
+was not found" crash loop instead. The remedy is deleting the
+EphemeralRunner, which ARC then replaces. With `runner.watchdog.enabled`,
+the janitor deletes any runner that holds no job, is past its grace
+period, and whose `runner` container is running but NotReady. The log
+grep stays as the fallback, for a runner whose watchdog cannot answer.
+`hack/janitor-cases.sh` runs both against a stub `kubectl`.
+
+`/metrics` is the Prometheus text format, on a container port named
+`watchdog` (`runner.watchdog.port`, 8091 by default). The chart renders no
+PodMonitor; an estate that scrapes runners selects the port by name:
+
+| Series | Type |
+|---|---|
+| `runner_watchdog_stuck` | gauge, 0/1 |
+| `runner_watchdog_stuck_detections_total` | counter |
+| `runner_watchdog_job_running` | gauge, 0/1 |
+| `runner_watchdog_jobs_started_total`, `runner_watchdog_jobs_completed_total` | counter |
+| `runner_watchdog_signature_lines_total{signature=…}` | counter, during a job or not |
+| `runner_watchdog_lines_total`, `runner_watchdog_lines_dropped_total` | counter |
+| `runner_watchdog_seconds_since_last_line`, `runner_watchdog_seconds_since_last_job` | gauge |
+| `runner_watchdog_grace_seconds` | gauge |
+
+The only lines the watchdog adds to the log are its own transitions,
+prefixed `runner-watchdog:` (`stuck: …` and `recovered: …`), and a
+server that could not bind.
+
+What it does not cover: a runner that hangs WHILE it holds a job
+(actions/runner#4569, a cancellation redelivery loop). The job is
+running, so the watchdog judges nothing.
+
 ## The release trigger is the last deliberate control point
 
 With pull-based promotion automated downstream, tag creation is the one

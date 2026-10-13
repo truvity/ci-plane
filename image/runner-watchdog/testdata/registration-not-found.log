@@ -1,0 +1,9 @@
+2026-10-13 02:41:50Z: Listening for Jobs
+[RUNNER 2026-10-13 03:33:40Z INFO RSAFileKeyManager] Loading RSA key parameters from file /home/runner/.credentials_rsaparams
+[RUNNER 2026-10-13 03:33:40Z ERR  GitHubActionsService] POST request to https://pipelines.example.invalid/<token>/_apis/oauth2/token failed. HTTP Status: BadRequest
+[RUNNER 2026-10-13 03:33:40Z ERR  BrokerServer] Catch exception during request
+[RUNNER 2026-10-13 03:33:40Z ERR  BrokerServer] GitHub.Services.OAuth.VssOAuthTokenRequestException: Registration 470d6c87-f8c4-411f-87d0-6b069233ccc7 was not found.
+[RUNNER 2026-10-13 03:33:40Z ERR  BrokerServer]    at GitHub.Services.OAuth.VssOAuthTokenProvider.OnGetTokenAsync(IssuedToken failedToken, CancellationToken cancellationToken)
+[RUNNER 2026-10-13 03:33:40Z WARN BrokerServer] Back off 6.292 seconds before next retry. 4 attempt left.
+[RUNNER 2026-10-13 03:33:46Z ERR  BrokerServer] GitHub.Services.OAuth.VssOAuthTokenRequestException: Registration 470d6c87-f8c4-411f-87d0-6b069233ccc7 was not found.
+[RUNNER 2026-10-13 03:33:46Z WARN BrokerServer] Back off 11.706 seconds before next retry. 3 attempt left.
