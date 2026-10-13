@@ -1,0 +1,5 @@
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: runner
+restricted: true

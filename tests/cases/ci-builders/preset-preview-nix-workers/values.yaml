@@ -1,0 +1,17 @@
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example

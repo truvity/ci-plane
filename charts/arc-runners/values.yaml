@@ -451,6 +451,13 @@ affinity: {}
 # `tolerations` above.
 listenerTolerations: []
 
+# restricted (v6.0.0): the release-wide default of scaleSets.<name>.restricted
+# (documented with scaleSets below), for every set that does not set its
+# own. Off by default. It lets an estate put a whole release on the Pod
+# Security `restricted` profile in one line instead of naming each set
+# (whose names a tier preset owns). docs/restricted-runners.md.
+restricted: false
+
 # The profile matrix. Recipes are not one population: measured on a Go
 # monorepo, linters peak at a flat ~4Gi while a cold build wants ~20Gi;
 # one profile sized for the second group parks trivial jobs on huge

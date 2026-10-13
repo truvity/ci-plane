@@ -11,6 +11,35 @@ line is summarised in one section.
 
 - **Breaking: the runner image no longer ships `r2broker`.** truvity/cloudflare retires its R2 credentials broker; sluis's Cloudflare module mints R2 credentials itself, so `sluisctl cloudflare r2 <preset>` (already in the image) replaces `sluisctl r2 --service-url <broker> -- credentials ...` in an `awsConfig.credentialProcess` line. A caller whose `credentialProcess` still names `sluisctl r2` or `r2broker` must move to an R2 preset first. `docs/architecture.md` ("An AWS profile for a credential helper") shows both shapes: a job signing in with its own GitHub token, and a credential a secrets operator projected (`--file`, mounted through `extraVolumes`). The arc-runners test case `r2-broker` is now `r2-credential-process`. No chart value changes.
 
+### Tier presets: `presets/preview.yaml`, `presets/stable.yaml` and friends
+
+- **New: opt-in values files under each chart's `presets/`.** They ship in
+  the chart package, so a consumer lists them ahead of its own values (Argo
+  CD: `helm.valueFiles: [presets/stable.yaml]`; Helm: `-f
+  presets/stable.yaml -f mine.yaml`); a file listed later wins key by key.
+  Nothing changes for a release that lists none.
+  - `arc-runners/presets/preview.yaml` and `stable.yaml`: the two tier
+    shapes of an AWS/Karpenter fleet (per-set fairness limit, runner pool
+    selector and tolerations, listener tolerations, `do-not-disrupt`; the
+    stable tier also replaces the three preview profiles with one fat, cold
+    `stable` set). `arc-runners/presets/nix-builders.yaml` turns the Nix
+    remote builders on, to be listed on the tier whose workers run.
+  - `ci-builders/presets/preview.yaml` and `stable.yaml`: buildkitd
+    scheduling and sizing per tier, which caches run, `maxParallelism: 4`.
+    `ci-builders/presets/nix-workers.yaml` turns the persistent Nix workers
+    on with the CI-only SSH login and host-certificate wiring.
+  - Estate facts are never in a preset: registries, the organization, CA
+    keys, OpenBao routing, consumer namespaces and buckets stay the
+    caller's values. Node pool names (`ci`, `ci-stable`, `build`, `platform`,
+    `volatile`) are the conventional ones; an estate whose pools are named
+    otherwise overrides `nodeSelector`/`tolerations`/`scheduling` (they
+    replace, they do not merge).
+- **New: `arc-runners` `restricted` (release-wide, default `false`).** The
+  default of `scaleSets.<name>.restricted` for every set that does not set
+  its own, so a release can be put on the Pod Security `restricted` profile
+  without naming sets. A set's own key wins; the values hash a set carries is
+  the one an explicit per-set `restricted: true` produced.
+
 ## v5.4.0
 
 ### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)

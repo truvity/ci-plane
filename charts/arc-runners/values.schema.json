@@ -73,6 +73,9 @@
         }
       }
     },
+    "restricted": {
+      "type": "boolean"
+    },
     "minRunners": {
       "type": "integer",
       "minimum": 0

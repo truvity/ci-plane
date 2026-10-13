@@ -1,0 +1,7 @@
+# The preview preset plus the estate facts it leaves to the caller; a
+# release-wide `restricted` puts every set on the restricted profile.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: runner
+restricted: true

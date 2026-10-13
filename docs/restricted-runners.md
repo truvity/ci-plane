@@ -3,7 +3,9 @@
 `scaleSets.<name>.restricted: true` runs one scale set on the Kubernetes Pod
 Security `restricted` profile, so the namespace that holds it can enforce
 that profile instead of `baseline`. It is off by default and per set: a set
-that does not ask for it renders exactly as before.
+that does not ask for it renders exactly as before. The release-wide
+`restricted: true` (v6.0.0) is the default for every set that does not set
+the key itself; a set's own value wins.
 
 ## What the profile changes
 

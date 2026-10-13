@@ -115,18 +115,25 @@ generate it (hack/gen-nix-sandbox-seccomp.sh). */}}
 {{- if not $nixSandbox.seccompProfile }}{{ fail (printf "scaleSets.%s.nixSandbox.seccompProfile is required when nixSandbox.enabled" $name) }}{{ end }}
 {{- end }}
 {{- /*
-restricted (v5.1.0) is per-set only, like nixSandbox: it moves ONE scale
+restricted (v5.1.0) is per-set: it moves ONE scale
 set's runner pods and their init container onto the
 Pod Security `restricted` profile (non-root with an explicit numeric
 uid, seccomp RuntimeDefault, no privilege escalation, every capability
 dropped). Off by default, and a set that leaves it off renders exactly
-as it did before the key existed. See docs/restricted-runners.md for
+as it did before the key existed. The release-wide `restricted` (v6.0.0)
+is the default for every set that does not say; a set's own key wins. See docs/restricted-runners.md for
 what a job loses.
 */}}
 {{- $restricted := false }}
 {{- if hasKey $p "restricted" }}
 {{- if not (kindIs "bool" $p.restricted) }}{{ fail (printf "scaleSets.%s.restricted must be true or false, not %q" $name (toString $p.restricted)) }}{{ end }}
 {{- $restricted = $p.restricted }}
+{{- else if $root.Values.restricted }}
+{{- /* The release-wide default: written INTO this set's own values, so the
+     values-hash below sees exactly what an explicit per-set
+     `restricted: true` would have given it. */}}
+{{- $restricted = true }}
+{{- $p = merge (dict "restricted" true) $p }}
 {{- end }}
 {{- $nixConfig := include "arc-runners.nixConfigFor" (dict "root" $root "p" $p) }}
 {{- $nixConfigName := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) }}
