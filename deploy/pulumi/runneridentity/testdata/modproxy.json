@@ -1,0 +1,1 @@
+{"Statement":[{"Action":"s3:ListBucket","Condition":{"StringLike":{"s3:prefix":"modcache/*"}},"Effect":"Allow","Resource":"@arn@:s3:::example-ci-cache"},{"Action":["s3:GetObject","s3:PutObject","s3:DeleteObject"],"Effect":"Allow","Resource":"@arn@:s3:::example-ci-cache/modcache/*"}],"Version":"2012-10-17"}
