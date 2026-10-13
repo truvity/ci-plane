@@ -196,6 +196,18 @@ on. The log grep stays as the backstop (idle, past `graceSeconds`), for a
 runner whose watchdog cannot answer. `hack/janitor-cases.sh` runs both
 against a stub `kubectl`.
 
+**A drill proves the chain without waiting for #4307.** With
+`runner.watchdog.drillFile` set (an absolute path, off by default), the
+watchdog feeds itself one line under its own signature, `drill`, each time
+that file appears. `kubectl exec <idle runner> -- touch <path>` then
+drives the real path: the matcher arms on the line only because no job is
+running, `/healthz` answers 503 after `grace`, the pod goes NotReady, the
+janitor deletes the runner, ARC replaces it, and `ARCRunnerStuck` fires.
+The line goes through the same matcher as the runner's output, so a drill
+during a job is only counted. `runner_watchdog_signature_lines_total{signature="drill"}`
+tells a drill from a real detection. An unset `drillFile` stays out of
+the values-hash, so the key's arrival recycles no listener.
+
 `/metrics` is the Prometheus text format, on a container port named
 `watchdog` (`runner.watchdog.port`, 8091 by default). `monitoring.enabled`
 renders the PodMonitor for it (and one for the scale-set listeners' `gha_*`
