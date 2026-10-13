@@ -1,0 +1,19 @@
+# Preset: the Nix remote builders' wiring, for the tier whose
+# ci-builders release runs nixWorkers (ci-builders' presets/nix-workers.yaml).
+# Opt in by listing it with a tier preset. It turns the builders ON, so
+# list it only where the workers run; it renders nothing by itself until
+# the estate facts it cannot know are supplied, and the chart refuses to
+# render until they are:
+#
+#   nixBuilders.builders            one entry per worker (host, system, ...)
+#   nixBuilders.knownHosts.certAuthorities   the workers' SSH host CA
+#   nixBuilders.openbao.{address,namespace,caBundle,sshCAPublicKeys,
+#                        authMount,authRole}
+#
+# `revision` only feeds the runners' values hash (a change recycles every
+# warm runner); it is kept so that adopting this preset recycles none.
+nixBuilders:
+  enabled: true
+  knownHosts:
+    revision: host-v1
+    pinned: false

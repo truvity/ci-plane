@@ -1,0 +1,28 @@
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runnerServiceAccountName: runner
+nixBuilders:
+  builders:
+    - host: nix-worker-amd64.example.svc.cluster.local
+      system: x86_64-linux
+      maxJobs: 2
+      speedFactor: 1
+    - host: nix-worker-arm64.example.svc.cluster.local
+      system: aarch64-linux
+      maxJobs: 2
+      speedFactor: 1
+  knownHosts:
+    certAuthorities:
+      - hosts:
+          - nix-worker-amd64.example.svc.cluster.local
+          - nix-worker-arm64.example.svc.cluster.local
+        key: ssh-ed25519 AAAACA
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    sshCAPublicKeys:
+      - ssh-ed25519 AAAATEST
+    authMount: jwt-example
+    authRole: runner-example

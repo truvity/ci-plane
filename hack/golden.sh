@@ -5,7 +5,10 @@
 #   hack/golden.sh update    rewrite tests/golden from the cases
 #
 # Every tests/cases/<chart>/<case>/values.yaml renders, in namespace
-# `example`, to tests/golden/<chart>/<case>.yaml. The goldens are
+# `example`, to tests/golden/<chart>/<case>.yaml. A case that proves a
+# preset has a `presets` file beside its values.yaml (one preset name per
+# line): each is passed as `-f charts/<chart>/presets/<name>.yaml` BEFORE
+# the case's values, the order a consumer lists them in. The goldens are
 # committed, so a template change that alters a manifest is a diff a
 # reviewer reads rather than a surprise in a cluster.
 #
@@ -33,7 +36,18 @@ for chart_dir in charts/*/; do
     cases=$((cases + 1))
     name=$(basename "$(dirname "$values")")
     golden="tests/golden/$chart/$name.yaml"
-    if ! out=$(helm template "$chart" "$chart_dir" --namespace example -f "$values" 2>&1); then
+    preset_args=()
+    if [ -f "$(dirname "$values")/presets" ]; then
+      while read -r preset; do
+        [ -n "$preset" ] || continue
+        if [ ! -f "charts/$chart/presets/$preset.yaml" ]; then
+          echo "NO PRESET: $(dirname "$values")/presets names $preset"
+          fail=1
+        fi
+        preset_args+=(-f "charts/$chart/presets/$preset.yaml")
+      done < "$(dirname "$values")/presets"
+    fi
+    if ! out=$(helm template "$chart" "$chart_dir" --namespace example "${preset_args[@]}" -f "$values" 2>&1); then
       echo "DID NOT RENDER: $values"
       sed 's/^/    /' <<< "$out" | tail -5
       fail=1

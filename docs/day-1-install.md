@@ -111,6 +111,28 @@ Kubernetes reads as "no class". A second, non-AWS estate sets its own
 storage class and its own tolerations instead; neither of these has a
 chart default to fall back on.
 
+### Presets: the same inputs, as opt-in files
+
+Instead of writing those values out, an AWS/Karpenter estate can list a
+tier preset shipped inside each chart. They are plain values files under
+`presets/`, so Argo CD takes them as `helm.valueFiles` (with `helm.valuesObject`
+after them for the estate's own facts, which win) and Helm as `-f`:
+
+| chart | preset | what it sets |
+|---|---|---|
+| arc-runners | `presets/preview.yaml` | pool `ci`, fairness limit 16, tolerations, `do-not-disrupt`; the chart's three preview profiles stay |
+| arc-runners | `presets/stable.yaml` | pool `ci-stable`, one fat cold `stable` set (the preview profiles removed), tolerations, `do-not-disrupt` |
+| arc-runners | `presets/nix-builders.yaml` | the Nix remote builders on, without the estate's hosts, CA and OpenBao routing |
+| ci-builders | `presets/preview.yaml` | buildkitd on a `build` pool, 10Gi, `maxParallelism`, all caches on |
+| ci-builders | `presets/stable.yaml` | buildkitd on `platform`/`volatile`, pull-through caches only, a sized nix cache |
+| ci-builders | `presets/nix-workers.yaml` | the persistent Nix workers on, CI-only login, host certificates |
+
+A preset holds no registry, organization, CA key, OpenBao address,
+namespace or bucket: those stay the caller's values, and the chart still
+refuses to render without the ones it requires. Pool names are the
+conventional ones; a differently named pool is an override of
+`nodeSelector`/`tolerations`/`scheduling`, which replace.
+
 ## Install the cache plane
 
 ```bash

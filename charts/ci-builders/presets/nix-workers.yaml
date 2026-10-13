@@ -1,0 +1,55 @@
+# Preset: the persistent Nix remote workers, for the preview tier. Opt in
+# by listing it with presets/preview.yaml; it turns the workers ON. The
+# chart refuses to render until the estate facts it cannot know are
+# supplied:
+#
+#   nixWorkers.ssh.trustedUserCAKeys        the SSH user CA the runners sign with
+#   nixWorkers.networkPolicy.consumerNamespaces
+#   nixWorkers.openbao.{address,namespace,caBundle,authMount}
+#
+# Workers are CI-only: sshd admits one account (`nix`) over ssh-ng on a
+# user-CA certificate whose only principal is `ci-nix`, no
+# authorized_keys. Each worker signs its OWN ephemeral host key against
+# the environment's SSH host CA; renewing at half the certificate
+# lifetime means a slow renewal never meets an expired certificate (the
+# chart's own render-time check enforces renewEvery < certificateTTL).
+# They live on the same `build` pool as preview.yaml's builders.
+nixWorkers:
+  enabled: true
+  serviceAccount:
+    create: true
+    name: nix-worker
+  hostCertificate:
+    enabled: true
+    renewEvery: 12h
+    certificateTTL: 24h
+  openbao:
+    audience: openbao
+    authRole: nix-worker-host
+    hostSshMount: ssh-host
+    hostSshRole: nix-worker
+    requestTimeout: 15s
+  accounts:
+    nix:
+      principals:
+        - ci-nix
+      trusted: true
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+  scheduling:
+    arm64:
+      nodeSelector:
+        karpenter.sh/nodepool: build
+        kubernetes.io/arch: arm64
+      tolerations:
+        - key: build
+          value: "true"
+          effect: NoSchedule
+    amd64:
+      nodeSelector:
+        karpenter.sh/nodepool: build
+        kubernetes.io/arch: amd64
+      tolerations:
+        - key: build
+          value: "true"
+          effect: NoSchedule

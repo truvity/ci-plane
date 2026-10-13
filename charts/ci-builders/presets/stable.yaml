@@ -1,0 +1,52 @@
+# Preset: the STABLE tier's builder and cache plane. Opt in by listing it
+# before your own values (Argo CD: `helm.valueFiles:
+# [presets/stable.yaml]`). A later values file wins key by key.
+#
+# Shape: pull-through caches only (no bazel-remote, no npm cache), the
+# nix cache sized for its measured working set, and buildkitd scheduled
+# on the shared AWS/Karpenter pools -- arm64 on one named `platform`,
+# amd64 on one named `volatile`, both on-demand (the volatile pool admits
+# spot, and a spot reclaim moves the pod despite do-not-disrupt). The
+# builders share small nodes with platform workloads, so the chart's own
+# memory limit stays: a limit above the node would turn a cgroup OOM into
+# node pressure. nodeSelector/tolerations/scheduling REPLACE when
+# overridden. Estate facts are never in a preset.
+storageClassName: gp3
+tolerations:
+  - key: arch
+    operator: Exists
+buildkitd:
+  maxParallelism: 4
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+  scheduling:
+    arm64:
+      nodeSelector:
+        karpenter.sh/nodepool: platform
+        kubernetes.io/arch: arm64
+        karpenter.sh/capacity-type: on-demand
+      tolerations:
+        - key: arch
+          operator: Exists
+    amd64:
+      nodeSelector:
+        karpenter.sh/nodepool: volatile
+        kubernetes.io/arch: amd64
+        karpenter.sh/capacity-type: on-demand
+      tolerations:
+        - key: arch
+          operator: Exists
+nixCache:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1100Mi
+    limits:
+      memory: 1536Mi
+bazelRemote:
+  enabled: false
+npmCache:
+  enabled: false
+goModproxy:
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
