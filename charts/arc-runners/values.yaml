@@ -645,6 +645,35 @@ runner:
     # reported stuck (a Go duration: 45s, 2m).
     grace: 45s
 
+# Scrapes for the metrics the fleet exports, as PodMonitor objects
+# (monitoring.coreos.com/v1: the Prometheus operator's, which the
+# VictoriaMetrics operator converts). OFF by default: the CRD must exist,
+# and an off render is byte-identical to before.
+#
+#  - watchdog: the runner pods' `runner_watchdog_*` metrics, on the
+#    container port named `watchdog` (runner.watchdog.enabled). Rendered
+#    only while the watchdog is on.
+#  - listener: the scale-set listeners' `gha_*` metrics (assigned and
+#    running jobs, job start-up time), on the container port named
+#    `metrics`. The listener pods live in the CONTROLLER's namespace
+#    (controllerServiceAccount.namespace), so this monitor selects across
+#    namespaces, by the scale-set-namespace label naming THIS release's
+#    namespace. The listeners export nothing until the controller chart's
+#    own `metrics:` is set (--listener-metrics-addr); the chart cannot do
+#    that, it does not install the controller.
+monitoring:
+  enabled: false
+  # -- Scrape interval. Empty leaves the agent's own default.
+  interval: ""
+  # -- Labels added to both PodMonitors, for an agent that selects by label.
+  labels: {}
+  watchdog:
+    enabled: true
+  listener:
+    enabled: true
+    # -- Must equal the controller chart's `metrics.listenerEndpoint`.
+    path: /metrics
+
 janitor:
   # Sweeps ephemeral runners that have stopped making progress. TWO
   # signatures, because they strand a runner in opposite ways and one

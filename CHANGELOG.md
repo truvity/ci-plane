@@ -7,6 +7,11 @@ line is summarised in one section.
 
 ## Unreleased
 
+### arc-runners chart: PodMonitors for the runner watchdog and the scale-set listeners (`monitoring`)
+
+- **New: `monitoring.enabled`** (default `false`; an off render is byte-identical to before, every existing golden unchanged). On, the release renders two `monitoring.coreos.com/v1` PodMonitors (the CRD must exist; the VictoriaMetrics operator converts them): `runner-watchdog`, selecting the release namespace's runner pods on the container port named `watchdog` (rendered only while `runner.watchdog.enabled`), and `scale-set-listeners`, selecting this release's listener pods in the controller's namespace (`controllerServiceAccount.namespace`) on the container port named `metrics`. Both copy the `actions.github.com/scale-set-name` pod label onto the series. Keys: `monitoring.interval`, `monitoring.labels`, `monitoring.watchdog.enabled`, `monitoring.listener.enabled`, `monitoring.listener.path` (default `/metrics`).
+- **The listeners export nothing until the controller chart's `metrics:` is set** (`controllerManagerAddr`, `listenerAddr`, `listenerEndpoint`; ARC 0.14.2 and 0.15.0). This chart does not install the controller, so it cannot set it. New golden `monitoring`.
+
 ## v6.2.0
 
 ### arc-runners chart: the janitor runs every minute and reads the readiness verdict
