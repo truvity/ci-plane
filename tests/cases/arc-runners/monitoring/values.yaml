@@ -1,0 +1,15 @@
+# monitoring on, with the watchdog on: one PodMonitor for the runner pods'
+# `watchdog` port and one, across namespaces, for the scale-set listeners'
+# `metrics` port in the controller's namespace. Off (every other case),
+# neither renders.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+runner:
+  watchdog:
+    enabled: true
+monitoring:
+  enabled: true
+  interval: 30s
+  labels:
+    team: platform

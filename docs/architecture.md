@@ -197,8 +197,10 @@ runner whose watchdog cannot answer. `hack/janitor-cases.sh` runs both
 against a stub `kubectl`.
 
 `/metrics` is the Prometheus text format, on a container port named
-`watchdog` (`runner.watchdog.port`, 8091 by default). The chart renders no
-PodMonitor; an estate that scrapes runners selects the port by name:
+`watchdog` (`runner.watchdog.port`, 8091 by default). `monitoring.enabled`
+renders the PodMonitor for it (and one for the scale-set listeners' `gha_*`
+metrics, port `metrics`, which need the controller chart's `metrics:`); an
+estate that scrapes some other way selects the port by name:
 
 | Series | Type |
 |---|---|
