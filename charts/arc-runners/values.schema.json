@@ -76,6 +76,35 @@
     "restricted": {
       "type": "boolean"
     },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "containment": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "serviceCidr": {
+              "type": "string"
+            },
+            "vpcCidr": {
+              "type": "string"
+            },
+            "cacheNamespace": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "minRunners": {
       "type": "integer",
       "minimum": 0

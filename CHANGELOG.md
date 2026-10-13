@@ -40,6 +40,25 @@ line is summarised in one section.
   without naming sets. A set's own key wins; the values hash a set carries is
   the one an explicit per-set `restricted: true` produced.
 
+### NetworkPolicies an estate used to render itself, now opt-in chart values
+
+- **New: `arc-runners` `networkPolicy.containment`.** Off by default. One
+  NetworkPolicy that selects every pod of the release namespace and allows
+  cluster DNS, the cache plane's namespace, the namespace itself, the
+  network CIDR on 443 (VPC endpoints) and the internet, and nothing else in
+  the cluster or the network, nor the cloud metadata address. `serviceCidr`,
+  `vpcCidr` and `cacheNamespace` are required while it is on (the first
+  NetworkPolicy that selects a pod is a default deny of it). `name`
+  (default `runner-containment`) and `annotations` (an Argo CD guard, a
+  sync wave) are values, so an estate that already renders the same object
+  elsewhere keeps its name.
+- **New: `ci-builders` `buildkitd.networkPolicy.additionalIngress` and
+  `nixWorkers.networkPolicy.additionalIngress`.** Empty by default. Each entry
+  (`name`, `from`, optional `annotations`, optional `arch`) is one additive
+  NetworkPolicy beside the consumer-namespaces policy, on the component's
+  own port, for a peer the consumer namespaces do not describe (developers
+  reaching a builder through a tailnet router, a pilot on one worker).
+
 ## v5.4.0
 
 ### ci-builders chart: cap buildkitd parallelism (`buildkitd.maxParallelism`)

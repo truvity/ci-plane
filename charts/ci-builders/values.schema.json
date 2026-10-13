@@ -17,6 +17,36 @@
             "minLength": 1
           },
           "description": "The runner namespaces that may reach this component. Required, and non-empty, while the component and its policy are on."
+        },
+        "additionalIngress": {
+          "type": "array",
+          "description": "Extra ingress beside consumerNamespaces: one additive NetworkPolicy per entry. Empty by default.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "from"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "arch": {
+                "enum": [
+                  "amd64",
+                  "arm64"
+                ]
+              },
+              "annotations": {
+                "type": "object"
+              },
+              "from": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
         }
       }
     },

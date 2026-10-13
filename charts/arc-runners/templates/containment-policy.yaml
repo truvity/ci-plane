@@ -1,0 +1,68 @@
+{{- /*
+Opt-in egress containment for the runner pods of this release (`networkPolicy.
+containment.enabled`, off by default). Release builds run untrusted-enough
+code with real credentials nearby, so a release tier fences its runners to:
+cluster DNS, the cache plane's namespace, their own namespace, the VPC
+endpoints on 443 and the internet -- and to nothing else inside the cluster
+or the VPC, nor the cloud metadata address.
+
+THE FIRST NetworkPolicy THAT SELECTS A POD IS A DEFAULT DENY OF IT. This one
+selects every pod of the release namespace (listeners are in the controller's
+namespace and are not touched), so it is a decision, not a default: the chart
+refuses to render it without the three addresses it cannot know.
+*/ -}}
+{{- $c := (.Values.networkPolicy | default dict).containment | default dict }}
+{{- if $c.enabled }}
+{{- if not $c.serviceCidr }}{{ fail "networkPolicy.containment.serviceCidr is required: the cluster's service CIDR, excluded from the internet rule and allowed for DNS" }}{{ end }}
+{{- if not $c.vpcCidr }}{{ fail "networkPolicy.containment.vpcCidr is required: the network's CIDR, allowed on 443 only (the VPC endpoints) and excluded from the internet rule" }}{{ end }}
+{{- if not $c.cacheNamespace }}{{ fail "networkPolicy.containment.cacheNamespace is required: the namespace the cache plane (ci-builders) runs in" }}{{ end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $c.name | default "runner-containment" }}
+  {{- with $c.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - ipBlock:
+            cidr: {{ $c.serviceCidr }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $c.cacheNamespace }}
+    - to:
+        - podSelector: {}
+    - to:
+        - ipBlock:
+            cidr: {{ $c.vpcCidr }}
+      ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - {{ $c.vpcCidr }}
+              - {{ $c.serviceCidr }}
+              - 169.254.169.254/32
+{{- end }}
