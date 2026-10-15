@@ -103,6 +103,21 @@ func TestModproxyDocument(t *testing.T) {
 	}
 }
 
+func TestCacheRedirectDocument(t *testing.T) {
+	c := CacheRedirect{Estate: estate, Bucket: "example-ci-cache", Prefix: "cache-redirect"}
+
+	got, err := c.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := fixture(t, "cache-redirect.json")
+
+	if got != want {
+		t.Errorf("document differs:\n got %s\nwant %s", got, want)
+	}
+}
+
 // A pool that omits a required input is refused, not rendered with a hole.
 func TestPoolRefusesMissingInputs(t *testing.T) {
 	for name, p := range map[string]Pool{
@@ -119,5 +134,13 @@ func TestPoolRefusesMissingInputs(t *testing.T) {
 
 	if _, err := (Modproxy{Estate: estate, Bucket: "b"}).Document(); err == nil {
 		t.Error("modproxy without a prefix: want an error")
+	}
+
+	if _, err := (CacheRedirect{Estate: estate, Bucket: "b"}).Document(); err == nil {
+		t.Error("cache-redirect without a prefix: want an error")
+	}
+
+	if _, err := (CacheRedirect{Estate: estate, Prefix: "p"}).Document(); err == nil {
+		t.Error("cache-redirect without a bucket: want an error")
 	}
 }
