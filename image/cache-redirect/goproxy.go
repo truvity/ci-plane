@@ -159,8 +159,7 @@ func isPlainPath(p string) bool {
 		}
 	}
 	for i := 0; i < len(p); i++ {
-		c := p[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("/._~!+@-", c) >= 0) {
+		if !isAlnum(p[i]) && strings.IndexByte("/._~!+@-", p[i]) < 0 {
 			return false
 		}
 	}
