@@ -1,10 +1,11 @@
 # ci-plane
 
 The CI plane for GitHub Actions on Kubernetes, released as one versioned
-unit: the ARC **runner image**, the **nix-worker image**, and the two
-Helm charts around them — **`ci-builders`** (the in-cluster builders and
-caches) and **`arc-runners`** (the runner scale sets). One `v*` tag
-publishes all four at one version, with each image's digest stamped into
+unit: the ARC **runner image**, the **nix-worker image**, the
+**cache-redirect image**, and the two Helm charts around them —
+**`ci-builders`** (the in-cluster builders and caches) and
+**`arc-runners`** (the runner scale sets). One `v*` tag publishes all
+five at one version, with each image's digest stamped into
 the chart defaults, so a consumer pins one chart version and is
 transitively digest-pinned.
 
@@ -12,8 +13,9 @@ transitively digest-pinned.
 |---|---|---|
 | [`image/runner`](image/runner/Dockerfile) | The runner: nix + devbox bootstrap, the daemonless docker client + buildx, `go-cache-plugin`, the optional `runner-watchdog` entrypoint | `ghcr.io/truvity/ci-plane/runner:vX.Y.Z` |
 | [`image/nix-worker`](image/nix-worker/Dockerfile) | A persistent remote Nix builder: nix-daemon behind sshd | `ghcr.io/truvity/ci-plane/nix-worker:vX.Y.Z` |
-| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the Nix, npm and Bazel read-through caches; the optional S3-backed Go module proxy | `oci://ghcr.io/truvity/charts/ci-builders` |
-| [`deploy/pulumi/runneridentity`](deploy/pulumi/runneridentity) — the AWS Pod Identity roles of the runner pools and the Go module proxy, as a Pulumi Go package | `github.com/truvity/ci-plane/deploy/pulumi/runneridentity` (tag `deploy/pulumi/runneridentity/vX.Y.Z`) |
+| [`image/cache-redirect`](image/cache-redirect) | A pull-through cache for Nix and Go downloads whose index is an S3 bucket: a hit on a NAR or module zip is a 302 to a presigned URL, so the bytes never pass through it ([architecture](docs/architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)) | `ghcr.io/truvity/ci-plane/cache-redirect:vX.Y.Z` |
+| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the Nix, npm and Bazel read-through caches; the optional S3-backed Go module proxy and cache-redirect | `oci://ghcr.io/truvity/charts/ci-builders` |
+| [`deploy/pulumi/runneridentity`](deploy/pulumi/runneridentity) — the AWS Pod Identity roles of the runner pools, the Go module proxy and cache-redirect, as a Pulumi Go package | `github.com/truvity/ci-plane/deploy/pulumi/runneridentity` (tag `deploy/pulumi/runneridentity/vX.Y.Z`) |
 | [`charts/arc-runners`](charts/arc-runners) | AutoscalingRunnerSet CRs per measured profile, the stuck-runner janitor and the optional runner watchdog, remote Nix builders per job | `oci://ghcr.io/truvity/charts/arc-runners` |
 
 Up to 1.5.0, `ci-builders` was published as
@@ -155,7 +157,7 @@ GitHub Release (an occasional tag may carry one made by hand), so
 devbox shell        # or direnv
 just check          # chart lint, golden renders + refused fixtures, leak canary
 just golden-update  # regenerate tests/golden after a template change — review the diff
-just test           # the two Go helper modules under image/
+just test           # the Go modules under image/ and deploy/
 ```
 
 Every `tests/cases/<chart>/<case>/values.yaml` renders, in namespace
@@ -169,7 +171,7 @@ their renders start from `tests/ci/<chart>.yaml`.
 
 Push a tag `vX.Y.Z` after its `## vX.Y.Z` heading lands in the
 CHANGELOG; tag creation is restricted by ruleset. The release workflow
-builds both images natively per architecture, stamps each digest into
+builds every image natively per architecture, stamps each digest into
 the charts by key, stamps both charts' `version` and `appVersion` from
 the tag — `Chart.yaml` commits `0.0.0` — and publishes them.
 `auto-release` is armed (`vars.AUTO_RELEASE` is `true`): the shared

@@ -1,5 +1,5 @@
-# Release: a v* tag publishes the whole plane at ONE version — both
-# images and both charts, with each image's digest stamped into the
+# Release: a v* tag publishes the whole plane at ONE version — the three
+# images (runner, nix-worker, cache-redirect) and both charts, with each image's digest stamped into the
 # chart defaults. Consumers pin one chart version and are transitively
 # digest-pinned.
 #
@@ -93,7 +93,7 @@ jobs:
       - name: Build the per-arch bases
         run: |
           set -euo pipefail
-          for img in runner nix-worker; do
+          for img in runner nix-worker cache-redirect; do
             docker buildx build \
               --platform "linux/${{ matrix.arch }}" \
               --file "image/${img}/Dockerfile" \
@@ -123,7 +123,7 @@ jobs:
       - name: Merge the native halves
         run: |
           set -euo pipefail
-          for img in runner nix-worker; do
+          for img in runner nix-worker cache-redirect; do
             docker buildx imagetools create \
               --tag "${IMAGE_REPO}/${img}-base:${GITHUB_REF_NAME}" \
               "${IMAGE_REPO}/${img}-base:${GITHUB_REF_NAME}-amd64" \
@@ -134,7 +134,7 @@ jobs:
         id: images
         run: |
           set -euo pipefail
-          for img in runner nix-worker; do
+          for img in runner nix-worker cache-redirect; do
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
               --file "image/release/${img}.Dockerfile" \
@@ -164,7 +164,8 @@ jobs:
           set -euo pipefail
           ./hack/stamp-digests.sh \
             "runnerImage=${{ steps.images.outputs.runner }}" \
-            "nixWorkerImage=${{ steps.images.outputs.nix_worker }}"
+            "nixWorkerImage=${{ steps.images.outputs.nix_worker }}" \
+            "cacheRedirectImage=${{ steps.images.outputs.cache_redirect }}"
           VERSION="${GITHUB_REF_NAME#v}"
           for c in charts/*/Chart.yaml; do
             sed -i -E "s|^version: .*$|version: ${VERSION}|; s|^appVersion: .*$|appVersion: ${VERSION}|" "$c"

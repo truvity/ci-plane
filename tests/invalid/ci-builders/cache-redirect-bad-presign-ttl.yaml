@@ -1,0 +1,16 @@
+# refuses: /cacheRedirect/presignTTL
+# Not a Go duration: the service would refuse to start on it.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  presignTTL: 5 minutes
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

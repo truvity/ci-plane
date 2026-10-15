@@ -264,6 +264,142 @@ the HOT layer only; the WARM layer is `cache-to type=registry` and
 survives builder replacement. Restrictive network defaults: only listed
 namespaces reach the builders.
 
+## cache-redirect: a hit is a redirect, not a stream
+
+The Nix cache (nginx) and the Go module proxy (go-cache-plugin) both
+stream every byte of every hit through one pod, and a pod's node network
+(on the order of 100 MiB/s sustained) is what a CI burst saturates: each
+job then crawls, however warm the cache is. Yet almost every byte they
+serve is an immutable, content-addressed file: a NAR, a module zip.
+
+`cache-redirect` (image `ghcr.io/truvity/ci-plane/cache-redirect`, chart
+`cacheRedirect`, off by default) keeps the cache's index in an S3 (or
+S3-compatible) bucket and answers a hit on a **large** immutable object
+with an **HTTP 302 to a presigned GET URL** of that object, valid for
+`presignTTL` (5 minutes). The runner downloads from the object store
+directly; the service only ever handles small requests, so two small
+replicas spread across nodes carry a fleet. **Small** objects (narinfo,
+`.info`, `.mod`, checksum-database tiles) are served directly, from an
+in-memory LRU or the bucket. The pods keep nothing on local disk.
+
+Clients, both front-ends on one Service:
+
+```text
+nix:  substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
+go:   GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct
+```
+
+Nix (curl) and the go command both follow redirects; a runner must be
+able to reach the bucket's endpoint itself (on AWS a gateway VPC endpoint
+for S3 is free and keeps the bytes off a NAT gateway). Its presigned
+request carries no credential of the runner's: the URL is the
+credential, for one object, for minutes.
+
+### A miss is fetched once and committed only whole
+
+A miss is pulled through from upstream **once per key**: the first
+request leads, and requests for the same key that arrive meanwhile wait
+for its outcome and are then redirected (or served the small body) --
+they never start a second fetch. The leader's client is fed the bytes as
+they arrive while the same bytes are uploaded to the bucket: one `PUT`
+for an object smaller than a part (8 MiB), a multipart upload otherwise.
+The fetch runs on the service's own context, so a leader whose client
+goes away does not abort the upload the waiting requests count on. The
+cost of this simplicity: a waiter for a large cold NAR waits for the
+whole download before its redirect, rather than streaming alongside.
+
+The object is **committed only when the upstream response completed
+and is whole**: every byte its `Content-Length` promised and no more
+and, for a NAR named after its file hash (cache.nixos.org's
+`nar/<sha256 in Nix base 32>.nar.<ext>`), bytes that hash to that name.
+S3 makes a multipart object visible at `CompleteMultipartUpload` and
+never before, so anything short of that is aborted and nothing appears
+under the key. A truncated object in a cache is worse than none -- it is
+a hit forever; a truncated zip in a Go module cache (`zip: not a valid
+zip file`) is a failure this plane has met. The client of a failed
+stream sees a broken response, never a clean end. An upstream body that
+sends nothing for `-idle-timeout` (1 minute) fails the same way. Give the
+bucket an `AbortIncompleteMultipartUpload` lifecycle rule as the
+backstop for an abort that itself never ran (a pod killed mid-upload),
+and an expiration rule if it should not grow forever: an expired object
+is only a miss.
+
+An upstream **404 or 410 reaches the client unchanged** (GOPROXY's comma
+falls through on exactly these two; Nix moves to its next substituter),
+remembered in memory for `-negative-ttl` (1 minute), never stored. Any
+other upstream failure is a 502.
+
+### The store's errors are never misses
+
+The bucket must answer a missing key with 404 (`NoSuchKey`), which needs
+`s3:ListBucket` on the prefix; without it S3 answers 403. The service
+treats only 404 as a miss. A 403 -- or any other store error -- is a 502
+(`store_error`): a role that lost its grant must not turn every request
+into an upstream fetch it can then never store. The presigned URLs are
+signed with the service's own credentials, so `s3:GetObject` on the
+prefix is also what authorizes every runner's redirected download; the
+credentials are refreshed `presignTTL` + 1 minute before they expire, so
+a URL is never signed with credentials about to lapse.
+`deploy/pulumi/runneridentity`'s `CacheRedirect` builds exactly this
+role for one prefix of a bucket (both front-end prefixes go under it,
+e.g. `cache-redirect/nix/` and `cache-redirect/goproxy/`); credentials
+come from the default AWS SDK chain, so EKS Pod Identity, IRSA, or the
+keys of `cacheRedirect.s3.existingSecret` for an S3-compatible store.
+
+### Nix front-end
+
+`/nix/nix-cache-info` is answered locally (`StoreDir: /nix/store`,
+`WantMassQuery: 1`, `Priority: 30` by default -- lower than
+cache.nixos.org's 40, which is what makes Nix prefer it; the order of
+`substituters` does not). `/nix/<hash>.narinfo` is stored **verbatim**:
+its signatures are over its content, and its relative `URL: nar/...`
+resolves against this cache. `/nix/nar/<file>` is the large object. A
+`HEAD` of a stored NAR is answered with its size (a presigned GET cannot
+answer a HEAD); a `HEAD` of one not stored is asked of upstream and
+stores nothing. Everything else (`/realisations/`, `/log/`, `.ls`) is a
+404.
+
+### Go front-end and the checksum database
+
+`/goproxy/<module>/@v/<version>.info` and `.mod` are stored and served
+directly; `.zip` is the large object. Only a **canonical** version
+(pseudo-versions and `+incompatible` included) is immutable: the go
+command also resolves a query (`master`, a commit) through
+`<query>.info`, whose answer moves, so that, `@v/list` and `@latest` are
+passed through and remembered in memory for `-mutable-ttl` (30 seconds),
+never stored. Module paths and versions keep the go command's `!`
+case-encoding byte for byte, in the store key and in the upstream URL.
+
+The checksum database is **proxied**: `/goproxy/sumdb/sum.golang.org/supported`
+answers 200, tiles (full and partial, both immutable by construction)
+are stored like any small object, and `lookup/` and `latest` are passed
+through. Answering `supported` with 404 instead would send every go
+command to sum.golang.org directly, so CI would need direct internet
+access for the checksum database even with every module cached; proxying
+removes that, and costs no trust: the go command verifies the database's
+signed tree heads and tiles itself, so a proxy can withhold an answer but
+cannot forge one. Set `goproxy.sumdb.name: ""` to send the go command to
+the database directly instead.
+
+### Metrics and operations
+
+`/metrics` (Prometheus text, `cacheRedirect.monitoring` renders a
+PodMonitor): `cache_redirect_requests_total{frontend,result}` with
+`result` one of `hit` (served from memory or the store), `redirect`,
+`miss` (pulled through), `not_found`, `upstream_error`, `store_error`;
+`cache_redirect_uploads_total{frontend,result="ok|failed"}`;
+`cache_redirect_upload_bytes_total{frontend}`;
+`cache_redirect_upstream_request_duration_seconds{frontend}` (a
+histogram of the time to upstream response headers); and
+`cache_redirect_fetches_in_flight`. `/healthz` answers 200 while the
+process serves. On SIGTERM it stops accepting, gives in-flight requests
+25 seconds, then aborts the uploads still running -- discarded, never
+committed.
+
+A down service degrades like every cache here: Nix falls through to the
+next substituter, and a GOPROXY comma fails the job loudly while a pipe
+would hide the outage.
+
 ## Persistent Nix workers are CI-only and separate from BuildKit
 
 The optional `nixWorkers` plane is one native StatefulSet per

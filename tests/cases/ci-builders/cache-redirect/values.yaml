@@ -1,0 +1,32 @@
+# cache-redirect on AWS: the bucket, its region, the pod's own identity (a
+# ServiceAccount the estate wires), both front-ends under the one prefix a
+# runneridentity CacheRedirect role grants, the runner namespaces allowed to
+# reach it, a metrics agent from another namespace, and its PodMonitor.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  nix:
+    prefix: cache-redirect/nix/
+  goproxy:
+    prefix: cache-redirect/goproxy/
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example, arc-runners-other]
+    additionalIngress:
+      - name: cache-redirect-from-metrics
+        from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: monitoring
+  monitoring:
+    enabled: true
+    interval: 30s
+    labels:
+      release: example

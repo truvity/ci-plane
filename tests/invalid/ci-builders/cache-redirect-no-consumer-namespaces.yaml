@@ -1,0 +1,13 @@
+# refuses: /cacheRedirect/networkPolicy/consumerNamespaces
+# Enabled with its policy on and nobody admitted.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1

@@ -97,6 +97,9 @@
     "nixWorkerImage": {
       "$ref": "#/definitions/image"
     },
+    "cacheRedirectImage": {
+      "$ref": "#/definitions/image"
+    },
     "nodeSelector": {
       "type": "object",
       "additionalProperties": {
@@ -221,6 +224,147 @@
         }
       },
       "description": "The caching Go module and sumdb proxy."
+    },
+    "cacheRedirect": {
+      "type": "object",
+      "description": "cache-redirect: the Nix and Go pull-through cache that redirects hits to presigned URLs of its bucket. Off by default; enabled, it needs the bucket, its region and the runner namespaces allowed to reach it.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "s3": {
+          "type": "object",
+          "properties": {
+            "bucket": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "pathStyle": {
+              "type": "boolean"
+            },
+            "existingSecret": {
+              "type": "string"
+            }
+          }
+        },
+        "presignTTL": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "description": "A Go duration, at most 168h (SigV4's limit; the service refuses more)."
+        },
+        "nix": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "upstream": {
+              "type": "string",
+              "pattern": "^https?://"
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "goproxy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "upstream": {
+              "type": "string",
+              "pattern": "^https?://"
+            },
+            "sumdb": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "upstream": {
+                  "type": "string",
+                  "pattern": "^https?://"
+                }
+              }
+            }
+          }
+        },
+        "extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^-"
+          }
+        },
+        "networkPolicy": {
+          "$ref": "#/definitions/networkPolicy"
+        },
+        "monitoring": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "type": "string"
+            },
+            "labels": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "$ref": "#/definitions/requiredPolicy"
+          },
+          "s3": {
+            "required": [
+              "bucket",
+              "region"
+            ],
+            "properties": {
+              "bucket": {
+                "minLength": 1
+              },
+              "region": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
     },
     "npmCache": {
       "type": "object",

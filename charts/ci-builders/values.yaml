@@ -41,6 +41,14 @@ nixWorkerImage:
   digest: "" # sha256:… — stamped at release; empty renders the tag instead
   tag: latest
 
+# cache-redirect's own image (`cacheRedirect` below): a static Go binary
+# on distroless. Stamped at release like the two above.
+cacheRedirectImage:
+  registry: ghcr.io
+  repository: truvity/ci-plane/cache-redirect
+  digest: "" # sha256:… — stamped at release; empty renders the tag instead
+  tag: latest
+
 # Scheduling and storage defaults shared by every component. Empty by
 # default (component contract C13: estate facts are inputs, never
 # defaults) -- an estate with tainted worker pools sets tolerations
@@ -407,6 +415,97 @@ goModproxy:
     # proxy and the policy are on (see buildkitd.networkPolicy).
     enabled: true
     consumerNamespaces: []
+
+cacheRedirect:
+  # cache-redirect: a pull-through cache for the Nix binary cache and the
+  # Go module proxy that keeps its index in an S3 (or S3-compatible) bucket
+  # and answers a hit on a large immutable download -- a NAR, a module zip
+  # -- with a 302 to a short-lived PRESIGNED URL of that bucket. The bytes
+  # then flow from the object store to the runner directly; these pods
+  # handle only small requests, so no one pod's node network is the
+  # bottleneck of a CI burst. A miss is fetched from upstream once, streamed
+  # to the client while it is uploaded, and committed only when it arrived
+  # whole. See docs/architecture.md ("cache-redirect").
+  #
+  # Clients (both front-ends on the one Service, port 80):
+  #   nix:      substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
+  #   go:       GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct
+  # Runners must be able to reach the bucket's endpoint themselves (a VPC
+  # gateway endpoint, or egress to it): that is where a redirect sends them.
+  #
+  # Off by default: it needs a bucket and an identity that may use it.
+  enabled: false
+  replicas: 2
+  s3:
+    # Required while enabled. `region` "auto" for Cloudflare R2.
+    bucket: ""
+    region: ""
+    # S3-COMPATIBLE STORES: the endpoint URL, and whether to address the
+    # bucket as endpoint/bucket/key (pathStyle) -- the same two switches as
+    # goModproxy.s3. Empty endpoint: AWS.
+    endpoint: ""
+    pathStyle: false
+    # Static credentials for a store with no pod identity, as
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (and optionally
+    # AWS_SESSION_TOKEN) in an existing Secret. Empty: the pod's own
+    # identity (EKS Pod Identity or IRSA on the ServiceAccount below).
+    existingSecret: ""
+  # How long a redirect's presigned URL stays valid. Minutes, not hours: a
+  # URL is a bearer credential for one object, and a client follows it at
+  # once.
+  presignTTL: 5m
+  nix:
+    enabled: true
+    # Store key prefix. With deploy/pulumi/runneridentity's CacheRedirect
+    # role (ONE prefix), put both prefixes under that one, e.g.
+    # `cache-redirect/nix/` and `cache-redirect/goproxy/`.
+    prefix: nix/
+    upstream: https://cache.nixos.org
+    # /nix-cache-info Priority. LOWER wins, and cache.nixos.org says 40, so
+    # Nix prefers this cache whatever the order of `substituters`.
+    priority: 30
+  goproxy:
+    enabled: true
+    prefix: goproxy/
+    upstream: https://proxy.golang.org
+    # The checksum database proxied under /goproxy/sumdb/<name>/: tiles are
+    # stored like any immutable object, lookups and the latest tree head
+    # are passed through. Set `name: ""` to answer `supported` with 404 and
+    # send the go command to the database directly.
+    sumdb:
+      name: sum.golang.org
+      upstream: https://sum.golang.org
+  # Extra flags, passed as given (see `cache-redirect -help`), e.g.
+  # ["-negative-ttl=5m"].
+  extraArgs: []
+  serviceAccount:
+    create: true
+    name: cache-redirect
+    annotations: {}
+  podAnnotations: {}
+  # Small: the bytes of a hit never pass through the pod. A miss holds up
+  # to (s3-upload-concurrency + 1) 8 MiB parts in memory per upstream
+  # fetch, 16 fetches at most by default.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+  networkPolicy:
+    # Only listed namespaces may reach the service. REQUIRED while it and
+    # the policy are on (see buildkitd.networkPolicy). additionalIngress
+    # adds a policy per entry on the same port, e.g. for a metrics agent
+    # in another namespace (`monitoring` below).
+    enabled: true
+    consumerNamespaces: []
+    additionalIngress: []
+  # A PodMonitor (monitoring.coreos.com/v1; the CRD must exist) on the
+  # `http` port's /metrics. Off by default.
+  monitoring:
+    enabled: false
+    interval: ""
+    labels: {}
 
 bazelRemote:
   # moon's remote task cache speaks the Bazel Remote Execution v2 API.
