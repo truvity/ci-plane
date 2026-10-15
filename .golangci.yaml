@@ -1,7 +1,8 @@
 version: "2"
 
 # One configuration for every Go module (image/nix-worker-client,
-# image/nix-worker-host-cert, image/runner-watchdog). There is no root go.mod
+# image/nix-worker-host-cert, image/runner-watchdog, image/cache-redirect,
+# deploy/pulumi/runneridentity). There is no root go.mod
 # and no go.work, so golangci-lint v2 is invoked once per module (it resolves
 # packages through the nearest go.mod, and modules with no workspace cannot be
 # linted in a single invocation). A config per module directory would duplicate this

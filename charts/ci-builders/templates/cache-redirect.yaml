@@ -1,0 +1,204 @@
+{{- if .Values.cacheRedirect.enabled }}
+{{- $c := .Values.cacheRedirect }}
+{{- if not $c.s3.bucket }}{{ fail "cacheRedirect.s3.bucket is required when cacheRedirect is enabled" }}{{ end }}
+{{- if not $c.s3.region }}{{ fail "cacheRedirect.s3.region is required when cacheRedirect is enabled (\"auto\" for Cloudflare R2)" }}{{ end }}
+{{- if not (or $c.nix.enabled $c.goproxy.enabled) }}{{ fail "cacheRedirect: nix.enabled and goproxy.enabled are both false; there is nothing to serve" }}{{ end }}
+---
+# cache-redirect: a pull-through cache for the Nix binary cache (/nix) and
+# the Go module proxy (/goproxy) whose index is an S3 bucket. A hit on a
+# large immutable object is a 302 to a presigned URL of the bucket, so the
+# bytes never pass through these pods; small objects are served directly;
+# a miss is fetched from upstream once and committed only when whole.
+#
+# The pods hold no state: S3 is the only durable layer. Their identity is
+# the ServiceAccount's (Pod Identity / IRSA, estate-side wiring, scoped to
+# the prefixes below), or the keys of `s3.existingSecret` for a store with
+# no pod identity. The redirects are signed with that same identity.
+{{- if $c.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $c.serviceAccount.name }}
+  labels:
+    app.kubernetes.io/name: cache-redirect
+    app.kubernetes.io/part-of: ci-builders
+  {{- with $c.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-redirect
+  labels:
+    app.kubernetes.io/name: cache-redirect
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  replicas: {{ $c.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache-redirect
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cache-redirect
+        app.kubernetes.io/part-of: ci-builders
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $c.serviceAccount.name }}
+      enableServiceLinks: false
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # One replica per node: what a burst of misses costs is the network
+      # of the node a pod runs on, so two pods on one node buy nothing.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cache-redirect
+      # Shutdown waits up to 25s for in-flight pull-throughs; an upload
+      # cut off past that is aborted, never committed half-written.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # distroless nonroot
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cache-redirect
+          image: {{ include "ci-builders.pinnedImage" .Values.cacheRedirectImage }}
+          args:
+            - -listen=:8080
+            - {{ printf "-s3-bucket=%s" $c.s3.bucket | quote }}
+            - {{ printf "-s3-region=%s" $c.s3.region | quote }}
+            {{- with $c.s3.endpoint }}
+            - {{ printf "-s3-endpoint=%s" . | quote }}
+            {{- end }}
+            {{- if $c.s3.pathStyle }}
+            - -s3-path-style=true
+            {{- end }}
+            - {{ printf "-presign-ttl=%s" $c.presignTTL | quote }}
+            - {{ printf "-nix=%t" $c.nix.enabled | quote }}
+            {{- if $c.nix.enabled }}
+            - {{ printf "-nix-prefix=%s" $c.nix.prefix | quote }}
+            - {{ printf "-nix-upstream=%s" $c.nix.upstream | quote }}
+            - {{ printf "-nix-priority=%d" (int $c.nix.priority) | quote }}
+            {{- end }}
+            - {{ printf "-goproxy=%t" $c.goproxy.enabled | quote }}
+            {{- if $c.goproxy.enabled }}
+            - {{ printf "-goproxy-prefix=%s" $c.goproxy.prefix | quote }}
+            - {{ printf "-goproxy-upstream=%s" $c.goproxy.upstream | quote }}
+            - {{ printf "-goproxy-sumdb=%s" $c.goproxy.sumdb.name | quote }}
+            - {{ printf "-goproxy-sumdb-upstream=%s" $c.goproxy.sumdb.upstream | quote }}
+            {{- end }}
+            {{- range $c.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- with $c.s3.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache-redirect
+  labels:
+    app.kubernetes.io/name: cache-redirect
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: cache-redirect
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if $c.networkPolicy.enabled }}
+---
+# Only the listed consumer namespaces may reach the service; a redirect
+# then sends them to the bucket, which this policy does not govern.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cache-redirect-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cache-redirect
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range $ns := $c.networkPolicy.consumerNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- include "ci-builders.additionalIngress" (dict "entries" $c.networkPolicy.additionalIngress "component" "cache-redirect" "port" 8080) }}
+{{- end }}
+{{- if $c.monitoring.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cache-redirect
+  labels:
+    app.kubernetes.io/name: cache-redirect
+    app.kubernetes.io/part-of: ci-builders
+    {{- with $c.monitoring.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache-redirect
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      {{- with $c.monitoring.interval }}
+      interval: {{ . }}
+      {{- end }}
+{{- end }}
+{{- end }}

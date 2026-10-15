@@ -446,7 +446,8 @@ jobs:
           cp charts/arc-runners/values.yaml /tmp/arc-runners.bak
           ./hack/stamp-digests.sh \
             runnerImage=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
-            nixWorkerImage=sha256:2222222222222222222222222222222222222222222222222222222222222222
+            nixWorkerImage=sha256:2222222222222222222222222222222222222222222222222222222222222222 \
+            cacheRedirectImage=sha256:4444444444444444444444444444444444444444444444444444444444444444
           if ./hack/stamp-digests.sh noSuchImage=sha256:3333333333333333333333333333333333333333333333333333333333333333 2>/dev/null; then
             echo "::error::the stamper accepted a key no chart declares"; exit 1
           fi
@@ -463,11 +464,12 @@ jobs:
   # nix-worker-host-cert's top-of-file comment for why they are siblings
   # rather than one binary. runner-watchdog is the runner container's
   # optional entrypoint wrapper (arc-runners `runner.watchdog`).
+  # cache-redirect is its own image (ci-builders `cacheRedirect`).
   go:
     strategy:
       fail-fast: false
       matrix:
-        module: [nix-worker-client, nix-worker-host-cert, runner-watchdog]
+        module: [nix-worker-client, nix-worker-host-cert, runner-watchdog, cache-redirect]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -531,10 +533,10 @@ jobs:
       - name: Build (amd64, no push)
         run: |
           set -euo pipefail
-          # Both bases, amd64 only: the arm64 half is native at release
+          # Every base, amd64 only: the arm64 half is native at release
           # time and QEMU here would buy no review signal for minutes of
           # emulation.
-          for img in runner nix-worker; do
+          for img in runner nix-worker cache-redirect; do
             docker buildx build --platform linux/amd64 \
               --file "image/${img}/Dockerfile" image/
           done

@@ -11,7 +11,7 @@ already moved the pins on master).
 git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
 ```
 
-The Release workflow does the rest: both images built natively per
+The Release workflow does the rest: every image built natively per
 architecture and merged into manifest lists, each digest stamped into
 the chart defaults by key, both charts stamped with the tag's version
 and published. Semver intent: patch = refresh/mechanics, minor = chart
@@ -115,6 +115,16 @@ warm layer lives in the registry (`cache-to type=registry`) and
 survives builder replacement — expect one slower build cycle after a
 PVC reset, not breakage. The nix, npm and Bazel caches degrade to
 upstream when down.
+
+cache-redirect's bucket is disposable the same way: an object that
+expires or is deleted is only a miss. Its health is in
+`cache_redirect_requests_total`: a rising `store_error` is the
+bucket's identity or reachability (a 403 is never taken for a miss), a
+rising `upstream_error` is the upstream, and `uploads_total{result="failed"}`
+counts objects discarded rather than committed half-written. A runner
+that cannot follow a redirect (no route to the bucket's endpoint) fails
+its download while the service looks healthy: check the runner side
+first.
 
 ## Persistent Nix worker operations
 

@@ -55,6 +55,22 @@ Order matters: caches before runners, controller before both charts.
    404/410, so a down proxy fails the job instead of silently costing
    the cache. Module zips and Go toolchain downloads both travel through
    it, so a cluster's egress to the public proxy shrinks to cache misses.
+   Optional, beside or instead of either proxy: `cacheRedirect`
+   (`cacheRedirect.enabled: true`), one service for the Nix cache and the
+   Go module proxy whose hits on NARs and module zips are redirects to
+   presigned URLs of its bucket, so the bytes flow from the object store
+   to the runner directly
+   ([architecture](architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)).
+   It needs `cacheRedirect.s3.bucket` and `region`,
+   `cacheRedirect.networkPolicy.consumerNamespaces`, an identity on its
+   ServiceAccount (`cacheRedirect.serviceAccount.name`, default
+   `cache-redirect`; runneridentity's `CacheRedirect` builds the AWS role,
+   for one prefix both `cacheRedirect.nix.prefix` and
+   `cacheRedirect.goproxy.prefix` must sit under), and a route from the
+   runners to the bucket's endpoint. Point runners at it with
+   `substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/`
+   and
+   `GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct`.
 6. For persistent Nix workers:
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
      signing role (default `ci-nix`) that allows the principal `ci-nix`

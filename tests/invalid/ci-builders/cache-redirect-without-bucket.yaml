@@ -1,0 +1,15 @@
+# refuses: /cacheRedirect/s3
+# Enabled with no bucket: a cache with nowhere to keep anything is refused,
+# not rendered into a pod that crash-loops.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    region: eu-example-1
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
