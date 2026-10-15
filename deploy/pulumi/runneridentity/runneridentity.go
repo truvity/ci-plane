@@ -88,6 +88,28 @@ type (
 		Bucket string
 		Prefix string
 	}
+
+	// CacheRedirect is cache-redirect's identity (charts/ci-builders
+	// `cacheRedirect`): one prefix of a bucket, read and written, and
+	// nothing else. The service presigns its redirects with these same
+	// credentials, so GetObject is also what every runner's download
+	// through a redirect is authorized by.
+	CacheRedirect struct {
+		Estate
+
+		RoleName       string
+		PolicyName     string
+		Description    string
+		Namespace      string
+		ServiceAccount string
+
+		// Bucket is the cache bucket and Prefix the one key prefix (no
+		// slashes) the service's front-end prefixes live under: its
+		// `-nix-prefix` and `-goproxy-prefix` must both start with
+		// "<Prefix>/".
+		Bucket string
+		Prefix string
+	}
 )
 
 const (
@@ -225,6 +247,49 @@ func NewModproxy(ctx *pulumi.Context, name string, m Modproxy, opts ...Option) (
 	return newPodIdentity(ctx, name, m.Estate, args{
 		roleName: m.RoleName, namespace: m.Namespace, serviceAccount: m.ServiceAccount,
 		policyName: m.PolicyName, description: m.Description, document: doc,
+	}, opts)
+}
+
+// Document is cache-redirect's managed policy document: list the prefix,
+// so a missing key is a 404 (NoSuchKey) rather than a 403, which the
+// service treats as an error and never as a miss; read objects under it,
+// for the hits it serves and the URLs it presigns; write them, as one PUT
+// or a multipart upload, and abort or inspect an upload that failed. No
+// delete: objects expire by the bucket's lifecycle rules, never by the
+// service.
+func (c CacheRedirect) Document() (string, error) {
+	if c.Bucket == "" || c.Prefix == "" {
+		return "", errors.New("runneridentity: CacheRedirect.Bucket and CacheRedirect.Prefix are required")
+	}
+
+	return document([]statement{
+		{
+			polEffect:   polAllow,
+			polAction:   s3ListBucket,
+			polResource: s3ARN(c.Bucket),
+			polCondition: map[string]any{
+				polStringLik: map[string]any{"s3:prefix": c.Prefix + "/*"},
+			},
+		},
+		{
+			polEffect:   polAllow,
+			polAction:   []string{s3GetObject, s3PutObject, s3AbortMultipartUpload, s3ListMultipartUploadParts},
+			polResource: s3ARN(c.Bucket + "/" + c.Prefix + "/*"),
+		},
+	}), nil
+}
+
+// NewCacheRedirect registers cache-redirect's pod-identity component under
+// name.
+func NewCacheRedirect(ctx *pulumi.Context, name string, c CacheRedirect, opts ...Option) (*podidentity.PodIdentity, error) {
+	doc, err := c.Document()
+	if err != nil {
+		return nil, err
+	}
+
+	return newPodIdentity(ctx, name, c.Estate, args{
+		roleName: c.RoleName, namespace: c.Namespace, serviceAccount: c.ServiceAccount,
+		policyName: c.PolicyName, description: c.Description, document: doc,
 	}, opts)
 }
 

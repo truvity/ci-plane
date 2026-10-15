@@ -1,0 +1,1 @@
+{"Statement":[{"Action":"s3:ListBucket","Condition":{"StringLike":{"s3:prefix":"cache-redirect/*"}},"Effect":"Allow","Resource":"@arn@:s3:::example-ci-cache"},{"Action":["s3:GetObject","s3:PutObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Effect":"Allow","Resource":"@arn@:s3:::example-ci-cache/cache-redirect/*"}],"Version":"2012-10-17"}

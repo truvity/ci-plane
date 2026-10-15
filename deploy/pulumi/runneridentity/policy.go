@@ -34,6 +34,9 @@ const (
 	s3GetObject    = "s3:GetObject"
 	s3PutObject    = "s3:PutObject"
 	s3DeleteObject = "s3:DeleteObject"
+
+	s3AbortMultipartUpload     = "s3:AbortMultipartUpload"
+	s3ListMultipartUploadParts = "s3:ListMultipartUploadParts"
 )
 
 // statement is one policy statement.
