@@ -36,7 +36,7 @@ func (n *nixFrontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/nix-cache-info":
 		// Priority is what makes Nix pick this cache over cache.nixos.org
-		// (40): LOWER wins, and the order of `substituters` does not.
+		// (40): LOWER wins, whatever order the client lists caches in.
 		body := fmt.Sprintf("StoreDir: /nix/store\nWantMassQuery: 1\nPriority: %d\n", n.priority)
 		n.cache.metrics.Request(frontendNix, resultHit)
 		writeCached(w, r.Method == http.MethodHead, cached{status: http.StatusOK, contentType: "text/x-nix-cache-info", body: []byte(body)})
@@ -74,12 +74,15 @@ func isNarFile(f string) bool {
 		return false
 	}
 	for i := 0; i < len(f); i++ {
-		c := f[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '+' || c == '-') {
+		if !isAlnum(f[i]) && strings.IndexByte("._+-", f[i]) < 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func isAlnum(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 func getOrHead(w http.ResponseWriter, r *http.Request) bool {

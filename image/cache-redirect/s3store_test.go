@@ -68,7 +68,9 @@ func (f *fakeS3) UploadPart(_ context.Context, in *s3.UploadPartInput, _ ...func
 	return &s3.UploadPartOutput{ETag: aws.String(fmt.Sprintf("e%d", *in.PartNumber))}, nil
 }
 
-func (f *fakeS3) CompleteMultipartUpload(_ context.Context, in *s3.CompleteMultipartUploadInput, _ ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
+func (f *fakeS3) CompleteMultipartUpload(
+	_ context.Context, in *s3.CompleteMultipartUploadInput, _ ...func(*s3.Options),
+) (*s3.CompleteMultipartUploadOutput, error) {
 	f.record("CompleteMultipartUpload")
 	f.mu.Lock()
 	defer f.mu.Unlock()
