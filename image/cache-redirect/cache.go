@@ -30,10 +30,28 @@ type object struct {
 	// large objects are answered with a redirect on a hit and streamed on
 	// a miss; small ones are served from memory or the store, body and all.
 	large bool
-	// sha256 is the expected Nix base-32 SHA-256 of the body, when its name
-	// carries it (a NAR's file name is its file hash). Empty: not checked.
+	// expect, for a large object that must be verified before it is stored
+	// (a NAR), looks up what its body must be: (nil, nil) means nothing is
+	// known, and the object is passed through and never stored.
+	expect func(ctx context.Context) (*expectation, error)
+	// onBody, when set, sees the whole body of a small object each time it
+	// is about to be served (a narinfo feeds the NAR index from it).
+	onBody func(body []byte)
+}
+
+// expectation is the size and Nix base-32 SHA-256 a body must have to be
+// committed.
+type expectation struct {
+	size   int64
 	sha256 string
 }
+
+// verifyError is a body that arrived whole (its Content-Length held) but is
+// not the one expected. It is not an upstream failure: the client has been
+// served the bytes, only the store refuses them.
+type verifyError struct{ msg string }
+
+func (e *verifyError) Error() string { return e.msg }
 
 // Cache is the shared core of both front-ends: the store lookups, the one
 // upstream fetch per key, the in-memory layers and the metrics.
@@ -103,6 +121,9 @@ func (c *Cache) ServeImmutable(w http.ResponseWriter, r *http.Request, o object)
 	}
 	if !o.large {
 		if v, ok := c.mem.Get(o.key); ok {
+			if o.onBody != nil {
+				o.onBody(v.body)
+			}
 			c.metrics.Request(o.frontend, resultHit)
 			writeCached(w, head, v)
 			return
@@ -138,6 +159,9 @@ func (c *Cache) ServeImmutable(w http.ResponseWriter, r *http.Request, o object)
 		case err == nil:
 			v := cached{status: http.StatusOK, contentType: o.contentType, body: body}
 			c.mem.Put(o.key, v, 0)
+			if o.onBody != nil {
+				o.onBody(body)
+			}
 			c.metrics.Request(o.frontend, resultHit)
 			writeCached(w, head, v)
 			return
@@ -173,7 +197,12 @@ func (c *Cache) getSmall(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
-	body, err := io.ReadAll(io.LimitReader(rc, maxSmall+1))
+	return readSmall(rc)
+}
+
+// readSmall reads a stored small object whole, up to maxSmall.
+func readSmall(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxSmall+1))
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +270,13 @@ func (c *Cache) follow(w http.ResponseWriter, r *http.Request, o object, f *flig
 	case f.res.status == http.StatusNotFound || f.res.status == http.StatusGone:
 		c.metrics.Request(o.frontend, resultNotFound)
 		writeCached(w, head, f.res)
+	case f.res.status == http.StatusOK:
+		// The leader's copy was passed through and not stored (no index,
+		// failed verification, a store failure): this request is served
+		// by a fetch of its own.
+		c.pullThrough(w, r, o)
 	default:
-		// The shared fetch failed, or the store refused its result: this
+		// The shared fetch failed: this
 		// request has nothing to redirect to.
 		c.metrics.Request(o.frontend, resultUpstreamError)
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
@@ -258,7 +292,7 @@ func (c *Cache) leadSmall(w http.ResponseWriter, r *http.Request, o object, f *f
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	fr := newFetchReader(resp, o, nil)
+	fr := newFetchReader(resp, nil, nil)
 	body, err := io.ReadAll(io.LimitReader(fr, maxSmall+1))
 	if err == nil && len(body) > maxSmall {
 		err = fmt.Errorf("upstream body is over %d bytes", maxSmall)
@@ -269,6 +303,9 @@ func (c *Cache) leadSmall(w http.ResponseWriter, r *http.Request, o object, f *f
 	}
 	v := cached{status: http.StatusOK, contentType: o.contentType, body: body}
 	f.res = v
+	if o.onBody != nil {
+		o.onBody(body)
+	}
 	c.metrics.Request(o.frontend, resultMiss)
 	writeCached(w, head, v)
 
@@ -287,6 +324,14 @@ func (c *Cache) leadSmall(w http.ResponseWriter, r *http.Request, o object, f *f
 // from what it reads, best effort: a client that goes away does not stop
 // the upload the waiting requests are counting on.
 func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *flight) {
+	var want *expectation
+	if o.expect != nil {
+		var err error
+		if want, err = o.expect(r.Context()); err != nil {
+			c.storeError(w, o, "get-index", err)
+			return
+		}
+	}
 	resp, ok := c.fetchOrAnswer(w, r, o, f)
 	if !ok {
 		return
@@ -310,14 +355,37 @@ func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *f
 		return err
 	}
 
-	fr := newFetchReader(resp, o, toClient)
+	fr := newFetchReader(resp, want, toClient)
 	start := time.Now()
+	if o.expect != nil && want == nil {
+		// Nothing says what this body must be (a NAR asked for without a
+		// narinfo through us): it goes to the client, never to the store.
+		_, err := io.Copy(io.Discard, fr)
+		if err != nil {
+			c.metrics.Request(o.frontend, resultUpstreamError)
+			c.log.Warn("upstream", "frontend", o.frontend, "key", o.key, "err", err, "bytes", fr.n)
+			panic(http.ErrAbortHandler)
+		}
+		f.res = cached{status: http.StatusOK}
+		c.metrics.Request(o.frontend, resultNoIndex)
+		c.log.Info("passed through, no index", "frontend", o.frontend, "key", o.key, "bytes", fr.n)
+		return
+	}
 	n, err := c.store.Put(c.bg, o.key, fr, o.contentType)
 	c.metrics.Upload(o.frontend, n, err)
 	if err != nil && fr.err == nil {
 		// The store failed and upstream did not: finish the client's copy.
 		c.log.Error("store", "op", "put", "frontend", o.frontend, "key", o.key, "err", err)
 		_, _ = io.Copy(io.Discard, fr)
+	}
+	var ve *verifyError
+	if errors.As(fr.err, &ve) {
+		// Whole, and the client has all of it, but not the body the
+		// narinfo announced: nothing is committed.
+		f.res = cached{status: http.StatusOK}
+		c.metrics.Request(o.frontend, resultVerifyFailed)
+		c.log.Warn("verify failed", "frontend", o.frontend, "key", o.key, "err", ve, "bytes", fr.n)
+		return
 	}
 	if !errors.Is(fr.err, io.EOF) {
 		// Truncated, stalled, too long or the wrong bytes: nothing was
@@ -425,7 +493,7 @@ func (c *Cache) ServeMutable(w http.ResponseWriter, r *http.Request, frontend, u
 		c.upstreamError(w, o, fmt.Errorf("upstream answered %s", resp.Status))
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(newFetchReader(resp, o, nil), maxSmall+1))
+	body, err := io.ReadAll(io.LimitReader(newFetchReader(resp, nil, nil), maxSmall+1))
 	if err == nil && len(body) > maxSmall {
 		err = fmt.Errorf("upstream body is over %d bytes", maxSmall)
 	}
@@ -490,7 +558,8 @@ func (b *idleBody) Close() error {
 
 // fetchReader reads an upstream body and ends in io.EOF ONLY when the body
 // is whole: every byte its Content-Length promised and no more, and, when
-// the name carries a hash, bytes that hash to it. Anything else ends in an
+// an expectation is given, the size and SHA-256 it names (a mismatch is a
+// *verifyError, after the length checks). Anything else ends in an
 // error, which is what keeps Store.Put from committing the object. Bytes
 // are copied to the client as they pass, best effort.
 type fetchReader struct {
@@ -498,15 +567,16 @@ type fetchReader struct {
 	want     int64 // -1: not announced
 	n        int64
 	sum      hash.Hash
+	wantSize int64
 	wantSum  string
 	toClient func([]byte) error // nil: none, or gone
 	err      error              // sticky; io.EOF once the body ended whole
 }
 
-func newFetchReader(resp *http.Response, o object, toClient func([]byte) error) *fetchReader {
+func newFetchReader(resp *http.Response, want *expectation, toClient func([]byte) error) *fetchReader {
 	fr := &fetchReader{r: resp.Body, want: resp.ContentLength, toClient: toClient}
-	if o.sha256 != "" {
-		fr.sum, fr.wantSum = sha256.New(), o.sha256
+	if want != nil {
+		fr.sum, fr.wantSum, fr.wantSize = sha256.New(), want.sha256, want.size
 	}
 	return fr
 }
@@ -542,8 +612,11 @@ func (f *fetchReader) finish() error {
 		return fmt.Errorf("upstream body ended at %d of %d bytes: %w", f.n, f.want, io.ErrUnexpectedEOF)
 	}
 	if f.sum != nil {
+		if f.n != f.wantSize {
+			return &verifyError{fmt.Sprintf("upstream body is %d bytes, its narinfo says FileSize %d", f.n, f.wantSize)}
+		}
 		if got := nix32(f.sum.Sum(nil)); got != f.wantSum {
-			return fmt.Errorf("upstream body hashes to sha256:%s, its name says %s", got, f.wantSum)
+			return &verifyError{fmt.Sprintf("upstream body hashes to sha256:%s, its narinfo says FileHash %s", got, f.wantSum)}
 		}
 	}
 	return io.EOF

@@ -57,11 +57,10 @@ type settings struct {
 	MaxFetches      int
 	LogLevel        slog.Level
 
-	Nix              bool
-	NixPrefix        string
-	NixUpstream      string
-	NixPriority      int
-	NixVerifyNarHash bool
+	Nix         bool
+	NixPrefix   string
+	NixUpstream string
+	NixPriority int
 
 	Go              bool
 	GoPrefix        string
@@ -96,7 +95,6 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.StringVar(&c.NixPrefix, "nix-prefix", "nix/", "store key prefix of the Nix front-end")
 	fs.StringVar(&c.NixUpstream, "nix-upstream", "https://cache.nixos.org", "the Nix binary cache pulled through")
 	fs.IntVar(&c.NixPriority, "nix-priority", 30, "Priority in /nix-cache-info (lower wins; cache.nixos.org says 40)")
-	fs.BoolVar(&c.NixVerifyNarHash, "nix-verify-nar-hash", true, "refuse to store a NAR whose bytes do not hash to the file hash in its name")
 
 	fs.BoolVar(&c.Go, "goproxy", true, "serve the GOPROXY front-end under /goproxy")
 	fs.StringVar(&c.GoPrefix, "goproxy-prefix", "goproxy/", "store key prefix of the GOPROXY front-end")
@@ -260,7 +258,8 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 	})
 	if cfg.Nix {
 		up, _ := parseUpstream(cfg.NixUpstream) // validated
-		mux.Handle("/nix/", &nixFrontend{cache: c, prefix: cfg.NixPrefix, upstream: up, priority: cfg.NixPriority, verify: cfg.NixVerifyNarHash})
+		mux.Handle("/nix/", &nixFrontend{cache: c, prefix: cfg.NixPrefix, upstream: up, priority: cfg.NixPriority,
+			index: &narIndex{store: store, prefix: cfg.NixPrefix, mem: newLRU(cfg.MemoryBytes/8, time.Now), bg: bg, log: log}})
 	}
 	if cfg.Go {
 		up, _ := parseUpstream(cfg.GoUpstream)

@@ -310,8 +310,7 @@ whole download before its redirect, rather than streaming alongside.
 
 The object is **committed only when the upstream response completed
 and is whole**: every byte its `Content-Length` promised and no more
-and, for a NAR named after its file hash (cache.nixos.org's
-`nar/<sha256 in Nix base 32>.nar.<ext>`), bytes that hash to that name.
+and, for a NAR, the size and hash its narinfo announced (below).
 S3 makes a multipart object visible at `CompleteMultipartUpload` and
 never before, so anything short of that is aborted and nothing appears
 under the key. A truncated object in a cache is worse than none -- it is
@@ -323,6 +322,26 @@ bucket an `AbortIncompleteMultipartUpload` lifecycle rule as the
 backstop for an abort that itself never ran (a pod killed mid-upload),
 and an expiration rule if it should not grow forever: an expired object
 is only a miss.
+
+A **NAR is verified against its narinfo, not its file name**: on
+cache.nixos.org `nar/<hash>.nar.zst` is not the hash of the compressed
+body. Whenever the Nix front-end serves a narinfo (miss or hit) it parses
+`URL`, `FileHash` and `FileSize` and writes an index record, keyed by the
+NAR's URL path, to the bucket and to memory:
+
+```text
+<nix prefix>nar-index/<URL path>.json     e.g. nix/nar-index/nar/<file>.nar.zst.json
+{"url":"nar/<file>","fileHash":"<sha256, Nix base 32>","fileSize":<bytes>}
+```
+
+It lives in the bucket because the narinfo request and the NAR request
+can reach different replicas. On a NAR miss the record is looked up
+(memory, then bucket); the NAR is committed only when the streamed body's
+size and SHA-256 equal it. A mismatch aborts the upload (the client still
+receives the whole pass-through body) and is counted `verify_failed`. A
+NAR with no record (asked for without a narinfo through this cache) is
+passed through and never stored, counted `no_index`. Neither is an
+`upstream_error`.
 
 An upstream **404 or 410 reaches the client unchanged** (GOPROXY's comma
 falls through on exactly these two; Nix moves to its next substituter),
@@ -386,7 +405,9 @@ the database directly instead.
 `/metrics` (Prometheus text, `cacheRedirect.monitoring` renders a
 PodMonitor): `cache_redirect_requests_total{frontend,result}` with
 `result` one of `hit` (served from memory or the store), `redirect`,
-`miss` (pulled through), `not_found`, `upstream_error`, `store_error`;
+`miss` (pulled through), `not_found`, `upstream_error`, `store_error`,
+`verify_failed` (a NAR not matching its narinfo: served, not stored),
+`no_index` (a NAR with no narinfo record: served, not stored);
 `cache_redirect_uploads_total{frontend,result="ok|failed"}`;
 `cache_redirect_upload_bytes_total{frontend}`;
 `cache_redirect_upstream_request_duration_seconds{frontend}` (a
