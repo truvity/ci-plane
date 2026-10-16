@@ -3,43 +3,23 @@
 # [presets/stable.yaml]`; Helm: `-f presets/stable.yaml -f mine.yaml`).
 # A values file you pass later wins key by key.
 #
-# Shape: ONE fat, cold scale set named `stable` (16 CPU / 32Gi, minimum
-# 0, at most 2 runners) instead of the three preview profiles, scheduled
-# on an AWS/Karpenter pool named `ci-stable` whose nodes carry the
-# matching `ci-stable` taint. The preview profiles are deleted with
-# null, which only a values FILE can express (Argo CD strips nulls out of
-# `helm.valuesObject`). A different pool name is an override of
-# nodeSelector and tolerations, both of which REPLACE. Estate facts --
-# the organization, the registry, the runner ServiceAccount -- are never
-# in a preset.
+# Shape: ONE fat, cold scale set named `stable` (minimum 0, at most 2
+# runners); the chart ships no other set, so nothing is deleted. The preset names no node pool, label or number of a platform; it
+# refers to NAMES that you define in your own values:
+#
+#   nodeClasses.stable-runners     where the runners go (`{}` for
+#                                  nowhere in particular)
+#   sizes.large                    the stable runner's requests/limits and
+#                                  GOMAXPROCS
+#
+# The chart refuses to render with a name undefined. Estate facts -- the
+# organization, the registry, the runner ServiceAccount -- are never in a
+# preset.
 minRunners: 0
 maxRunners: 2
+nodeClass: stable-runners
 scaleSets:
-  preview-large: null
-  preview-medium: null
-  preview-small: null
   stable:
+    size: large
     minRunners: 0
     maxRunners: 2
-    gomaxprocs: 16
-    resources:
-      requests:
-        cpu: "8"
-        memory: 32Gi
-      limits:
-        cpu: "16"
-        memory: 32Gi
-        ephemeral-storage: 60Gi
-nodeSelector:
-  karpenter.sh/nodepool: ci-stable
-tolerations:
-  - key: arch
-    operator: Exists
-  - key: ci-stable
-    value: "true"
-    effect: NoSchedule
-listenerTolerations:
-  - key: arch
-    operator: Exists
-podAnnotations:
-  karpenter.sh/do-not-disrupt: "true"

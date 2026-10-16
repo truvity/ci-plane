@@ -297,6 +297,7 @@ set's value block.
 {{- $root := .root -}}
 {{- $p := .p -}}
 {{- $base := $root.Values.affinity -}}
+{{- if not $base }}{{ $base = (include "arc-runners.nodeClass" (dict "root" $root "name" $root.Values.nodeClass) | fromJson).affinity }}{{ end -}}
 {{- if hasKey $p "affinity" }}{{ $base = $p.affinity }}{{ end -}}
 {{- $aff := deepCopy ($base | default (dict)) -}}
 {{- if $root.Values.packing.enabled -}}
@@ -314,4 +315,56 @@ set's value block.
 {{- $_ := set $aff "podAffinity" $podAffinity -}}
 {{- end -}}
 {{- if $aff }}{{ toYaml $aff }}{{ end -}}
+{{- end -}}
+
+{{- /*
+A node class by name (values.nodeClasses): the placement the caller
+defines for a name a preset or a scale set refers to. Returns the class
+as JSON ({nodeSelector, tolerations, affinity}, each optional); an empty
+name is the empty class. A name that is not defined is a render error --
+a typo must not quietly schedule runners anywhere. To place nothing,
+define the class empty: `nodeClasses: {name: {}}`.
+
+Takes a dict `{root, name}`.
+*/ -}}
+{{- define "arc-runners.nodeClass" -}}
+{{- $root := .root -}}
+{{- $name := .name -}}
+{{- if $name -}}
+{{- $classes := $root.Values.nodeClasses | default (dict) -}}
+{{- if not (hasKey $classes $name) }}{{ fail (printf "nodeClass %q is not defined: add it under nodeClasses (defined: [%s]); a class that places nothing is `nodeClasses: {%s: {}}`" $name (keys $classes | sortAlpha | join ", ") $name) }}{{ end -}}
+{{- get $classes $name | default (dict) | toJson -}}
+{{- else -}}
+{}
+{{- end -}}
+{{- end -}}
+
+{{- /*
+A size by name (values.sizes): the requests/limits, GOMAXPROCS and
+maxRunners the caller defines for a name a scale set refers to, as JSON.
+An undefined name is a render error.
+
+Takes a dict `{root, name, set}`; `set` is the scale set asking, for the
+message.
+*/ -}}
+{{- define "arc-runners.size" -}}
+{{- $root := .root -}}
+{{- $sizes := $root.Values.sizes | default (dict) -}}
+{{- if not (hasKey $sizes .name) }}{{ fail (printf "scaleSets.%s.size %q is not defined: add it under sizes (defined: [%s])" .set .name (keys $sizes | sortAlpha | join ", ")) }}{{ end -}}
+{{- get $sizes .name | default (dict) | toJson -}}
+{{- end -}}
+
+{{- /*
+The scale sets, as JSON, without the entries whose value is not a map. A
+key a values file sets to null stays in the map when the chart has no
+default under that name (deleting a preset's set is `name: null`, and the
+chart ships no default sets any more), and every template that ranges over
+the sets would otherwise meet a nil block.
+*/ -}}
+{{- define "arc-runners.scaleSets" -}}
+{{- $sets := dict -}}
+{{- range $name, $p := .Values.scaleSets -}}
+{{- if kindIs "map" $p }}{{ $_ := set $sets $name $p }}{{ end -}}
+{{- end -}}
+{{- $sets | toJson -}}
 {{- end -}}

@@ -1,0 +1,51 @@
+# Sizes and node classes at their edges: buildkitd and the Nix workers
+# each picking a size (it replaces the component's own resources), a
+# per-architecture class, an architecture with no class falling back to the
+# release-wide one, and an explicit nodeSelector winning over a class.
+nodeClass: shared
+nodeClasses:
+  shared:
+    nodeSelector: {example.com/pool: shared}
+    tolerations:
+      - {key: example.com/shared, operator: Exists}
+  fast:
+    nodeSelector: {example.com/pool: fast}
+sizes:
+  builder:
+    maxParallelism: 3
+    resources:
+      requests: {cpu: 500m, memory: 3Gi}
+      limits: {memory: 5Gi}
+  worker:
+    maxJobs: 3
+    cores: 6
+    resources:
+      requests: {cpu: "3", memory: 12Gi}
+      limits: {cpu: "6", memory: 24Gi, ephemeral-storage: 80Gi}
+buildkitd:
+  size: builder
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  scheduling:
+    arm64:
+      nodeClass: fast
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  enabled: true
+  size: worker
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  ssh:
+    trustedUserCAKeys:
+      - ssh-ed25519 AAAATEST
+  openbao:
+    address: https://openbao.example
+    namespace: example
+    caBundle: dGVzdA==
+    authMount: jwt-example
+    authRole: nix-worker
+  scheduling:
+    amd64:
+      nodeSelector: {kubernetes.io/hostname: node-1}

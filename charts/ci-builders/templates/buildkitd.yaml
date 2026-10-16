@@ -1,5 +1,14 @@
 {{- if .Values.buildkitd.enabled }}
 {{- $b := .Values.buildkitd }}
+{{- /* buildkitd.size (values.sizes): its resources and maxParallelism replace
+     the component's own. A copy, so the release-wide values stay as given. */}}
+{{- if $b.size }}
+{{- $b = deepCopy $b }}
+{{- range $k, $v := (include "ci-builders.sizeOf" (dict "root" $ "size" $b.size "name" "buildkitd") | fromJson) }}
+{{- if has $k (list "resources" "maxParallelism") }}{{ $_ := set $b $k $v }}
+{{- else }}{{ fail (printf "sizes.%s.%s does not apply to buildkitd (it takes resources and maxParallelism)" $b.size $k) }}{{ end }}
+{{- end }}
+{{- end }}
 {{- range $arch := $b.archs }}
 ---
 apiVersion: v1
@@ -48,24 +57,14 @@ spec:
       {{- end }}
     spec:
       {{- $sched := (index $b.scheduling $arch) | default dict }}
-      {{- if $sched.nodeSelector }}
+      {{- $placement := include "ci-builders.placement" (dict "root" $ "sched" $sched "arch" $arch) | fromJson }}
+      {{- with $placement.nodeSelector }}
       nodeSelector:
-        {{- toYaml $sched.nodeSelector | nindent 8 }}
-      {{- else }}
-      nodeSelector:
-        kubernetes.io/arch: {{ $arch }}
-        {{- with $.Values.nodeSelector }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- end }}
-      {{- if $sched.tolerations }}
-      tolerations:
-        {{- toYaml $sched.tolerations | nindent 8 }}
-      {{- else }}
-      {{- with $.Values.tolerations }}
-      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $placement.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
         fsGroup: 1000

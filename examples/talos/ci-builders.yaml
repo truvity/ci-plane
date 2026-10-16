@@ -1,0 +1,45 @@
+# ci-builders on Talos (or kind): fixed arm64 nodes, Cilium, no Karpenter,
+# no EKS. Nothing here is a default of the chart: the node classes and the
+# size taxonomy are this file's own, with names chosen for this cluster.
+#
+#   helm install ci-builders oci://ghcr.io/truvity/charts/ci-builders \
+#     --version <X.Y.Z> -n ci-cache -f examples/talos/ci-builders.yaml
+#
+# Render-only in CI (tests/cases/ci-builders/talos): the render must not
+# mention Karpenter or EKS.
+
+# The cluster's own StorageClass for the builders' cache volumes (a local
+# provisioner on Talos); empty would take the cluster default.
+storageClassName: local-path
+
+nodeClasses:
+  ci:
+    nodeSelector:
+      node-role.example/ci: ""
+    tolerations:
+      - key: node-role.example/ci
+        operator: Exists
+        effect: NoSchedule
+# The caches and the module proxy go where the CI nodes are.
+nodeClass: ci
+
+sizes:
+  builder:
+    maxParallelism: 4
+    resources:
+      requests: {cpu: "1", memory: 4Gi}
+      limits: {memory: 8Gi}
+
+buildkitd:
+  enabled: true
+  # Fixed arm64 nodes only: no amd64 builder.
+  archs: [arm64]
+  size: builder
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  scheduling:
+    arm64:
+      nodeClass: ci
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
