@@ -7,6 +7,10 @@ line is summarised in one section.
 
 ## Unreleased
 
+### arc-runners: the runner nix ConfigMap is named by its full content
+
+- **Fixed: setting `nixCache.url` with `nixBuilders` off changed an immutable ConfigMap in place.** The `runner-nix-config-<hash>` ConfigMap is immutable, but with `nixBuilders.enabled: false` its name hashed `nixConfig` alone, while the rendered `nix.conf` also carries the `substituters = <nixCache.url> https://cache.nixos.org/` line. Adding or changing `nixCache.url` therefore rewrote the data under the same name and Argo CD failed with `field is immutable when immutable is set`. The name now hashes the whole rendered `nix.conf` in every branch (with builders on it already covered the whole payload). A render without `nixCache.url` keeps its name (the rendered text is `nixConfig` verbatim), so only a release that sets `nixCache.url` gets a new name: one rollout of the listener and runner template, harmless with `minRunners: 0`. The `nix-cache` golden moves to the new name, and `hack/golden.sh` now fails if `minimal` and `nix-cache` (which differ only in `nixCache.url`) share a name.
+
 ## v6.6.1
 
 ### cache-redirect: NARs are now cached (verified against their narinfo)
