@@ -1,0 +1,25 @@
+# Preset (opt-in): the Karpenter and EKS assumptions. List it, with a tier
+# preset or alone, ONLY where Karpenter (or EKS Auto Mode, which runs it)
+# provisions the nodes of an EKS cluster. Nothing else in this chart
+# assumes either. The pool labels and taints are not here: they are your
+# `nodeClasses`.
+#
+# A builder mid-build is not migratable state: node consolidation kills
+# the build. The annotation tells Karpenter to leave a node alone while the
+# pod is on it (it stops consolidation, not a spot reclaim: run builder
+# pools on-demand). Inert for a component that is off.
+#
+# storageClassName: EKS's gp3 EBS class, for the builders' cache volumes.
+# Elsewhere the cluster's default StorageClass (or the one you name) does.
+storageClassName: gp3
+buildkitd:
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+nixWorkers:
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+goModproxy:
+  # A restart mid-job fails the jobs that meet it (GOPROXY uses a comma):
+  # off voluntary disruption. Inert while goModproxy.enabled is false.
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"

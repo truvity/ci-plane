@@ -51,14 +51,62 @@ cacheRedirectImage:
 
 # Scheduling and storage defaults shared by every component. Empty by
 # default (component contract C13: estate facts are inputs, never
-# defaults) -- an estate with tainted worker pools sets tolerations
-# here once, and an empty storageClassName renders NO
-# `storageClassName` field on a PVC at all, which Kubernetes reads as
-# "use the cluster's default StorageClass". That is not the same as an
-# explicit empty string, which Kubernetes reads as "no class" -- the
-# templates omit the field rather than render it empty. Truvity's own
-# AWS/Karpenter fleet sets `storageClassName: gp3` here; see
-# docs/day-1-install.md#values-an-awskarpenter-estate-sets.
+# defaults). An empty storageClassName renders NO `storageClassName` field
+# on a PVC at all, which Kubernetes reads as "use the cluster's default
+# StorageClass". That is not the same as an explicit empty string, which
+# Kubernetes reads as "no class" -- the templates omit the field rather
+# than render it empty.
+
+# NODE CLASSES (v7.0.0): where a pod may run, as data YOU define. A class
+# is a name you choose, mapped to a nodeSelector and/or tolerations; a
+# preset, a per-architecture block or the whole release then refers to the
+# NAME. The chart ships no class and knows no pool, label or taint of any
+# platform. Map a class to whatever your nodes carry:
+#
+#   nodeClasses:
+#     builders-arm64:           # a pool: its label and taint
+#       nodeSelector: {example.com/pool: build}
+#       tolerations:
+#         - {key: example.com/build, value: "true", effect: NoSchedule}
+#     cache-plane: {}           # a class that places nothing
+#
+# The class used for a builder carries the pool, not the architecture:
+# the chart adds `kubernetes.io/arch` itself for buildkitd and the Nix
+# workers. A class a preset or a values file names but you did not define
+# is a render error (a typo must not schedule a builder anywhere); define
+# it empty, as `cache-plane` above, to place nothing. The presets
+# (presets/preview.yaml, presets/stable.yaml, presets/nix-workers.yaml)
+# name `builders-arm64`, `builders-amd64` and `cache-plane`.
+nodeClasses: {}
+
+# The class of every component that has no placement of its own: the
+# caches, the Go module proxy, cache-redirect, and buildkitd / the Nix
+# workers for an architecture whose `scheduling.<arch>.nodeClass` is
+# unset. Empty: no class. An explicit `nodeSelector` / `tolerations`
+# below, when not empty, wins over the class's own for that one key.
+nodeClass: ""
+
+# SIZES (v7.0.0): a taxonomy of builder sizes, as data YOU define. A size
+# is a name you choose, mapped to the keys a builder takes: for buildkitd
+# `resources` and `maxParallelism`, for the Nix workers `resources`,
+# `maxJobs` and `cores`. A builder picks one by name with `size:`
+# (buildkitd.size, nixWorkers.size). The chart ships none. A size REPLACES
+# the component's own value for each key it sets (the chart's defaults for
+# those keys cannot be told from yours, so a merge would leave stray
+# defaults behind); a key the size leaves out keeps the component's. An
+# undefined name is a render error.
+#
+#   sizes:
+#     medium:
+#       maxParallelism: 4
+#       resources:
+#         requests: {cpu: "1", memory: 4Gi}
+#         limits: {memory: 10Gi}
+#
+#   buildkitd:
+#     size: medium
+sizes: {}
+
 nodeSelector: {}
 tolerations: []
 storageClassName: ""
@@ -144,15 +192,24 @@ buildkitd:
     #         - namespaceSelector: {matchLabels: {example.com/router: "true"}}
     #           podSelector: {matchLabels: {app.kubernetes.io/name: router}}
     additionalIngress: []
-  # Annotations for the builder pods. Empty by default (C13); a
-  # Karpenter estate sets `karpenter.sh/do-not-disrupt: "true"` here --
-  # a builder mid-build is not migratable state.
+  # The name of a size under `sizes` above; empty applies none.
+  size: ""
+  # Annotations for the builder pods. Empty by default: no platform
+  # annotation is assumed. A builder mid-build is not migratable state, so
+  # an autoscaler that consolidates nodes needs the annotation that stops
+  # it (Karpenter: `karpenter.sh/do-not-disrupt: "true"`, which
+  # presets/karpenter.yaml sets).
   podAnnotations: {}
   # Per-arch scheduling override. Empty = the chart default
-  # (kubernetes.io/arch selector + the chart-global tolerations). An
-  # estate whose arches live on different pools sets each arch's
-  # nodeSelector/tolerations here wholesale (the block REPLACES the
-  # default when present).
+  # (kubernetes.io/arch selector + the release-wide placement above). An
+  # estate whose arches live on different pools names a class for each:
+  #
+  #   scheduling:
+  #     arm64: {nodeClass: builders-arm64}
+  #     amd64: {nodeClass: builders-amd64}
+  #
+  # or writes the nodeSelector / tolerations wholesale (the block REPLACES
+  # the default when present; the arch selector is then yours to write).
   scheduling:
     arm64: {}
     amd64: {}
@@ -325,10 +382,12 @@ nixWorkers:
     # port is the workers' SSH port. `arch` narrows an entry to one
     # architecture's worker (a pilot on a single worker).
     additionalIngress: []
-  # Empty by default (C13); a Karpenter estate sets
-  # `karpenter.sh/do-not-disrupt: "true"` here, same as buildkitd's
-  # podAnnotations above.
+  # The name of a size under `sizes` above; empty applies none.
+  size: ""
+  # Empty by default (C13): the same as buildkitd's podAnnotations above.
   podAnnotations: {}
+  # Per-arch placement, as buildkitd.scheduling: a `nodeClass` per
+  # architecture, or nodeSelector / tolerations written out.
   scheduling:
     arm64: {}
     amd64: {}
@@ -398,7 +457,7 @@ goModproxy:
     name: go-modproxy
     annotations: {}
   stagingSize: 10Gi
-  # Pod annotations, e.g. karpenter.sh/do-not-disrupt: "true". A proxy
+  # Pod annotations (a node-consolidation guard, if your autoscaler has one). A proxy
   # restart mid-job fails the jobs that hit it when GOPROXY uses a comma,
   # so an estate that cares keeps the single replica off voluntary
   # disruption.

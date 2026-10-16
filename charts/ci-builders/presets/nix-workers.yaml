@@ -13,7 +13,11 @@
 # the environment's SSH host CA; renewing at half the certificate
 # lifetime means a slow renewal never meets an expired certificate (the
 # chart's own render-time check enforces renewEvery < certificateTTL).
-# They live on the same `build` pool as preview.yaml's builders.
+# Where they run is two names that you define in your own values:
+# `nodeClasses.nix-workers-arm64` and `nodeClasses.nix-workers-amd64`
+# (`{}` for nowhere in particular; the chart adds the architecture to the
+# selector itself). A platform's own pod annotations are not here: see
+# presets/karpenter.yaml.
 nixWorkers:
   enabled: true
   serviceAccount:
@@ -34,22 +38,8 @@ nixWorkers:
       principals:
         - ci-nix
       trusted: true
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"
   scheduling:
     arm64:
-      nodeSelector:
-        karpenter.sh/nodepool: build
-        kubernetes.io/arch: arm64
-      tolerations:
-        - key: build
-          value: "true"
-          effect: NoSchedule
+      nodeClass: nix-workers-arm64
     amd64:
-      nodeSelector:
-        karpenter.sh/nodepool: build
-        kubernetes.io/arch: amd64
-      tolerations:
-        - key: build
-          value: "true"
-          effect: NoSchedule
+      nodeClass: nix-workers-amd64

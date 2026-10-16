@@ -222,6 +222,36 @@
     "affinity": {
       "type": "object"
     },
+    "nodeClass": {
+      "type": "string",
+      "description": "Name of a class under nodeClasses; the placement of every runner pod unless its scale set names its own."
+    },
+    "nodeClasses": {
+      "type": "object",
+      "description": "Placement classes you define: name -> nodeSelector / tolerations / affinity.",
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+          "tolerations": {"type": "array", "items": {"type": "object"}},
+          "affinity": {"type": "object"}
+        }
+      }
+    },
+    "sizes": {
+      "type": "object",
+      "description": "Runner sizes you define: name -> gomaxprocs / resources / maxRunners.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gomaxprocs": {"type": "integer", "minimum": 1},
+          "maxRunners": {"type": "integer", "minimum": 1},
+          "resources": {"type": "object"}
+        }
+      }
+    },
     "extraEnv": {
       "type": "array",
       "items": {

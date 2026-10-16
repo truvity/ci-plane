@@ -52,11 +52,12 @@ spec:
     spec:
       serviceAccountName: {{ $c.serviceAccount.name }}
       enableServiceLinks: false
-      {{- with .Values.nodeSelector }}
+      {{- $placement := include "ci-builders.placement" (dict "root" $) | fromJson }}
+      {{- with $placement.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with $placement.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

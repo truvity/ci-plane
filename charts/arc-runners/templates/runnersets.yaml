@@ -64,7 +64,7 @@ projected tokens sharing a mount path).
 {{- end }}
 {{- end }}
 {{- $root := . }}
-{{- range $name, $p := .Values.scaleSets }}
+{{- range $name, $p := (include "arc-runners.scaleSets" . | fromJson) }}
 {{- /*
 The CRs are rendered DIRECTLY rather than through the upstream
 gha-runner-scale-set chart: the controller and that chart share a
@@ -75,6 +75,38 @@ upstream chart creates. The values-hash annotation changes whenever
 this set's rendered inputs change, which is what prompts the
 controller to recycle the listener — same mechanism as upstream.
 */}}
+{{- /*
+Sizes and node classes (v7.0.0). A scale set may name a `size` (values.sizes:
+gomaxprocs, resources, maxRunners) and a `nodeClass` (values.nodeClasses:
+nodeSelector, tolerations, affinity). Both are resolved HERE, into the set's
+own value block, and the two names are dropped from it: what follows (the
+values-hash included) sees exactly the block a hand-written set with those
+keys would have, which is why moving an estate's inline numbers into `sizes`
+recycles no warm runner. A key the set writes itself wins over its size's
+(resources merge key by key); a nodeSelector, tolerations or affinity the
+set writes wins over its class's.
+*/}}
+{{- if hasKey $p "size" }}
+{{- $size := include "arc-runners.size" (dict "root" $root "name" $p.size "set" $name) | fromJson }}
+{{- $resolved := omit $p "size" | deepCopy }}
+{{- range $k, $v := $size }}
+{{- if not (hasKey $resolved $k) }}{{ $_ := set $resolved $k $v }}
+{{- else if and (eq $k "resources") (kindIs "map" $v) (kindIs "map" (get $resolved $k)) }}{{ $_ := set $resolved $k (mergeOverwrite (deepCopy $v) (get $resolved $k)) }}
+{{- end }}
+{{- end }}
+{{- $p = $resolved }}
+{{- end }}
+{{- if hasKey $p "nodeClass" }}
+{{- $setClass := include "arc-runners.nodeClass" (dict "root" $root "name" $p.nodeClass) | fromJson }}
+{{- $resolved := omit $p "nodeClass" | deepCopy }}
+{{- /* The set's class REPLACES the release-wide placement outright (a key
+     the class leaves out is empty, not inherited), like every other
+     per-set placement key. */}}
+{{- range $k, $empty := dict "nodeSelector" (dict) "tolerations" (list) "affinity" (dict) }}
+{{- if not (hasKey $resolved $k) }}{{ $_ := set $resolved $k (get $setClass $k | default $empty) }}{{ end }}
+{{- end }}
+{{- $p = $resolved }}
+{{- end }}
 {{- /* hasKey, NOT `| default`: sprig's default treats 0 as empty, so a
      profile asking for minRunners 0 (a deliberately COLD set) silently
      rendered as the chart default 1 — the same bool-false trap that bit
@@ -90,9 +122,13 @@ key is present on this scale set at all. hasKey again, not `default`:
 an explicit `nodeSelector: {}` or `extraEnv: []` on one set must render
 as "nothing", not fall back to the release-wide value because an empty
 map/list looks unset to sprig's `default`. */}}
-{{- $nodeSelector := $root.Values.nodeSelector }}
+{{- /* The release-wide nodeClass fills the placement the release-wide
+     nodeSelector / tolerations leave empty. It never enters the hash, as
+     the release-wide values never did. */}}
+{{- $rootClass := include "arc-runners.nodeClass" (dict "root" $root "name" $root.Values.nodeClass) | fromJson }}
+{{- $nodeSelector := $root.Values.nodeSelector | default $rootClass.nodeSelector }}
 {{- if hasKey $p "nodeSelector" }}{{ $nodeSelector = $p.nodeSelector }}{{ end }}
-{{- $tolerations := $root.Values.tolerations }}
+{{- $tolerations := $root.Values.tolerations | default $rootClass.tolerations }}
 {{- if hasKey $p "tolerations" }}{{ $tolerations = $p.tolerations }}{{ end }}
 {{- $podAnnotations := $root.Values.podAnnotations }}
 {{- if hasKey $p "podAnnotations" }}{{ $podAnnotations = $p.podAnnotations }}{{ end }}
@@ -405,8 +441,10 @@ spec:
             {{- end }}
           {{- end }}
           env:
+            {{- if hasKey $p "gomaxprocs" }}
             - name: GOMAXPROCS
               value: {{ $p.gomaxprocs | quote }}
+            {{- end }}
             {{- with $extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -447,8 +485,10 @@ spec:
             - name: AWS_PROFILE
               value: {{ $root.Values.awsConfig.profile | quote }}
             {{- end }}
+          {{- with $p.resources }}
           resources:
-            {{- toYaml $p.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if $hasVolumeMounts }}
           {{- if $root.Values.nixBuilders.enabled }}
           # Writable by `runner` (the init container chowns both emptyDirs to

@@ -8,7 +8,11 @@
 # `example`, to tests/golden/<chart>/<case>.yaml. A case that proves a
 # preset has a `presets` file beside its values.yaml (one preset name per
 # line): each is passed as `-f charts/<chart>/presets/<name>.yaml` BEFORE
-# the case's values, the order a consumer lists them in. The goldens are
+# the case's values, the order a consumer lists them in. A case WITHOUT a
+# `presets` file is rendered over tests/cases/<chart>/base.yaml, when that
+# exists: the scale sets the chart no longer ships by default, so the
+# cases that exercise something else (a nix sandbox, a watchdog) still
+# have sets to exercise it on. The goldens are
 # committed, so a template change that alters a manifest is a diff a
 # reviewer reads rather than a surprise in a cluster.
 #
@@ -37,6 +41,9 @@ for chart_dir in charts/*/; do
     name=$(basename "$(dirname "$values")")
     golden="tests/golden/$chart/$name.yaml"
     preset_args=()
+    if [ ! -f "$(dirname "$values")/presets" ] && [ -f "tests/cases/$chart/base.yaml" ]; then
+      preset_args+=(-f "tests/cases/$chart/base.yaml")
+    fi
     if [ -f "$(dirname "$values")/presets" ]; then
       while read -r preset; do
         [ -n "$preset" ] || continue
@@ -54,6 +61,15 @@ for chart_dir in charts/*/; do
       continue
     fi
     rendered=$((rendered + 1))
+    # A case named talos-* is the proof the chart works with no Karpenter
+    # (and no EKS): its render must not mention either.
+    case "$name" in talos*)
+      if grep -qiE 'karpenter|eks\.amazonaws|nodepool' <<< "$out"; then
+        echo "TALOS CASE MENTIONS KARPENTER/EKS: $values"
+        grep -niE 'karpenter|eks\.amazonaws|nodepool' <<< "$out" | head -5 | sed 's/^/    /'
+        fail=1
+      fi ;;
+    esac
     if [ "$mode" = update ]; then
       mkdir -p "tests/golden/$chart"
       printf '%s\n' "$out" > "$golden"

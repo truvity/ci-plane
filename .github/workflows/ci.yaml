@@ -268,7 +268,7 @@ jobs:
           )
           helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
             "${nix_builder_args[@]}" "${ca_args[@]}" \
-            --set nodeSelector."karpenter\.sh/nodepool"=ci \
+            --set nodeSelector."example\.com/pool"=ci \
             --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /dev/null
           # The v5 defaults: `nix` / ci-nix over ssh-ng, signing on the

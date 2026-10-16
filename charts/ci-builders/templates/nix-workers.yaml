@@ -1,5 +1,14 @@
 {{- if .Values.nixWorkers.enabled }}
 {{- $n := .Values.nixWorkers }}
+{{- /* nixWorkers.size (values.sizes): its resources, maxJobs and cores replace
+     the component's own. A copy, so the release-wide values stay as given. */}}
+{{- if $n.size }}
+{{- $n = deepCopy $n }}
+{{- range $k, $v := (include "ci-builders.sizeOf" (dict "root" $ "size" $n.size "name" "nixWorkers") | fromJson) }}
+{{- if has $k (list "resources" "maxJobs" "cores") }}{{ $_ := set $n $k $v }}
+{{- else }}{{ fail (printf "sizes.%s.%s does not apply to nixWorkers (it takes resources, maxJobs and cores)" $n.size $k) }}{{ end }}
+{{- end }}
+{{- end }}
 {{- /* The static host key is read ONLY on the explicit static-key path
      (hostCertificate.enabled: false). With a host certificate the
      worker generates an ephemeral key per pod and mounts no Secret. */}}
@@ -241,24 +250,14 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       {{- $sched := (index $n.scheduling $arch) | default dict }}
-      {{- if $sched.nodeSelector }}
+      {{- $placement := include "ci-builders.placement" (dict "root" $ "sched" $sched "arch" $arch) | fromJson }}
+      {{- with $placement.nodeSelector }}
       nodeSelector:
-        {{- toYaml $sched.nodeSelector | nindent 8 }}
-      {{- else }}
-      nodeSelector:
-        kubernetes.io/arch: {{ $arch }}
-        {{- with $.Values.nodeSelector }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- end }}
-      {{- if $sched.tolerations }}
-      tolerations:
-        {{- toYaml $sched.tolerations | nindent 8 }}
-      {{- else }}
-      {{- with $.Values.tolerations }}
-      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $placement.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
         - name: seed-store

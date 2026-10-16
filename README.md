@@ -81,13 +81,17 @@ helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
   --set arcVersion=<installed controller version>
 ```
 
-Pin both charts to the same version. A workflow then asks for a profile
-by its scale-set name:
+Pin both charts to the same version. The chart ships no scale set, no node
+pool and no size: you define the sizes (`sizes`), where they run
+(`nodeClasses`) and the sets (`scaleSets`), or list a tier preset that
+names them. [examples/talos](examples/talos) is a complete values pair for
+fixed nodes with no autoscaler. A workflow then asks for a set by its
+scale-set name:
 
 ```yaml
 jobs:
   build:
-    runs-on: preview-small   # or preview-medium, preview-large
+    runs-on: build   # the name of a scaleSets entry
 ```
 
 [docs/day-1-install.md](docs/day-1-install.md) covers the prerequisites,

@@ -58,11 +58,12 @@ spec:
       # BAZEL_REMOTE_PORT=tcp://ip:8080, which the binary parses as its
       # OWN --port env flag and crashes. Kill service-link envs.
       enableServiceLinks: false
-      {{- with .Values.nodeSelector }}
+      {{- $placement := include "ci-builders.placement" (dict "root" $) | fromJson }}
+      {{- with $placement.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with $placement.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

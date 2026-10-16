@@ -1,0 +1,12 @@
+# refuses: does not apply to buildkitd
+# A size carrying a Nix worker key, picked by buildkitd.
+sizes:
+  worker:
+    maxJobs: 3
+buildkitd:
+  size: worker
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

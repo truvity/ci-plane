@@ -1,0 +1,62 @@
+# arc-runners on Talos (or kind): fixed arm64 nodes, Cilium, no Karpenter,
+# no EKS. Nothing here is a default of the chart: the node classes and the
+# size taxonomy are this file's own, with names chosen for this cluster.
+#
+#   helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
+#     --version <X.Y.Z> -n arc-runners-example -f examples/talos/arc-runners.yaml
+#
+# Render-only in CI (tests/cases/arc-runners/talos): the render must not
+# mention Karpenter or EKS.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+
+# Where runners may run. Label the CI nodes yourself
+# (`kubectl label node <n> node-role.example/ci=`), or on Talos in the
+# machine config (`machine.nodeLabels`), and taint them the same way
+# (`machine.kubelet.extraConfig.registerWithTaints`).
+nodeClasses:
+  ci:
+    nodeSelector:
+      kubernetes.io/arch: arm64
+      node-role.example/ci: ""
+    tolerations:
+      - key: node-role.example/ci
+        operator: Exists
+        effect: NoSchedule
+  # Placing nothing is a class too (a one-node kind cluster):
+  anywhere: {}
+nodeClass: ci
+
+# Three sizes, named for this cluster. Any names and numbers do; size them
+# from the peak memory your jobs print.
+sizes:
+  small:
+    gomaxprocs: 2
+    maxRunners: 6
+    resources:
+      requests: {cpu: "1", memory: 4Gi}
+      limits: {cpu: "2", memory: 4Gi, ephemeral-storage: 15Gi}
+  medium:
+    gomaxprocs: 4
+    maxRunners: 4
+    resources:
+      requests: {cpu: "2", memory: 8Gi}
+      limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 30Gi}
+  large:
+    gomaxprocs: 8
+    maxRunners: 2
+    resources:
+      requests: {cpu: "4", memory: 16Gi}
+      limits: {cpu: "8", memory: 16Gi, ephemeral-storage: 60Gi}
+
+# The `runs-on` label of each set is its name.
+scaleSets:
+  lint:
+    size: small
+  build:
+    size: medium
+    minRunners: 0
+  release:
+    size: large
+    minRunners: 0

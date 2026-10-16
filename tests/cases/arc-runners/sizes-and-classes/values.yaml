@@ -1,0 +1,46 @@
+# Sizes and node classes at their edges: a size's maxRunners, a key the set
+# writes itself winning over the size's (and resources merging key by
+# key), a per-set class beating the release-wide one, a set's own
+# nodeSelector beating its class's (a set's class REPLACES the release-wide
+# placement outright), a class with an affinity, and a set
+# with neither size nor resources.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+nodeClass: shared
+nodeClasses:
+  shared:
+    nodeSelector: {example.com/pool: shared}
+    tolerations:
+      - {key: example.com/shared, operator: Exists}
+  big:
+    nodeSelector: {example.com/pool: big}
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - {key: kubernetes.io/arch, operator: In, values: [arm64]}
+sizes:
+  small:
+    gomaxprocs: 2
+    maxRunners: 5
+    resources:
+      requests: {cpu: "1", memory: 2Gi}
+      limits: {cpu: "2", memory: 2Gi, ephemeral-storage: 10Gi}
+scaleSets:
+  plain:
+    size: small
+  tuned:
+    size: small
+    maxRunners: 9
+    resources:
+      limits: {memory: 3Gi}
+  placed:
+    size: small
+    nodeClass: big
+  pinned:
+    size: small
+    nodeClass: big
+    nodeSelector: {kubernetes.io/hostname: node-1}
+  bare: {}
