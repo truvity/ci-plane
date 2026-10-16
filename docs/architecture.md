@@ -286,7 +286,7 @@ Clients, both front-ends on one Service:
 
 ```text
 nix:  substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
-go:   GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct
+go:   GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
 ```
 
 Nix (curl) and the go command both follow redirects; a runner must be

@@ -87,6 +87,24 @@ spec:
 
 ---
 # Source: ci-builders/templates/cache-redirect.yaml
+# A voluntary disruption (node drain, consolidation) may take down all
+# but the pods this keeps; rendered only with more than one replica,
+# where minAvailable: 1 would otherwise block every drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cache-redirect
+  labels:
+    app.kubernetes.io/name: cache-redirect
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache-redirect
+
+---
+# Source: ci-builders/templates/cache-redirect.yaml
 # cache-redirect: a pull-through cache for the Nix binary cache (/nix) and
 # the Go module proxy (/goproxy) whose index is an S3 bucket. A hit on a
 # large immutable object is a 302 to a presigned URL of the bucket, so the
@@ -497,6 +515,12 @@ metadata:
     app.kubernetes.io/part-of: ci-builders
 spec:
   replicas: 3
+  # Never take a ready pod away before its replacement is ready.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: cache-redirect
@@ -517,9 +541,11 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: cache-redirect
-      # Shutdown waits up to 25s for in-flight pull-throughs; an upload
-      # cut off past that is aborted, never committed half-written.
-      terminationGracePeriodSeconds: 30
+      # The preStop sleep (drainDelaySeconds) runs first, then shutdown
+      # waits up to 25s for in-flight pull-throughs; an upload cut off past
+      # that is aborted, never committed half-written. The grace period
+      # must cover both.
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532 # distroless nonroot
@@ -548,6 +574,15 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # Keep serving while the endpoint is removed from the Service
+          # (kube-proxy and the like lag a few seconds behind the pod
+          # going Terminating); only then does SIGTERM close the listener.
+          # The native sleep action needs no shell (the image has none):
+          # Kubernetes 1.30+ (beta, on by default; GA in 1.34).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
           readinessProbe:
             httpGet:
               path: /healthz

@@ -236,6 +236,27 @@
           "type": "integer",
           "minimum": 1
         },
+        "drainDelaySeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Seconds of preStop sleep before shutdown; 0 renders no hook."
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minAvailable": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
         "s3": {
           "type": "object",
           "properties": {

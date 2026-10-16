@@ -5,6 +5,14 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### cache-redirect: a rollout no longer refuses connections
+
+- **Fixed: rolling the cache-redirect Deployment made clients fail with "connection refused".** On SIGTERM the server closed its listener at once while the pod's endpoint was still programmed in the nodes' service routing for a few seconds, so a client routed to the terminating pod was refused (the go command does not fall back from `,` on a connection error, so the job failed). The pod now has a `preStop` sleep (`cacheRedirect.drainDelaySeconds`, default 10; 0 renders no hook) that keeps it serving until the endpoint is gone, and `cacheRedirect.terminationGracePeriodSeconds` rises from 30 to 45 so the sleep plus the 25s shutdown fit. The native `sleep` action (the image has no shell) needs Kubernetes 1.30+ (on by default as a beta; GA in 1.34).
+- **New: explicit rollout strategy and a PodDisruptionBudget.** The Deployment is `RollingUpdate` with `maxUnavailable: 0`, `maxSurge: 1`, so a ready pod is never removed before its replacement is ready. `cacheRedirect.podDisruptionBudget` (`enabled: true`, `minAvailable: 1`) renders a PodDisruptionBudget only when `replicas` is above 1. The `cache-redirect` and `cache-redirect-s3-compatible` goldens move accordingly.
+- **Changed (docs): the recommended `GOPROXY` is `http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct`.** The `|` makes the go command fall back to the next entry on ANY error, including a refused connection; keep the `,` before `direct`.
+
 ## v6.7.1
 
 ### cache-redirect: logged request values are single-line
