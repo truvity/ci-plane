@@ -5,15 +5,17 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.1.0
+
+### Pulumi package: `deploy/pulumi/runneridentity` v0.3.0 (breaking)
+
+- **Removed: `WithLegacyTopLevel`.** It set truvity/k8s podidentity's `LegacyTopLevel`, an alias from the URN a child had before it was wrapped in the component. A stack applied with the component holds the component URNs, so the alias resolves to nothing. Apply every stack that passes it with your current version, then drop the option: a preview shows no create or delete. Needed before truvity/k8s removes `podidentity.Args.LegacyTopLevel`. `WithArgs` can still set any podidentity field while it exists.
+
 ## v7.0.2
 
 ### Changed
 
 - **Images: Nix is installed with its seccomp filter on.** The runner and nix-worker images no longer set `filter-syscalls = false` for the Nix install step. It existed only because the arm64 half used to build under QEMU user emulation, where Nix's seccomp BPF load fails; both architectures build natively now. The baked `nix.conf` is unchanged (it never carried the setting). Pull-request CI now builds every base on a native arm64 runner too (`image-arm64`), so an arm64 regression fails before a release. The nix-worker seed step (`nix-worker-seed.sh`, a `nix copy` between two local stores at pod start) keeps its own `filter-syscalls = false`; it is not a build and was not added for QEMU.
-
-### Pulumi package: `deploy/pulumi/runneridentity` (breaking, next minor)
-
-- **Removed: `WithLegacyTopLevel`.** It set truvity/k8s podidentity's `LegacyTopLevel`, an alias from the URN a child had before it was wrapped in the component. A stack applied with the component holds the component URNs, so the alias resolves to nothing. Apply every stack that passes it with your current version, then drop the option: a preview shows no create or delete. Needed before truvity/k8s removes `podidentity.Args.LegacyTopLevel`. `WithArgs` can still set any podidentity field while it exists.
 
 ## v7.0.1
 
