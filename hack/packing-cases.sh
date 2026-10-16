@@ -17,7 +17,10 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 render() {
+  # The chart ships no scale set (v7.0.0): the cases render over the three
+  # the test base defines, which is what "every scale set" means below.
   helm template t "$here/charts/arc-runners" \
+    -f "$here/tests/cases/arc-runners/base.yaml" \
     --set githubConfigUrl=https://github.com/example \
     --set controllerServiceAccount.namespace=arc-system "$@"
 }
@@ -43,7 +46,7 @@ TERM = {
 sets = [d for d in yaml.safe_load_all(open(path))
         if d and d.get("kind") == "AutoscalingRunnerSet"]
 if len(sets) < 3:
-    sys.exit(f"{case}: expected every default scale set, found {len(sets)}")
+    sys.exit(f"{case}: expected every base scale set, found {len(sets)}")
 
 bad = []
 for s in sets:
@@ -131,7 +134,7 @@ for d in yaml.safe_load_all(sys.stdin):
         if got != want:
             sys.exit(d["metadata"]["name"] + ": caller affinity not rendered verbatim with packing off")
 if n < 3:
-    sys.exit(f"off+caller affinity: expected every default scale set, found {n}")
+    sys.exit(f"off+caller affinity: expected every base scale set, found {n}")
 print(f"off+caller affinity: {n} scale sets verbatim OK")
 ' "$work/affinity.yaml" || fail=1
 
