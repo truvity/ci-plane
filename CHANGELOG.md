@@ -5,7 +5,7 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
-## Unreleased
+## v7.0.0
 
 ### cache-redirect: a rollout no longer refuses connections
 
@@ -13,13 +13,7 @@ line is summarised in one section.
 - **New: explicit rollout strategy and a PodDisruptionBudget.** The Deployment is `RollingUpdate` with `maxUnavailable: 0`, `maxSurge: 1`, so a ready pod is never removed before its replacement is ready. `cacheRedirect.podDisruptionBudget` (`enabled: true`, `minAvailable: 1`) renders a PodDisruptionBudget only when `replicas` is above 1. The `cache-redirect` and `cache-redirect-s3-compatible` goldens move accordingly.
 - **Changed (docs): the recommended `GOPROXY` is `http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct`.** The `|` makes the go command fall back to the next entry on ANY error, including a refused connection; keep the `,` before `direct`.
 
-## v6.7.1
-
-### cache-redirect: logged request values are single-line
-
-- **Changed: request-derived values (object keys, upstream URLs) are passed through `logSafe` before they are logged.** Line breaks become spaces in the logged copy only; storage keys and lookups are untouched. The JSON log handler already escapes control characters, so there is no behaviour change; this keeps entries on one line under any handler and satisfies the code scanner's log-injection check.
-
-### Placement and sizes are data you define; no node pool is named (v7.0.0)
+### Placement and sizes are data you define; no node pool is named
 
 The presets named one platform's node pools (`ci`, `ci-stable`, `build`, `platform`, `volatile`) and the chart shipped three runner sizes. Both are now the caller's: the chart works the same on EKS with Karpenter, on Talos with fixed arm64 nodes and Cilium, and on kind.
 
@@ -29,6 +23,12 @@ The presets named one platform's node pools (`ci`, `ci-stable`, `build`, `platfo
 - **Breaking: arc-runners ships no scale sets.** `scaleSets` defaults to `{}` (it was `preview-large`, `preview-medium`, `preview-small`, so a caller's own set made four). `presets/preview.yaml` now carries those three sets, on sizes `large`, `medium`, `small`; a release that listed no preset and relied on the three must add the preset or write them (a set may be an empty block). A set without `size` or `resources` renders no `resources` block, and without `gomaxprocs` no `GOMAXPROCS` variable. `name: null` entries in `scaleSets` are skipped instead of failing.
 - **New: `presets/karpenter.yaml` (both charts), opt-in.** What was Karpenter-only in the old presets: `karpenter.sh/do-not-disrupt` (arc-runners `podAnnotations`; ci-builders `buildkitd`, `nixWorkers`, `goModproxy` `podAnnotations`) and ci-builders' `storageClassName: gp3`. Nothing else in the charts assumes Karpenter or EKS.
 - **New: examples/talos and the `talos` golden cases.** A complete render-only values pair for fixed arm64 nodes with no autoscaler, built on classes and sizes; `just golden` fails if either render mentions Karpenter, EKS or a node pool label. New cases `sizes-and-classes` (both charts), the `base.yaml` the old default sets moved to for the cases that do not list a preset, and the refusals `unknown-size`, `unknown-node-class`, `unknown-release-node-class` (arc-runners), `unknown-size`, `unknown-node-class`, `size-key-not-for-buildkitd` (ci-builders).
+
+## v6.7.1
+
+### cache-redirect: logged request values are single-line
+
+- **Changed: request-derived values (object keys, upstream URLs) are passed through `logSafe` before they are logged.** Line breaks become spaces in the logged copy only; storage keys and lookups are untouched. The JSON log handler already escapes control characters, so there is no behaviour change; this keeps entries on one line under any handler and satisfies the code scanner's log-injection check.
 
 ## v6.7.0
 
