@@ -18,3 +18,7 @@ nixBuilders:
       speedFactor: 1
       supportedFeatures: []
       mandatoryFeatures: []
+# The chart ships no scale set (v7.0.0); the assertions in ci.yaml look at a
+# runner pod, so the base has one.
+scaleSets:
+  runner: {}
