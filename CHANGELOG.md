@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### Security / Fixed
+
+- arc-runners: runner pods never automount the service-account token (previously only with nixBuilders on)
+
 ## v7.0.0
 
 ### The superseded caches are removed: `nixCache` and `goModproxy`

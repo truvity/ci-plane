@@ -621,6 +621,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""
@@ -710,6 +711,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""
@@ -799,6 +801,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""
@@ -888,6 +891,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""
@@ -977,6 +981,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""
@@ -1066,6 +1071,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/arch: arm64
         node-role.example/ci: ""

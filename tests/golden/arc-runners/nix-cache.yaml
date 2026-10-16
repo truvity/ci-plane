@@ -466,6 +466,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -548,6 +549,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -630,6 +632,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

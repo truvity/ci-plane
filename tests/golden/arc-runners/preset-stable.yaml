@@ -367,6 +367,7 @@ spec:
         karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: runner
+      automountServiceAccountToken: false
       # Pod Security `restricted`. The uid is numeric on purpose: the
       # image's USER is the NAME `runner`, which the kubelet cannot check
       # against runAsNonRoot. fsGroup is what lets the non-root init

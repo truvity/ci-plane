@@ -384,6 +384,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       hostUsers: false
       nodeSelector:
         kubernetes.io/hostname: hive-8
