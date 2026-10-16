@@ -50,13 +50,12 @@ ARG NIX_VERSION=2.35.2
 # upstream shell script buys nothing here either.
 ARG OPKSSH_VERSION=0.16.0
 
-# The in-cluster read-through cache of cache.nixos.org first, then nix's
-# default upstream as automatic fallback: cache down = slower, never
-# broken. `substituters`, NOT `extra-substituters` -- the extra- form
-# APPENDS to nix's default, so the list reads upstream-first and the
-# cache is never chosen. arc-runners' `nixCache.url` (v4.1.0) overrides
-# this without a rebuild, same as image/runner/Dockerfile.
-ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
+# The public upstream only. An in-cluster cache in front of it is set at
+# deploy time through arc-runners' `nixCache.url`, as in
+# image/runner/Dockerfile. `substituters`, NOT `extra-substituters` -- the
+# extra- form APPENDS to nix's default, so a cache named there would be
+# listed after upstream.
+ARG NIX_SUBSTITUTERS="https://cache.nixos.org/"
 
 # nix-worker-host-cert (host certificates, phase 1): signs the worker's
 # OWN SSH host key with an OpenBao SSH secrets engine, so a client's

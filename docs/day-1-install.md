@@ -21,41 +21,23 @@ Order matters: caches before runners, controller before both charts.
    `<namespace>` below. Dedicated namespaces — a general-purpose janitor
    that sweeps old releases will eventually collect a long-lived
    AutoscalingRunnerSet. The charts take the namespace from the release;
-   two things outside them still assume the maintainers' name,
-   `ci-cache`:
-   - the published runner and nix-worker images bake the Service
-     `nix-cache` in namespace `ci-cache` as their first Nix substituter.
-     Anywhere else, override it without rebuilding through arc-runners'
-     `nixCache.url` (v4.1.0), e.g.
-     `nixCache.url: http://nix-cache.<namespace>.svc.cluster.local`
+   two things outside them still assume the maintainers' name
+   `ci-cache`, or want a cache URL:
+   - the published runner and nix-worker images list only
+     `https://cache.nixos.org/` as their Nix substituter (v7.0.0; earlier
+     images baked an in-cluster name). To use the cache-redirect `/nix`
+     front-end, set arc-runners' `nixCache.url`, e.g.
+     `nixCache.url: http://cache-redirect.<namespace>.svc.cluster.local/nix`
      (renders a full `substituters = <url> https://cache.nixos.org/`
-     line into `NIX_CONFIG`, which beats the image's own nix.conf), or
-     every Nix call retries a name that does not resolve. Empty by
-     default, so an estate that already resolves the baked name (or
-     already overrides it through the general-purpose `nixConfig`) sees
-     no change from setting nothing. Un-baking the image's own default
-     is a separate, later, coordinated change — see CHANGELOG.md;
+     line into `NIX_CONFIG`, which beats the image's own nix.conf). Empty
+     by default;
    - truvity/ci-workflows' `node-cache: true` probes
      `npm-cache.ci-cache.svc` by that fixed name.
 4. Optional but recommended: a **registry pull-through cache** per
    hosting account, so image pulls are same-region and unthrottled. The
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
-5. Optional: the Go module proxy (`goModproxy.enabled: true`), a
-   caching module + sumdb proxy (`go-cache-plugin serve --modproxy`) over
-   an S3 prefix. It needs `goModproxy.s3.bucket` and `region`, the
-   runner namespaces allowed to reach it in
-   `goModproxy.networkPolicy.consumerNamespaces`, and a ServiceAccount
-   (`goModproxy.serviceAccount.name`, default `go-modproxy`) carrying
-   the pod's own object-store identity. The identity must exist BEFORE
-   the pod starts (EKS Pod Identity injects its environment at pod
-   creation). Point runners at it with
-   `GOPROXY=http://go-modproxy.<ns>.svc/mod,https://proxy.golang.org,direct`.
-   Use a comma, not a pipe: with a comma Go falls through only on
-   404/410, so a down proxy fails the job instead of silently costing
-   the cache. Module zips and Go toolchain downloads both travel through
-   it, so a cluster's egress to the public proxy shrinks to cache misses.
-   Optional, beside or instead of either proxy: `cacheRedirect`
+5. Optional: `cacheRedirect`
    (`cacheRedirect.enabled: true`), one service for the Nix cache and the
    Go module proxy whose hits on NARs and module zips are redirects to
    presigned URLs of its bucket, so the bytes flow from the object store
@@ -207,7 +189,7 @@ assumption a platform adds beyond placement:
 | chart | what `presets/karpenter.yaml` sets |
 |---|---|
 | arc-runners | `podAnnotations: {karpenter.sh/do-not-disrupt: "true"}` |
-| ci-builders | `buildkitd`, `nixWorkers` and `goModproxy` `podAnnotations` the same; `storageClassName: gp3` (EKS's EBS class) |
+| ci-builders | `buildkitd` and `nixWorkers` `podAnnotations` the same; `storageClassName: gp3` (EKS's EBS class) |
 
 An empty `storageClassName` renders no `storageClassName` field on a PVC
 at all, which Kubernetes reads as "use the cluster's default
@@ -259,8 +241,7 @@ Key values (see the chart's values.yaml for the full annotated set):
 `buildkitd.archs`, `buildkitd.scheduling.<arch>` (a `nodeClass`, or
 nodeSelector + tolerations per arch, REPLACING the default when set),
 `nixWorkers.scheduling.<arch>`, `nodeClasses`, `sizes`, `storageClassName`
-(empty by default; see "Placement and sizes" above),
-`nixCache.upstream`. A Nix worker is privileged so
+(empty by default; see "Placement and sizes" above). A Nix worker is privileged so
 its daemon can create Linux sandboxes: enabling it without selecting a
 dedicated, tainted CI/build pool is not a supported production shape.
 
@@ -367,7 +348,7 @@ for the worked example and what it renders.
 Point `runs-on` at the scale-set names (via org variables so a rename
 is one change, not N). Runners reach the caches by cluster DNS:
 `buildkitd-<arch>.<namespace>.svc:1234` (buildx `--driver remote`),
-`nix-cache.<namespace>.svc` (nix substituter),
+`cache-redirect.<namespace>.svc/nix` (nix substituter) and `/goproxy` (GOPROXY),
 `bazel-remote.<namespace>.svc:9092` (moon remote cache),
 `npm-cache.<namespace>.svc` (yarn/npm/pnpm `npmRegistryServer`, public
 packages, behind a health-probe fallback to registry.npmjs.org).

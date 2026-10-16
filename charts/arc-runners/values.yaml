@@ -108,24 +108,13 @@ nixConfig: |
 
 # When set, renders `substituters = <url> https://cache.nixos.org/` into
 # the release-wide nixConfig above (so it still beats the image's own
-# nix.conf, and upstream stays the automatic fallback). Empty by
-# default (v4.1.0), which changes NOTHING: the published image still
-# bakes its own `nix-cache` Service, in the maintainers' `ci-cache`
-# namespace, as its nix.conf default, as it always has (see
-# image/runner/Dockerfile's own ARG NIX_SUBSTITUTERS for the exact
-# string). That baked default names the maintainers' own namespace and
-# has been STALE for any OTHER estate since ci-builders 2.x stopped
-# requiring a fixed namespace -- this key is the fix for THAT estate,
-# not a change for one that already resolves it:
+# nix.conf, and upstream stays the automatic fallback). Empty by default:
+# the published image lists only cache.nixos.org, so with nothing set every
+# Nix path comes straight from upstream. Point it at the cache-redirect
+# `/nix` front-end of the ci-builders release (cacheRedirect.nix):
 #
 #   nixCache:
-#     url: http://nix-cache.<namespace>.svc.cluster.local
-#
-# Un-baking the image's own default is a SEPARATE, coordinated change
-# for a later release: every consumer that currently relies on it
-# (including the maintainers' own estate) has to set this key first, or
-# it silently loses its in-cluster cache and falls back to pulling
-# every Nix path straight from upstream. See CHANGELOG.md.
+#     url: http://cache-redirect.<namespace>.svc.cluster.local/nix
 nixCache:
   url: ""
 

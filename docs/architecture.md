@@ -266,11 +266,11 @@ namespaces reach the builders.
 
 ## cache-redirect: a hit is a redirect, not a stream
 
-The Nix cache (nginx) and the Go module proxy (go-cache-plugin) both
-stream every byte of every hit through one pod, and a pod's node network
-(on the order of 100 MiB/s sustained) is what a CI burst saturates: each
-job then crawls, however warm the cache is. Yet almost every byte they
-serve is an immutable, content-addressed file: a NAR, a module zip.
+A read-through cache that streams every byte of every hit through one
+pod is limited by that pod's node network (on the order of 100 MiB/s
+sustained), which a CI burst saturates: each job then crawls, however
+warm the cache is. Yet almost every byte such a cache serves is an
+immutable, content-addressed file: a NAR, a module zip.
 
 `cache-redirect` (image `ghcr.io/truvity/ci-plane/cache-redirect`, chart
 `cacheRedirect`, off by default) keeps the cache's index in an S3 (or

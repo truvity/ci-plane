@@ -85,7 +85,7 @@ jobs:
           # it is the only probe allowed to watch the host certificate's
           # remaining life. Matched on the exact command-line literals
           # (not "readinessProbe:" generally, which also matches
-          # nixCache/bazelRemote's unrelated probes in this same chart),
+          # bazelRemote's unrelated probes in this same chart),
           # so counts are exact regardless of nixWorkers.archs. With
           # hostCertificate enabled, the render must also carry the
           # minRemaining env var the health check reads.

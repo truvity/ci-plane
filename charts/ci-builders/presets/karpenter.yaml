@@ -18,8 +18,3 @@ buildkitd:
 nixWorkers:
   podAnnotations:
     karpenter.sh/do-not-disrupt: "true"
-goModproxy:
-  # A restart mid-job fails the jobs that meet it (GOPROXY uses a comma):
-  # off voluntary disruption. Inert while goModproxy.enabled is false.
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"

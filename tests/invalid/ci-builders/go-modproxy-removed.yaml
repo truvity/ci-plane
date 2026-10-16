@@ -1,0 +1,11 @@
+# refuses: removed `goModproxy`
+# v7.0.0 removed it; the cache-redirect front-end replaces it. Even an
+# `enabled: false` block is a caller who believes the chart still has it.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+goModproxy:
+  enabled: false

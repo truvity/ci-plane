@@ -42,12 +42,8 @@ allows=(
   '123456789012\.dkr\.ecr\.'           # the documented placeholder registry
   # A templated or placeholder namespace is how the charts NAME a Service,
   # not which one; kube-dns in kube-system is Kubernetes' own, not an
-  # estate's. The two image ARGs are known debt: the images still bake one
-  # estate's in-cluster Nix substituter by default. v4.1.0 adds a chart
-  # value (arc-runners' nixCache.url) that overrides it without a rebuild,
-  # but un-baking the DEFAULT itself is a separate, coordinated change for
-  # a later release, once every consumer has set nixCache.url explicitly.
-  '(%s|example|<namespace>|<ns>)\.svc\.cluster\.local|kube-dns\.kube-system\.svc\.cluster\.local|^image/(runner|nix-worker)/Dockerfile:[0-9]+:ARG NIX_SUBSTITUTERS='
+  # estate's.
+  '(%s|example|<namespace>|<ns>)\.svc\.cluster\.local|kube-dns\.kube-system\.svc\.cluster\.local'
   # Where Kubernetes mounts a projected token, not a parameter path.
   '/var/run/secrets/'
   ''

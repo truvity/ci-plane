@@ -15,3 +15,9 @@ false` is still a caller who believes the legacy login exists.
 {{- if hasKey ((.Values.nixWorkers | default dict).accounts | default dict) "nixremote" }}
 {{- fail "ci-builders 5.0.0 removed `nixWorkers.accounts.nixremote`: the legacy `nixremote` login (nix-store --serve) and its shim are gone from the worker image, and `nix` over ssh-ng is the only machine login. Delete the nixremote block from your values; runners connect as nixBuilders.login.user=nix, principal ci-nix, protocol ssh-ng (arc-runners 5.0.0's defaults)." }}
 {{- end }}
+{{- if hasKey .Values "nixCache" }}
+{{- fail "ci-builders 7.0.0 removed `nixCache`: the nginx read-through cache of the Nix binary cache is gone. Its replacement is the cache-redirect `/nix` front-end (`cacheRedirect.enabled: true`, `cacheRedirect.nix`); point the runners at it with arc-runners' `nixCache.url: http://cache-redirect.<namespace>.svc.cluster.local/nix`. Delete the `nixCache` block from your values (and the `nix-cache-data` PVC it left behind)." }}
+{{- end }}
+{{- if hasKey .Values "goModproxy" }}
+{{- fail "ci-builders 7.0.0 removed `goModproxy`: the Go module proxy component is gone. Its replacement is the cache-redirect `/goproxy` front-end (`cacheRedirect.enabled: true`, `cacheRedirect.goproxy`); set GOPROXY=http://cache-redirect.<namespace>.svc.cluster.local/goproxy|https://proxy.golang.org,direct. Delete the `goModproxy` block from your values." }}
+{{- end }}
