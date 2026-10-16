@@ -39,8 +39,8 @@ func narinfoFor(file string, body []byte) string {
 		"NarHash: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73\nNarSize: 0\nReferences: \nSig: cache.nixos.org-1:dGVzdA==\n"
 }
 
-// nixUpstream serves narinfo for narinfoHash and body for nar/<file>.
-func nixUpstream(t *testing.T, file string, info string, body []byte) *upstream {
+// nixUpstream serves info for narinfoHash and body for any NAR.
+func nixUpstream(t *testing.T, info string, body []byte) *upstream {
 	return newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, ".narinfo") {
 			_, _ = w.Write([]byte(info))
@@ -133,7 +133,7 @@ func TestNarinfoMissThenHitPreservesBytes(t *testing.T) {
 func TestNarMissStreamsThenRedirects(t *testing.T) {
 	body := []byte(strings.Repeat("nar bytes ", 10000))
 	file := narFile(body)
-	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	up := nixUpstream(t, narinfoFor(file, body), body)
 	f := newFixture(t, up, "-presign-ttl", "2m")
 
 	if r := f.get(t, "/nix/"+narinfoHash+".narinfo"); r.code != 200 {
@@ -188,7 +188,7 @@ func TestNarVerificationAgainstTheNarinfo(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			up := nixUpstream(t, file, tc.info, body)
+			up := nixUpstream(t, tc.info, body)
 			f := newFixture(t, up)
 			if r := f.get(t, "/nix/"+narinfoHash+".narinfo"); r.code != 200 {
 				t.Fatalf("narinfo: %d", r.code)
@@ -220,7 +220,7 @@ func TestNarVerificationAgainstTheNarinfo(t *testing.T) {
 func TestNarNameIsNotItsHash(t *testing.T) {
 	body := []byte(strings.Repeat("zstd bytes ", 5000))
 	file := narFile(body) // the name's hash is NOT the body's
-	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	up := nixUpstream(t, narinfoFor(file, body), body)
 	f := newFixture(t, up)
 
 	f.get(t, "/nix/"+narinfoHash+".narinfo")
@@ -241,7 +241,7 @@ func TestNarNameIsNotItsHash(t *testing.T) {
 func TestNarWithoutIndexIsPassedThroughNotStored(t *testing.T) {
 	body := []byte(strings.Repeat("orphan ", 1000))
 	file := narFile(body)
-	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	up := nixUpstream(t, narinfoFor(file, body), body)
 	f := newFixture(t, up)
 
 	for range 2 {
@@ -263,7 +263,7 @@ func TestNarWithoutIndexIsPassedThroughNotStored(t *testing.T) {
 func TestNarIndexSharedBetweenReplicas(t *testing.T) {
 	body := []byte(strings.Repeat("replica ", 4000))
 	file := narFile(body)
-	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	up := nixUpstream(t, narinfoFor(file, body), body)
 	a := newFixture(t, up)
 	a.get(t, "/nix/"+narinfoHash+".narinfo") // replica A sees the narinfo
 
