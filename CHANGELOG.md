@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v6.7.0
+
 ### runner: git-lfs is in the image
 
 - **New: `git-lfs` in the runner image**, so `actions/checkout` with `lfs: true` works on ARC runners as on GitHub-hosted runners (which ship it); without it the checkout failed with "Unable to locate executable file: git-lfs" (truvity/docs' release job). It counts as part of git, not as a tool devbox should deliver: the checkout action execs it before any devbox environment exists. A static release binary pinned by `GIT_LFS_VERSION` (v3.8.0, annotated for Renovate) and verified against the release's `sha256sums.asc`; `git lfs install --system` writes the filters to `/etc/gitconfig`. The `image` CI job now runs the built runner image as the `runner` user and asserts `git lfs version` and the system filters. Requires re-pinning `ciRunnerImage` to the digest of the release that carries it.
