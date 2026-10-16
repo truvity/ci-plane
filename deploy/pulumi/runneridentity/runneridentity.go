@@ -136,12 +136,6 @@ func WithNames(names podidentity.NameFunc) Option {
 	return func(a *podidentity.Args) { a.Names = names }
 }
 
-// WithLegacyTopLevel gives every child an alias from the URN it had before
-// it was wrapped in the component.
-func WithLegacyTopLevel() Option {
-	return func(a *podidentity.Args) { a.LegacyTopLevel = true }
-}
-
 // WithIgnoreAssociationTags ignores tag changes on the associations, for
 // associations adopted with tags another tool set.
 func WithIgnoreAssociationTags() Option {

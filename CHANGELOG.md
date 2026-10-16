@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### Pulumi package: `deploy/pulumi/runneridentity` (breaking, next minor)
+
+- **Removed: `WithLegacyTopLevel`.** It set truvity/k8s podidentity's `LegacyTopLevel`, an alias from the URN a child had before it was wrapped in the component. A stack applied with the component holds the component URNs, so the alias resolves to nothing. Apply every stack that passes it with your current version, then drop the option: a preview shows no create or delete. Needed before truvity/k8s removes `podidentity.Args.LegacyTopLevel`. `WithArgs` can still set any podidentity field while it exists.
+
 ## v7.0.1
 
 ### Security / Fixed
