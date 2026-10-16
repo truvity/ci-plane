@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,10 +23,45 @@ const narinfoBody = "StorePath: /nix/store/0mdqa9w1p6cmli6976v4wi0sw9r4p5pr-hell
 	"FileSize: 3\nNarHash: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73\nNarSize: 0\n" +
 	"References:  \nSig: cache.nixos.org-1:dGVzdA==\nSig: other-1:c2lnbmF0dXJl\n"
 
-// narFile names a body after its own file hash, as cache.nixos.org does.
+// narFile is a NAR's file name as cache.nixos.org really has it: NOT the
+// hash of the (compressed) body, whatever it looks like.
 func narFile(body []byte) string {
-	sum := sha256.Sum256(body)
+	sum := sha256.Sum256(append([]byte("not the body: "), body...))
 	return nix32(sum[:]) + ".nar.zst"
+}
+
+// narinfoFor is the narinfo of a NAR whose body is body: its real FileHash
+// (Nix base 32 SHA-256) and FileSize, at URL nar/<file>.
+func narinfoFor(file string, body []byte) string {
+	sum := sha256.Sum256(body)
+	return "StorePath: /nix/store/" + narinfoHash + "-go-1.27.1\nURL: nar/" + file + "\nCompression: zstd\n" +
+		"FileHash: sha256:" + nix32(sum[:]) + "\nFileSize: " + strconv.Itoa(len(body)) + "\n" +
+		"NarHash: sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73\nNarSize: 0\nReferences: \nSig: cache.nixos.org-1:dGVzdA==\n"
+}
+
+// nixUpstream serves narinfo for narinfoHash and body for nar/<file>.
+func nixUpstream(t *testing.T, file string, info string, body []byte) *upstream {
+	return newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".narinfo") {
+			_, _ = w.Write([]byte(info))
+			return
+		}
+		_, _ = w.Write(body)
+	})
+}
+
+// seedIndex writes the index record of file's narinfo into f's store, as
+// another replica would have.
+func seedIndex(t *testing.T, f *fixture, file string, info string) {
+	t.Helper()
+	rec, ok := parseNarinfo([]byte(info))
+	if !ok {
+		t.Fatal("test narinfo unparsable")
+	}
+	b, _ := json.Marshal(rec)
+	f.store.mu.Lock()
+	f.store.objs["nix/nar-index/nar/"+file+".json"] = b
+	f.store.mu.Unlock()
 }
 
 func TestNix32(t *testing.T) {
@@ -97,9 +133,12 @@ func TestNarinfoMissThenHitPreservesBytes(t *testing.T) {
 func TestNarMissStreamsThenRedirects(t *testing.T) {
 	body := []byte(strings.Repeat("nar bytes ", 10000))
 	file := narFile(body)
-	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) })
+	up := nixUpstream(t, file, narinfoFor(file, body), body)
 	f := newFixture(t, up, "-presign-ttl", "2m")
 
+	if r := f.get(t, "/nix/"+narinfoHash+".narinfo"); r.code != 200 {
+		t.Fatalf("narinfo: %d", r.code)
+	}
 	r := f.get(t, "/nix/nar/"+file)
 	if r.code != 200 || r.body != string(body) || r.readErr != nil {
 		t.Fatalf("miss: %d, %d bytes, %v", r.code, len(r.body), r.readErr)
@@ -123,32 +162,126 @@ func TestNarMissStreamsThenRedirects(t *testing.T) {
 		t.Errorf("upstream fetched %d times, want 1", n)
 	}
 	if m := f.metrics(t); !strings.Contains(m, `cache_redirect_requests_total{frontend="nix",result="redirect"} 1`) ||
-		!strings.Contains(m, `cache_redirect_upload_bytes_total{frontend="nix"} 100000`) {
+		!strings.Contains(m, `cache_redirect_upload_bytes_total{frontend="nix"} `+strconv.Itoa(len(body)+len(narinfoFor(file, body)))) {
 		t.Errorf("metrics:\n%s", m)
 	}
 }
 
-func TestNarHashMismatchIsNeverStored(t *testing.T) {
-	body := []byte("these are not the bytes the name promises")
-	file := narFile([]byte("other bytes"))
-	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) })
+func TestNarVerificationAgainstTheNarinfo(t *testing.T) {
+	body := []byte(strings.Repeat("compressed nar ", 1000))
+	file := narFile(body)
+	good := narinfoFor(file, body)
+	other := []byte(strings.Repeat("some other  nar", 1000)) // same size, other bytes
+	otherSum := sha256.Sum256(other)
+
+	for name, tc := range map[string]struct {
+		info string
+		want string // metrics line
+	}{
+		"hash mismatch": {
+			strings.Replace(good, "FileHash: sha256:"+nix32(func() []byte { s := sha256.Sum256(body); return s[:] }()), "FileHash: sha256:"+nix32(otherSum[:]), 1),
+			`cache_redirect_requests_total{frontend="nix",result="verify_failed"} 1`,
+		},
+		"size mismatch": {
+			strings.Replace(good, "FileSize: "+strconv.Itoa(len(body)), "FileSize: "+strconv.Itoa(len(body)+1), 1),
+			`cache_redirect_requests_total{frontend="nix",result="verify_failed"} 1`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			up := nixUpstream(t, file, tc.info, body)
+			f := newFixture(t, up)
+			if r := f.get(t, "/nix/"+narinfoHash+".narinfo"); r.code != 200 {
+				t.Fatalf("narinfo: %d", r.code)
+			}
+			// The client still gets every byte, cleanly.
+			r := f.get(t, "/nix/nar/"+file)
+			if r.code != 200 || r.readErr != nil || r.body != string(body) {
+				t.Fatalf("nar: %d, %d bytes, %v; the client must get the pass-through bytes", r.code, len(r.body), r.readErr)
+			}
+			if _, ok := f.store.object("nix/nar/" + file); ok {
+				t.Fatal("a NAR that does not match its narinfo was committed")
+			}
+			m := f.metrics(t)
+			if !strings.Contains(m, tc.want) {
+				t.Errorf("metrics lack %s:\n%s", tc.want, m)
+			}
+			if strings.Contains(m, `result="upstream_error"} 1`) {
+				t.Errorf("a verify failure was counted as an upstream error:\n%s", m)
+			}
+			// Nothing was remembered as stored: the next request fetches again.
+			f.get(t, "/nix/nar/"+file)
+			if n := up.count("/nar/" + file); n != 2 {
+				t.Errorf("upstream fetched %d times, want 2", n)
+			}
+		})
+	}
+}
+
+func TestNarNameIsNotItsHash(t *testing.T) {
+	body := []byte(strings.Repeat("zstd bytes ", 5000))
+	file := narFile(body) // the name's hash is NOT the body's
+	up := nixUpstream(t, file, narinfoFor(file, body), body)
 	f := newFixture(t, up)
 
-	r := f.get(t, "/nix/nar/"+file)
-	if r.readErr == nil && r.code == 200 {
-		t.Fatal("a body that does not hash to its name was answered as a clean 200")
+	f.get(t, "/nix/"+narinfoHash+".narinfo")
+	if r := f.get(t, "/nix/nar/"+file); r.code != 200 || r.readErr != nil || r.body != string(body) {
+		t.Fatalf("miss: %d %v", r.code, r.readErr)
+	}
+	if got, ok := f.store.object("nix/nar/" + file); !ok || string(got) != string(body) {
+		t.Fatal("a NAR whose narinfo matches was not committed")
+	}
+	if r := f.get(t, "/nix/nar/"+file); r.code != http.StatusFound {
+		t.Fatalf("next request: %d, want a 302", r.code)
+	}
+	if _, ok := f.store.object("nix/nar-index/nar/" + file + ".json"); !ok {
+		t.Errorf("no index record in the store; keys %v", f.store.keys())
+	}
+}
+
+func TestNarWithoutIndexIsPassedThroughNotStored(t *testing.T) {
+	body := []byte(strings.Repeat("orphan ", 1000))
+	file := narFile(body)
+	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	f := newFixture(t, up)
+
+	for range 2 {
+		r := f.get(t, "/nix/nar/"+file)
+		if r.code != 200 || r.readErr != nil || r.body != string(body) {
+			t.Fatalf("%d %v", r.code, r.readErr)
+		}
 	}
 	if keys := f.store.keys(); len(keys) != 0 {
 		t.Fatalf("stored %v", keys)
 	}
-
-	// The check can be turned off for an upstream that names NARs otherwise.
-	f = newFixture(t, up, "-nix-verify-nar-hash=false")
-	if r := f.get(t, "/nix/nar/"+file); r.code != 200 || r.readErr != nil {
-		t.Fatalf("unverified: %d %v", r.code, r.readErr)
+	m := f.metrics(t)
+	if !strings.Contains(m, `cache_redirect_requests_total{frontend="nix",result="no_index"} 2`) ||
+		!strings.Contains(m, `cache_redirect_requests_total{frontend="nix",result="upstream_error"} 0`) {
+		t.Errorf("metrics:\n%s", m)
 	}
-	if _, ok := f.store.object("nix/nar/" + file); !ok {
-		t.Error("unverified NAR not stored")
+}
+
+func TestNarIndexSharedBetweenReplicas(t *testing.T) {
+	body := []byte(strings.Repeat("replica ", 4000))
+	file := narFile(body)
+	up := nixUpstream(t, file, narinfoFor(file, body), body)
+	a := newFixture(t, up)
+	a.get(t, "/nix/"+narinfoHash+".narinfo") // replica A sees the narinfo
+
+	b := newFixture(t, up) // replica B: fresh memory, the same bucket
+	b.store.mu.Lock()
+	a.store.mu.Lock()
+	b.store.objs = a.store.objs
+	a.store.mu.Unlock()
+	b.store.mu.Unlock()
+
+	if r := b.get(t, "/nix/nar/"+file); r.code != 200 || r.readErr != nil || r.body != string(body) {
+		t.Fatalf("replica B miss: %d %v", r.code, r.readErr)
+	}
+	if _, ok := b.store.object("nix/nar/" + file); !ok {
+		t.Fatal("replica B did not commit the NAR from replica A's index record")
+	}
+	if r := a.get(t, "/nix/nar/"+file); r.code != http.StatusFound {
+		t.Errorf("replica A after B's commit: %d, want 302", r.code)
 	}
 }
 
@@ -157,6 +290,7 @@ func TestTruncatedUpstreamIsNeverCommitted(t *testing.T) {
 	file := narFile(body)
 	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) { truncate(w, body, 1000) })
 	f := newFixture(t, up)
+	seedIndex(t, f, file, narinfoFor(file, body))
 
 	for _, path := range []string{"/nix/nar/" + file, "/nix/" + narinfoHash + ".narinfo"} {
 		r := f.get(t, path)
@@ -167,8 +301,10 @@ func TestTruncatedUpstreamIsNeverCommitted(t *testing.T) {
 			t.Errorf("%s: truncated body ended cleanly (%d bytes); the client must see the break", path, len(r.body))
 		}
 	}
-	if keys := f.store.keys(); len(keys) != 0 {
-		t.Fatalf("a truncated object was committed: %v", keys)
+	for _, k := range f.store.keys() {
+		if !strings.HasPrefix(k, "nix/nar-index/") {
+			t.Fatalf("a truncated object was committed: %v", f.store.keys())
+		}
 	}
 	// Nothing remembered: the next request tries upstream again.
 	f.get(t, "/nix/nar/"+file)
@@ -193,6 +329,7 @@ func TestConcurrentMissesShareOneFetch(t *testing.T) {
 		_, _ = w.Write(body)
 	})
 	f := newFixture(t, up)
+	seedIndex(t, f, file, narinfoFor(file, body))
 	var joined counter
 	f.cache.onFollow = joined.inc
 

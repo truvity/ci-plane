@@ -18,9 +18,11 @@ const (
 	resultNotFound      = "not_found"      // 404/410: upstream's, remembered, or a path no front-end serves
 	resultUpstreamError = "upstream_error" // upstream failed: 502
 	resultStoreError    = "store_error"    // the store failed (a 403 above all): 502
+	resultVerifyFailed  = "verify_failed"  // a NAR's body is whole but not the size/FileHash its narinfo says: served, not stored
+	resultNoIndex       = "no_index"       // a NAR no narinfo of ours announced: passed through, not stored
 )
 
-var allResults = []string{resultHit, resultRedirect, resultMiss, resultNotFound, resultUpstreamError, resultStoreError}
+var allResults = []string{resultHit, resultRedirect, resultMiss, resultNotFound, resultUpstreamError, resultStoreError, resultVerifyFailed, resultNoIndex}
 
 // upstreamBuckets are the histogram bounds, in seconds, of the time to
 // upstream response headers.
@@ -104,7 +106,7 @@ func (m *Metrics) Write(w io.Writer) {
 	}
 
 	head("cache_redirect_requests_total", "counter",
-		"Requests by front-end and result (hit, redirect, miss, not_found, upstream_error, store_error).")
+		"Requests by front-end and result (hit, redirect, miss, not_found, upstream_error, store_error, verify_failed, no_index).")
 	for _, k := range sortedKeys2(m.requests) {
 		_, _ = fmt.Fprintf(w, "cache_redirect_requests_total{frontend=%q,result=%q} %d\n", k[0], k[1], m.requests[k])
 	}

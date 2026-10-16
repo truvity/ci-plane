@@ -7,6 +7,10 @@ line is summarised in one section.
 
 ## Unreleased
 
+### cache-redirect: NARs are now cached (verified against their narinfo)
+
+- **Fixed: the Nix front-end never stored a NAR.** It verified the body against the hash in the NAR's file name, which on cache.nixos.org is not the hash of the compressed body, so every NAR was streamed through and discarded (and counted as `upstream_error`). The file-name check is removed (and with it the `-nix-verify-nar-hash` flag). Serving a narinfo now records its `URL`, `FileHash` and `FileSize` in an index record at `<nix prefix>nar-index/<URL path>.json` in the bucket (plus memory; replicas share it through the bucket). A NAR miss is committed only when the body's size and SHA-256 match the record; a mismatch is served but not stored, and a NAR with no record (requested without a narinfo through this cache) is passed through and not stored. New `cache_redirect_requests_total` results: `verify_failed` and `no_index`, never `upstream_error`. A truncated body still aborts as before. See docs/architecture.md ("cache-redirect").
+
 ## v6.6.0
 
 ### cache-redirect: a Nix and Go cache whose hits are redirects (`cacheRedirect`)
