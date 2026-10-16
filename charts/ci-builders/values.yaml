@@ -392,89 +392,6 @@ nixWorkers:
     arm64: {}
     amd64: {}
 
-nixCache:
-  # Transparent read-through cache of the nix upstream, consumed as an
-  # ordinary HTTP SUBSTITUTER (not a forward proxy). Runners list this
-  # service before the upstream in nix.conf; pod down = fall through:
-  # slower, never broken.
-  enabled: true
-  upstream: cache.nixos.org
-  # In-cluster resolver for the upstream's rotating CDN IPs.
-  resolver: kube-dns.kube-system.svc.cluster.local
-  size: 30Gi
-  # nginx max_size — keep ~2Gi under `size` for temp files and
-  # eviction lag.
-  maxSize: 28g
-  image:
-    registry: docker.io
-    repository: library/nginx
-    # renovate: datasource=docker depName=nginx
-    tag: 1.31.6-alpine
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      memory: 1Gi
-
-goModproxy:
-  # go-cache-plugin `serve` — a caching Go module + sumdb proxy backed
-  # by an S3 prefix. Runs the RUNNER IMAGE (it bakes the binary).
-  # Needs object-store access: on AWS that is the ServiceAccount's own
-  # identity (pod identity / IRSA, estate-side wiring); on a store with no
-  # such mechanism it is `existingSecret` below. Disabled by default for
-  # that reason.
-  enabled: false
-  s3:
-    bucket: ""
-    region: ""
-    keyPrefix: modcache
-    # S3-COMPATIBLE STORES. Empty keeps the AWS endpoint, so nothing
-    # changes for an AWS caller. go-cache-plugin has understood
-    # --s3-endpoint-url all along; this chart simply never passed it,
-    # which made the module proxy AWS-only by omission rather than by
-    # decision.
-    #
-    # Cloudflare R2: endpoint https://<account>.r2.cloudflarestorage.com
-    # with region "auto" — R2 serves one region and rejects a
-    # bucket-location lookup, which go-cache-plugin skips entirely when
-    # region is set.
-    endpoint: ""
-    # Address the bucket as endpoint/bucket/key rather than
-    # bucket.endpoint/key. A property of the store's certificate — does
-    # its wildcard cover a bucket subdomain? — not of the endpoint, so it
-    # is its own switch.
-    pathStyle: false
-    # Static credentials for a store with no pod identity, as
-    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (and optionally
-    # AWS_SESSION_TOKEN) in an existing Secret. Empty keeps the pod's
-    # ambient identity, which is the right default on AWS: asking for keys
-    # there would be asking for the thing IRSA exists to remove.
-    existingSecret: ""
-  sumdb: sum.golang.org
-  serviceAccount:
-    create: true
-    name: go-modproxy
-    annotations: {}
-  stagingSize: 10Gi
-  # Pod annotations (a node-consolidation guard, if your autoscaler has one). A proxy
-  # restart mid-job fails the jobs that hit it when GOPROXY uses a comma,
-  # so an estate that cares keeps the single replica off voluntary
-  # disruption.
-  podAnnotations: {}
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      memory: 1Gi
-
-  networkPolicy:
-    # Only listed namespaces may reach the proxy. REQUIRED while the
-    # proxy and the policy are on (see buildkitd.networkPolicy).
-    enabled: true
-    consumerNamespaces: []
-
 cacheRedirect:
   # cache-redirect: a pull-through cache for the Nix binary cache and the
   # Go module proxy that keeps its index in an S3 (or S3-compatible) bucket
@@ -513,7 +430,7 @@ cacheRedirect:
     region: ""
     # S3-COMPATIBLE STORES: the endpoint URL, and whether to address the
     # bucket as endpoint/bucket/key (pathStyle) -- the same two switches as
-    # goModproxy.s3. Empty endpoint: AWS.
+    # the `s3` block of the earlier module proxy. Empty endpoint: AWS.
     endpoint: ""
     pathStyle: false
     # Static credentials for a store with no pod identity, as

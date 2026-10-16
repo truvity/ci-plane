@@ -157,7 +157,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: runner-nix-config-c4cde62bf206
+  name: runner-nix-config-020cffd14f05
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
@@ -170,7 +170,7 @@ data:
     filetransfer-retry-jitter = true
     connect-timeout = 30
     stalled-download-timeout = 300
-    substituters = http://nix-cache.example.svc.cluster.local https://cache.nixos.org/
+    substituters = http://cache-redirect.example.svc.cluster.local/nix https://cache.nixos.org/
     
 immutable: true
 
@@ -486,7 +486,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-c4cde62bf206
+                  name: runner-nix-config-020cffd14f05
                   key: nix.conf
           resources:
             limits:
@@ -568,7 +568,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-c4cde62bf206
+                  name: runner-nix-config-020cffd14f05
                   key: nix.conf
           resources:
             limits:
@@ -650,7 +650,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-c4cde62bf206
+                  name: runner-nix-config-020cffd14f05
                   key: nix.conf
           resources:
             limits:

@@ -351,7 +351,7 @@
       "properties": {
         "url": {
           "type": "string",
-          "description": "When set, becomes the first entry of a full `substituters = <url> https://cache.nixos.org/` line rendered into NIX_CONFIG. Empty default: the image's own baked cache.nixos.org-only substituter list stands."
+          "description": "When set, becomes the first entry of a full `substituters = <url> https://cache.nixos.org/` line rendered into NIX_CONFIG. Empty default: the image's own cache.nixos.org-only substituter list stands."
         }
       }
     },

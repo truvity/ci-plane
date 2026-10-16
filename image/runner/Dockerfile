@@ -11,29 +11,11 @@
 # it before any devbox exists; D627). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
 # per job from the repo's own devbox.json through the nix cache.
 # Repo-specific OR cluster-specific content in this image is a bug
-# (builder registration lives in workflows, not here). The one known
-# debt to that rule is the substituters line near the bottom: it names
-# an in-cluster nix cache, which is cluster-shaped. It is a build ARG
-# (NIX_SUBSTITUTERS) so a fleet building its own image sets its own; the
-# default is unchanged.
-#
-# IT IS NOT FREE ON A CLUSTER WITHOUT THAT CACHE, which an earlier
-# version of this comment claimed ("harmless elsewhere"). If the name
-# does not resolve, nix retries before falling through -- measured on a
-# consumer cluster, eight attempts with the runners chart's backoff:
-#
-#   Could not resolve host: nix-cache.<namespace>.svc.cluster.local;
-#   retrying in 4281 ms (attempt 1/8) ... 11382 ... 36723 ... 58570
-#
-# Minutes per job, on every nix invocation. Consumers of the PUBLISHED
-# image override it without rebuilding: arc-runners delivers nixConfig
-# as NIX_CONFIG, which beats this file. v4.1.0 adds a dedicated chart
-# value for exactly that override, `nixCache.url` -- unset by default,
-# so this baked default (and every existing consumer's behaviour) is
-# unchanged; see CHANGELOG.md and docs/day-1-install.md. Un-baking this
-# default itself is a SEPARATE, coordinated change for a later release,
-# once every consumer that relies on it (the maintainers' own estate
-# included) has set `nixCache.url` explicitly first.
+# (builder registration lives in workflows, not here). The substituter list
+# near the bottom is a build ARG (NIX_SUBSTITUTERS) and names only the
+# public upstream: a cluster-local cache is a deploy-time choice, made
+# without a rebuild through arc-runners' `nixCache.url` (which delivers
+# nixConfig as NIX_CONFIG, and that beats this file).
 #
 # Multi-arch: built as a manifest list (amd64 + arm64) by
 # .github/workflows/release.yaml on a v* tag; consumers pin by DIGEST
@@ -58,13 +40,13 @@
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
 ARG RUNNER_VERSION=2.338.0
 
-# The nix substituter list baked into the image. Default unchanged, so a
-# rebuild produces what it always did; a fleet whose cache lives
-# elsewhere overrides it here rather than patching the file, OR, without
-# a rebuild, through arc-runners' `nixCache.url` (v4.1.0). Name the
-# FULL list -- the `extra-` form appends to nix's default and the cache
-# is then never chosen (155 GB/day from upstream, measured).
-ARG NIX_SUBSTITUTERS="http://nix-cache.ci-cache.svc.cluster.local https://cache.nixos.org/"
+# The nix substituter list baked into the image: the public upstream only,
+# so the image names nothing cluster-shaped. An in-cluster cache is set at
+# deploy time through arc-runners' `nixCache.url` (no rebuild); a fleet
+# building its own image may override the ARG instead. Name the FULL list
+# -- the `extra-` form appends to nix's default and a cache listed there
+# is then never chosen.
+ARG NIX_SUBSTITUTERS="https://cache.nixos.org/"
 
 # PINNED, and it must MATCH image/nix-worker/Dockerfile exactly.
 #
@@ -304,19 +286,16 @@ ENV USER=runner \
 
 # Single-user nix owned by the runner user (no daemon — containers have
 # no systemd; the official installer's --no-daemon mode is the proven
-# in-image shape). Substituters: the in-cluster read-through cache of
-# cache.nixos.org first (nginx, ci-builders' nixCache), then nix's
-# default upstream as automatic
-# fallback: cache down = slower, never broken.
+# in-image shape). Substituters: cache.nixos.org by default; a cache in
+# front of it (the cache-redirect `/nix` front-end) is set through
+# arc-runners' `nixCache.url`, which lists it first. A cache down = slower,
+# never broken, because upstream stays in the list.
 #
 # `substituters`, NOT `extra-substituters`: the extra- form APPENDS to
-# nix's default (cache.nixos.org), so the list read upstream-first and
-# the cache was never chosen — runners pulled ~155 GB/day straight
-# from Fastly while the nginx cache sat idle. Naming the
-# full list is what puts the cache first. Order alone is not enough
-# either: nix ranks substituters by the Priority in each
-# nix-cache-info, so the proxy also advertises Priority 10 against
-# upstream's 40 (ci-builders chart).
+# nix's default (cache.nixos.org), so a cache named there would be listed
+# after upstream. Order alone is not enough either: nix ranks substituters
+# by the Priority in each nix-cache-info, and cache-redirect advertises a
+# Priority below upstream's 40 (`cacheRedirect.nix.priority`).
 #
 # The S3 push cache is retired with this — and with it the
 # require-sigs=false it forced: everything now originates upstream,

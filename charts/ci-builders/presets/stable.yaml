@@ -2,8 +2,8 @@
 # before your own values (Argo CD: `helm.valueFiles:
 # [presets/stable.yaml]`). A later values file wins key by key.
 #
-# Shape: pull-through caches only (no bazel-remote, no npm cache), the
-# nix cache sized for its measured working set, and buildkitd per
+# Shape: pull-through caches only (no bazel-remote, no npm cache) and
+# buildkitd per
 # architecture on a pool it shares with other workloads. The builders
 # share small nodes, so the chart's own memory limit stays: a limit above
 # the node would turn a cgroup OOM into node pressure. The preset names no
@@ -27,13 +27,6 @@ buildkitd:
       nodeClass: builders-arm64
     amd64:
       nodeClass: builders-amd64
-nixCache:
-  resources:
-    requests:
-      cpu: 250m
-      memory: 1100Mi
-    limits:
-      memory: 1536Mi
 bazelRemote:
   enabled: false
 npmCache:
