@@ -102,52 +102,137 @@ Order matters: caches before runners, controller before both charts.
    (`nixBuilders.knownHosts.existingSecret`) for both worker Service
    FQDNs.
 
-## Values an AWS/Karpenter estate sets
+## Placement and sizes: node classes and sizes
 
-Neither chart bakes in a storage class, a toleration or a scheduling
-annotation any more (component contract C13: estate facts are inputs,
-never defaults). Before v4.0.0 these rendered unconditionally as
-Truvity's own AWS/Karpenter shape; now each is empty or absent until you
-set it, and the chart works with each left empty. What Truvity's own
-fleet sets explicitly:
+Neither chart knows a node pool, a label, a taint or a runner size of any
+platform. Two maps, which you define, carry them.
 
-| chart | value | what an AWS/Karpenter estate sets |
+### Node classes: where a pod goes
+
+`nodeClasses` maps a name you choose to a `nodeSelector`, `tolerations`
+and (arc-runners) `affinity`. Everything else refers to the name:
+`nodeClass` (the whole release), `scaleSets.<name>.nodeClass`
+(arc-runners), `buildkitd.scheduling.<arch>.nodeClass` and
+`nixWorkers.scheduling.<arch>.nodeClass` (ci-builders). The tier presets
+refer to class names only:
+
+| chart | preset | class names it refers to |
 |---|---|---|
-| ci-builders | `storageClassName` | `gp3` |
-| ci-builders | `buildkitd.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
-| ci-builders | `nixWorkers.podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
-| arc-runners | `tolerations` | `[{key: arch, operator: Exists}, {key: ci, value: "true", effect: NoSchedule}]` |
-| arc-runners | `podAnnotations` | `{karpenter.sh/do-not-disrupt: "true"}` |
-| arc-runners | `listenerTolerations` | `[{key: arch, operator: Exists}]` |
+| arc-runners | `presets/preview.yaml` | `preview-runners` |
+| arc-runners | `presets/stable.yaml` | `stable-runners` |
+| ci-builders | `presets/preview.yaml`, `presets/stable.yaml` | `builders-arm64`, `builders-amd64`, `cache-plane` |
+| ci-builders | `presets/nix-workers.yaml` | `nix-workers-arm64`, `nix-workers-amd64` |
+
+A class a preset or a values file names but you did not define is a render
+error, so a typo cannot schedule runners anywhere. A class that places
+nothing is defined empty (`cache-plane: {}`). The chart adds
+`kubernetes.io/arch` to a builder's selector itself, so a class carries
+the pool, not the architecture.
+
+- **Talos, kind, fixed nodes.** Map a class to labels you put on the
+  nodes (Talos: `machine.nodeLabels`, and `registerWithTaints` for a taint),
+  or to nothing. [examples/talos](../examples/talos) is a complete
+  arc-runners and ci-builders values pair; CI renders both and fails if the
+  render mentions Karpenter or EKS.
+- **EKS with Karpenter or Auto Mode.** Map a class to the pool's label and
+  taint, e.g. `nodeClasses.preview-runners.nodeSelector:
+  {karpenter.sh/nodepool: <pool>}`, and list `presets/karpenter.yaml`.
+
+An explicit release-wide `nodeSelector` / `tolerations` / `affinity`, when
+not empty, wins over the release-wide class's own for that one key. A scale
+set's own `nodeClass` replaces the release-wide placement outright; a
+`nodeSelector`, `tolerations` or `affinity` written on the set wins over its
+class's.
+
+### Sizes: how big a runner or a builder is
+
+`sizes` maps a name you choose to what a size means; the chart ships none
+and its schema requires none. For arc-runners a size is `gomaxprocs`,
+`resources` (requests and limits, the ephemeral-storage limit included) and
+`maxRunners`, and a scale set picks one with `size:`. For ci-builders it is
+`resources` and `maxParallelism` (buildkitd) or `resources`, `maxJobs` and
+`cores` (nixWorkers), picked with `buildkitd.size` / `nixWorkers.size`.
+
+An example taxonomy for arc-runners (any names, any numbers: size them from
+the peak memory your jobs print, with memory request equal to limit):
+
+```yaml
+sizes:
+  small:                  # linters, small tests
+    gomaxprocs: 2
+    maxRunners: 40
+    resources:
+      requests: {cpu: "1", memory: 6Gi}
+      limits: {cpu: "2", memory: 6Gi, ephemeral-storage: 20Gi}
+  medium:                 # a typical Go or JS build
+    gomaxprocs: 4
+    maxRunners: 18
+    resources:
+      requests: {cpu: "2", memory: 14Gi}
+      limits: {cpu: "4", memory: 14Gi, ephemeral-storage: 30Gi}
+  large:                  # cold monorepo builds
+    gomaxprocs: 4
+    maxRunners: 12
+    resources:
+      requests: {cpu: "2", memory: 24Gi}
+      limits: {cpu: "4", memory: 24Gi, ephemeral-storage: 40Gi}
+scaleSets:
+  lint: {size: small}
+  build: {size: medium, minRunners: 0}
+```
+
+A key a scale set writes itself wins over its size's (`resources` merge key
+by key). The tier presets refer to the sizes `small`, `medium` and `large`
+(`presets/preview.yaml`) and `large` (`presets/stable.yaml`); define them or
+write your own `scaleSets`. In ci-builders a size REPLACES the component's own
+value for each key it sets, because the chart's defaults for those keys
+cannot be told from yours.
+
+### Moving from the v6 presets
+
+v6's presets carried a Karpenter pool, its taint and the sizes. v7's carry
+names. To keep v6's render byte for byte: state the old pool as a class and
+the old numbers as sizes (the tables above name them), and list
+`presets/karpenter.yaml` for `karpenter.sh/do-not-disrupt` (and, for
+ci-builders, `storageClassName: gp3`). The chart's three `preview-*` scale
+sets are no longer a default: they come with `presets/preview.yaml`, or
+you write them. The release's `scaleSets` was a map with three inherited
+entries; it is now empty, so nothing needs deleting with null.
+
+### The Karpenter preset
+
+`presets/karpenter.yaml` (one per chart) is the opt-in for the one
+assumption a platform adds beyond placement:
+
+| chart | what `presets/karpenter.yaml` sets |
+|---|---|
+| arc-runners | `podAnnotations: {karpenter.sh/do-not-disrupt: "true"}` |
+| ci-builders | `buildkitd`, `nixWorkers` and `goModproxy` `podAnnotations` the same; `storageClassName: gp3` (EKS's EBS class) |
 
 An empty `storageClassName` renders no `storageClassName` field on a PVC
 at all, which Kubernetes reads as "use the cluster's default
 StorageClass" — not the same as an explicit empty string, which
-Kubernetes reads as "no class". A second, non-AWS estate sets its own
-storage class and its own tolerations instead; neither of these has a
-chart default to fall back on.
+Kubernetes reads as "no class".
 
 ### Presets: the same inputs, as opt-in files
 
-Instead of writing those values out, an AWS/Karpenter estate can list a
-tier preset shipped inside each chart. They are plain values files under
-`presets/`, so Argo CD takes them as `helm.valueFiles` (with `helm.valuesObject`
-after them for the estate's own facts, which win) and Helm as `-f`:
+Tier presets are plain values files under `presets/`, so Argo CD takes them
+as `helm.valueFiles` (with `helm.valuesObject` after them for the estate's
+own facts, which win) and Helm as `-f`:
 
 | chart | preset | what it sets |
 |---|---|---|
-| arc-runners | `presets/preview.yaml` | pool `ci`, fairness limit 16, tolerations, `do-not-disrupt`; the chart's three preview profiles stay |
-| arc-runners | `presets/stable.yaml` | pool `ci-stable`, one fat cold `stable` set (the preview profiles removed), tolerations, `do-not-disrupt` |
+| arc-runners | `presets/preview.yaml` | fairness limit 16, class `preview-runners`, three scale sets (`preview-large`/`-medium`/`-small`) on sizes `large`/`medium`/`small` |
+| arc-runners | `presets/stable.yaml` | class `stable-runners`, one fat cold `stable` set on size `large` |
 | arc-runners | `presets/nix-builders.yaml` | the Nix remote builders on, without the estate's hosts, CA and OpenBao routing |
-| ci-builders | `presets/preview.yaml` | buildkitd on a `build` pool, 10Gi, `maxParallelism`, all caches on |
-| ci-builders | `presets/stable.yaml` | buildkitd on `platform`/`volatile`, pull-through caches only, a sized nix cache |
+| arc-runners, ci-builders | `presets/karpenter.yaml` | the Karpenter assumptions above; opt-in |
+| ci-builders | `presets/preview.yaml` | buildkitd per arch on classes `builders-arm64`/`-amd64`, 10Gi, `maxParallelism`, all caches on |
+| ci-builders | `presets/stable.yaml` | buildkitd on the same classes, pull-through caches only, a sized nix cache |
 | ci-builders | `presets/nix-workers.yaml` | the persistent Nix workers on, CI-only login, host certificates |
 
 A preset holds no registry, organization, CA key, OpenBao address,
 namespace or bucket: those stay the caller's values, and the chart still
-refuses to render without the ones it requires. Pool names are the
-conventional ones; a differently named pool is an override of
-`nodeSelector`/`tolerations`/`scheduling`, which replace.
+refuses to render without the ones it requires.
 
 ## Install the cache plane
 
@@ -171,10 +256,10 @@ rendering it. List your runner namespaces, or set that component's
 `networkPolicy.enabled: false`.
 
 Key values (see the chart's values.yaml for the full annotated set):
-`buildkitd.archs`, `buildkitd.scheduling.<arch>` (nodeSelector +
-tolerations per arch, REPLACING the default when set),
-`nixWorkers.scheduling.<arch>`, `storageClassName` (empty by default —
-see "Values an AWS/Karpenter estate sets" above),
+`buildkitd.archs`, `buildkitd.scheduling.<arch>` (a `nodeClass`, or
+nodeSelector + tolerations per arch, REPLACING the default when set),
+`nixWorkers.scheduling.<arch>`, `nodeClasses`, `sizes`, `storageClassName`
+(empty by default; see "Placement and sizes" above),
 `nixCache.upstream`. A Nix worker is privileged so
 its daemon can create Linux sandboxes: enabling it without selecting a
 dedicated, tainted CI/build pool is not a supported production shape.
@@ -248,9 +333,8 @@ half of).
   removes the cold-start window that upstream ARC#4307 turns into a
   permanent stall.
 - Run CI pools on-demand, not spot: an estate that sets `podAnnotations`
-  to `karpenter.sh/do-not-disrupt: "true"` (see "Values an AWS/Karpenter
-  estate sets" above; empty by default) stops consolidation, not
-  reclaims.
+  to `karpenter.sh/do-not-disrupt: "true"` (`presets/karpenter.yaml`;
+  empty by default) stops consolidation, not reclaims.
 - Runners prefer nodes that already run runners, across every scale
   set and organization (`packing`, on by default). The same annotation
   is why packing matters: without it, nothing can repack runners after

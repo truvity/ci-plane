@@ -115,6 +115,36 @@
     "storageClassName": {
       "type": "string"
     },
+    "nodeClass": {
+      "type": "string",
+      "description": "Name of a class under nodeClasses; the placement of every component that has no placement of its own."
+    },
+    "nodeClasses": {
+      "type": "object",
+      "description": "Placement classes you define: name -> nodeSelector / tolerations.",
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+          "tolerations": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    },
+    "sizes": {
+      "type": "object",
+      "description": "Builder sizes you define: name -> resources / maxParallelism (buildkitd) / maxJobs, cores (nixWorkers).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resources": {"type": "object"},
+          "maxParallelism": {"type": "integer", "minimum": 1},
+          "maxJobs": {"type": "integer", "minimum": 1},
+          "cores": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
     "buildkitd": {
       "type": "object",
       "properties": {

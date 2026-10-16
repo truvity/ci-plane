@@ -4,24 +4,31 @@
 # A values file you pass later wins key by key, so every number below is
 # a default for this tier, never a lock.
 #
-# Shape: the chart's three warm-ish profiles (preview-large/medium/small,
-# from values.yaml) with a wide per-set fairness limit, scheduled on an
-# AWS/Karpenter pool named `ci` whose nodes carry the matching `ci`
-# taint. A different pool name is an override of nodeSelector and
-# tolerations, both of which REPLACE (a map or list has no merge).
-# Estate facts -- the organization, the registry, the runner
-# ServiceAccount, the nix builders -- are never in a preset.
+# Shape: three scale sets (preview-large / preview-medium / preview-small)
+# and a wide per-set fairness limit. The preset names no node pool, no
+# label and no number of a platform; it refers to NAMES that you define in
+# your own values:
+#
+#   nodeClasses.preview-runners    where the runners go (nodeSelector,
+#                                  tolerations, affinity; `{}` for
+#                                  nowhere in particular)
+#   sizes.large, sizes.medium, sizes.small
+#                                  their requests/limits, GOMAXPROCS and
+#                                  max runners (an example taxonomy is in
+#                                  docs/day-1-install.md)
+#
+# The chart refuses to render with a name undefined. A different class
+# name is an override of `nodeClass`; a differently named set is your own
+# `scaleSets` entry (delete these with null, in a values file). Estate
+# facts -- the organization, the registry, the runner ServiceAccount, the
+# nix builders -- are never in a preset. A platform's own pod annotations
+# are not either: see presets/karpenter.yaml.
 maxRunners: 16
-nodeSelector:
-  karpenter.sh/nodepool: ci
-tolerations:
-  - key: arch
-    operator: Exists
-  - key: ci
-    value: "true"
-    effect: NoSchedule
-listenerTolerations:
-  - key: arch
-    operator: Exists
-podAnnotations:
-  karpenter.sh/do-not-disrupt: "true"
+nodeClass: preview-runners
+scaleSets:
+  preview-large:
+    size: large
+  preview-medium:
+    size: medium
+  preview-small:
+    size: small

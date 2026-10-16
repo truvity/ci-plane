@@ -4,3 +4,27 @@ buildkitd:
 npmCache:
   networkPolicy:
     consumerNamespaces: [arc-runners-example]
+
+# The estate facts the preset refers to by name: three pools of an
+# AWS/Karpenter fleet (listed with the karpenter preset).
+nodeClasses:
+  cache-plane:
+    tolerations:
+      - key: arch
+        operator: Exists
+  builders-arm64:
+    nodeSelector:
+      karpenter.sh/nodepool: build
+      karpenter.sh/capacity-type: on-demand
+    tolerations:
+      - key: build
+        value: "true"
+        effect: NoSchedule
+  builders-amd64:
+    nodeSelector:
+      karpenter.sh/nodepool: build
+      karpenter.sh/capacity-type: on-demand
+    tolerations:
+      - key: build
+        value: "true"
+        effect: NoSchedule

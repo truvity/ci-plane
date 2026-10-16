@@ -1,0 +1,36 @@
+# The three scale sets the chart shipped by default before v7.0.0 (it ships
+# none now). Every case WITHOUT a `presets` file renders over this, so the
+# cases about a nix sandbox, a watchdog or an egress policy keep sets to
+# exercise them on, and their goldens are the proof that nothing else in
+# the chart moved.
+scaleSets:
+  preview-large:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 24Gi
+      limits:
+        cpu: "4"
+        memory: 24Gi
+        ephemeral-storage: 40Gi
+  preview-medium:
+    gomaxprocs: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 14Gi
+      limits:
+        cpu: "4"
+        memory: 14Gi
+        ephemeral-storage: 30Gi
+  preview-small:
+    gomaxprocs: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: 6Gi
+      limits:
+        cpu: "2"
+        memory: 6Gi
+        ephemeral-storage: 20Gi

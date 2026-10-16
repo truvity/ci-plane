@@ -17,7 +17,7 @@ _helpers.tpl carries the full reasoning).
 {{- if $base -}}
 {{- $_ := set $configs $baseName $base -}}
 {{- end -}}
-{{- range $setName, $p := $root.Values.scaleSets -}}
+{{- range $setName, $p := (include "arc-runners.scaleSets" $root | fromJson) -}}
 {{- if $p -}}
 {{- $name := include "arc-runners.nixConfigNameFor" (dict "root" $root "p" $p) -}}
 {{- if and (ne $name $baseName) (not (hasKey $configs $name)) -}}

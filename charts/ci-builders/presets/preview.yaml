@@ -2,48 +2,34 @@
 # it before your own values (Argo CD: `helm.valueFiles:
 # [presets/preview.yaml]`). A later values file wins key by key.
 #
-# Shape: buildkitd on a dedicated on-demand AWS/Karpenter pool named
-# `build` (both arches; a spot reclaim kills a build with two minutes'
-# notice, which do-not-disrupt cannot stop), with a 10Gi limit that pool's
-# nodes can hold; all caches on. nodeSelector/tolerations/scheduling
-# REPLACE when overridden. Estate facts -- registries, namespaces that may
-# consume, the Go module proxy's bucket -- are never in a preset.
-storageClassName: gp3
-tolerations:
-  - key: arch
-    operator: Exists
+# Shape: buildkitd on a dedicated pool per architecture (a spot reclaim
+# kills a build with two minutes' notice, so run it on-demand), with a
+# 10Gi limit that pool's nodes can hold; all caches on. The preset names
+# no node pool, label or taint of a platform; it refers to NAMES that you
+# define in your own values:
+#
+#   nodeClasses.builders-arm64     where buildkitd-arm64 goes
+#   nodeClasses.builders-amd64     where buildkitd-amd64 goes
+#   nodeClasses.cache-plane        where the caches go (`{}` for nowhere
+#                                  in particular)
+#
+# The chart adds `kubernetes.io/arch` to a builder's selector itself. The
+# chart refuses to render with a name undefined. A platform's own pod
+# annotations and storage class are not here: see presets/karpenter.yaml.
+# Estate facts -- registries, namespaces that may consume, the Go module
+# proxy's bucket -- are never in a preset.
+nodeClass: cache-plane
 buildkitd:
   maxParallelism: 4
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"
   resources:
     limits:
       memory: 10Gi
   scheduling:
     arm64:
-      nodeSelector:
-        karpenter.sh/nodepool: build
-        kubernetes.io/arch: arm64
-        karpenter.sh/capacity-type: on-demand
-      tolerations:
-        - key: build
-          value: "true"
-          effect: NoSchedule
+      nodeClass: builders-arm64
     amd64:
-      nodeSelector:
-        karpenter.sh/nodepool: build
-        kubernetes.io/arch: amd64
-        karpenter.sh/capacity-type: on-demand
-      tolerations:
-        - key: build
-          value: "true"
-          effect: NoSchedule
+      nodeClass: builders-amd64
 bazelRemote:
   enabled: true
 npmCache:
   enabled: true
-goModproxy:
-  # A restart mid-job fails the jobs that meet it (GOPROXY uses a comma):
-  # off voluntary disruption. Inert while goModproxy.enabled is false.
-  podAnnotations:
-    karpenter.sh/do-not-disrupt: "true"

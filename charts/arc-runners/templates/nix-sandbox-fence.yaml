@@ -41,7 +41,7 @@ expression per set, each naming its own profile literal.
 {{- if .Values.nixSandbox.fence.enabled }}
 {{- $root := . }}
 {{- $sandboxed := list }}
-{{- range $setName, $p := $root.Values.scaleSets }}
+{{- range $setName, $p := (include "arc-runners.scaleSets" $root | fromJson) }}
 {{- if $p }}
 {{- $ns := $p.nixSandbox | default (dict) }}
 {{- if $ns.enabled }}

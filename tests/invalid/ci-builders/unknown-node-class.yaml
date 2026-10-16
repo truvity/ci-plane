@@ -1,0 +1,11 @@
+# refuses: is not defined: add it under nodeClasses
+# An architecture naming a class nobody defined.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  scheduling:
+    arm64:
+      nodeClass: builders-arm64
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
