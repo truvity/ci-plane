@@ -25,9 +25,9 @@ knob changes the runner pod template reference and lets Argo prune the
 old ConfigMap after ARC has converged. The image's nix.conf continues to
 own substituters; this overlay names only retry/build scheduling keys.
 
-With nixBuilders disabled the payload is `nixConfig` verbatim, so the
-ConfigMap, its name and the scale sets' values hash are byte-identical
-to a chart without remote builders. Enabled, it appends the machines
+With nixBuilders disabled and no nixCache.url the payload is `nixConfig`
+verbatim, so the ConfigMap, its name and the scale sets' values hash are
+byte-identical to a chart without remote builders. Enabled, it appends the machines
 file reference; an EMPTY machines file means no remote builders and
 leaves Nix's ordinary local builder in charge.
 */ -}}
@@ -187,7 +187,11 @@ secret: the credential is the projected token, mounted separately.
 {{- end -}}
 
 {{- /*
-Disabled: exactly the pre-nixBuilders name (hash of nixConfig alone).
+Disabled: the hash of the RENDERED nix.conf (arc-runners.nixConfig), not
+of `nixConfig` alone: nixCache.url adds a substituters line to it, and the
+ConfigMap is immutable, so any input to the data must move the name. With
+no nixCache.url the rendered text is `nixConfig` verbatim, so that name is
+unchanged from before.
 Enabled: hash every immutable ConfigMap input, rendered — changing a
 builder, SSH policy, OpenBao route, CA bundle or the hook script must
 rotate the name and the AutoscalingRunnerSet values hash rather than
@@ -198,7 +202,7 @@ attempting to mutate an immutable object in place.
 {{- $payload := dict "nixConfig" (include "arc-runners.nixConfig" .) "nixBuilders" .Values.nixBuilders "machines" (include "arc-runners.nixMachines" .) "sshConfig" (include "arc-runners.nixSSHConfig" .) "jobStartedHook" (include "arc-runners.nixJobStartedHook" .) -}}
 runner-nix-config-{{ $payload | toJson | sha256sum | trunc 12 }}
 {{- else -}}
-runner-nix-config-{{ .Values.nixConfig | sha256sum | trunc 12 }}
+runner-nix-config-{{ include "arc-runners.nixConfig" . | sha256sum | trunc 12 }}
 {{- end -}}
 {{- end -}}
 

@@ -111,6 +111,20 @@ for golden in tests/golden/*/*.yaml; do
   fi
 done
 
+# The runner nix ConfigMap is immutable and named by its content: with
+# nixBuilders off, setting nixCache.url (which adds a substituters line to
+# nix.conf) must move the name, or Argo CD tries to mutate the object in
+# place. The `minimal` and `nix-cache` cases differ only in nixCache.url.
+cm_name() {
+  grep -m1 -E '^  name: runner-nix-config-' "$1" | awk '{print $2}'
+}
+a=$(cm_name tests/golden/arc-runners/minimal.yaml)
+b=$(cm_name tests/golden/arc-runners/nix-cache.yaml)
+if [ -z "$a" ] || [ -z "$b" ] || [ "$a" = "$b" ]; then
+  echo "NIX CONFIGMAP NAME: minimal ($a) and nix-cache ($b) must differ -- nixCache.url is part of the immutable nix.conf"
+  fail=1
+fi
+
 if [ "$rendered" -eq 0 ]; then
   echo "rendered nothing -- that is a failure, not a pass"
   exit 1

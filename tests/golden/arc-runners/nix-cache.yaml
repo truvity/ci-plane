@@ -157,7 +157,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: runner-nix-config-df8643f062aa
+  name: runner-nix-config-c4cde62bf206
   labels:
     app.kubernetes.io/name: runner-nix-config
     app.kubernetes.io/part-of: gha-rs
@@ -486,7 +486,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-df8643f062aa
+                  name: runner-nix-config-c4cde62bf206
                   key: nix.conf
           resources:
             limits:
@@ -568,7 +568,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-df8643f062aa
+                  name: runner-nix-config-c4cde62bf206
                   key: nix.conf
           resources:
             limits:
@@ -650,7 +650,7 @@ spec:
             - name: NIX_CONFIG
               valueFrom:
                 configMapKeyRef:
-                  name: runner-nix-config-df8643f062aa
+                  name: runner-nix-config-c4cde62bf206
                   key: nix.conf
           resources:
             limits:
