@@ -488,13 +488,25 @@ cacheRedirect:
   #
   # Clients (both front-ends on the one Service, port 80):
   #   nix:      substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
-  #   go:       GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct
+  #   go:       GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
   # Runners must be able to reach the bucket's endpoint themselves (a VPC
   # gateway endpoint, or egress to it): that is where a redirect sends them.
   #
   # Off by default: it needs a bucket and an identity that may use it.
   enabled: false
   replicas: 2
+  # Seconds the pod keeps serving after it is told to stop (a preStop
+  # sleep), so the Service stops sending it traffic before the listener
+  # closes; without it a rollout refuses connections for a few seconds.
+  # 0 renders no preStop hook. Needs Kubernetes 1.30+ (native sleep action).
+  drainDelaySeconds: 10
+  # Must cover drainDelaySeconds plus the 25s the server gives in-flight
+  # requests on shutdown.
+  terminationGracePeriodSeconds: 45
+  # Rendered only with replicas > 1.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   s3:
     # Required while enabled. `region` "auto" for Cloudflare R2.
     bucket: ""

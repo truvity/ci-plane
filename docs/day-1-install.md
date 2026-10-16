@@ -70,7 +70,7 @@ Order matters: caches before runners, controller before both charts.
    runners to the bucket's endpoint. Point runners at it with
    `substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/`
    and
-   `GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy,https://proxy.golang.org,direct`.
+   `GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct`.
 6. For persistent Nix workers:
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
      signing role (default `ci-nix`) that allows the principal `ci-nix`
