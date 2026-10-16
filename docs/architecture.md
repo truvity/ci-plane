@@ -685,13 +685,23 @@ access-control docs) — this chart does not decide it.
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
-bootstrap, bash-as-sh, the daemonless docker client + buildx, and the
+bootstrap, bash-as-sh, the daemonless docker client + buildx, git-lfs, and the
 Go build cache client. goreleaser-pro is deliberately absent: its
 licence forbids redistributing the binary, and this image is public.
 Everything else arrives per job from each repository's own
 `devbox.json`. Repo- or cluster-specific content in
 the image is a bug; the one documented debt is the baked in-cluster nix
 substituter (dead elsewhere, upstream fallback).
+
+**`git-lfs` ships because it is part of git** (v6.7.0, owner decision
+D627). GitHub-hosted runners carry it, and `actions/checkout` with
+`lfs: true` execs `git lfs` before any devbox environment exists, so on
+a runner without it the checkout fails with "Unable to locate
+executable file: git-lfs". It is a pinned static release binary
+(`GIT_LFS_VERSION`, Renovate-tracked, checked against the release's
+`sha256sums.asc`), and `git lfs install --system` configures the LFS
+filters in `/etc/gitconfig`. CI runs the built image as the runner
+user and asserts it.
 
 **One Go cache client ships: `go-cache-plugin`.** The
 [truvity/ci-cache](https://github.com/truvity/ci-cache) agent sat beside

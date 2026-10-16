@@ -7,7 +7,8 @@
 # license-gated; the Go cache agent: must pre-exist before any go
 # invocation it caches), and the docker toolchain (client + buildx:
 # essential, ruled in-image 2026-08-13 — daemonless, the daemon never
-# ships). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
+# ships), and git-lfs (part of git; actions/checkout `lfs: true` needs
+# it before any devbox exists; D627). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
 # per job from the repo's own devbox.json through the nix cache.
 # Repo-specific OR cluster-specific content in this image is a bug
 # (builder registration lives in workflows, not here). The one known
@@ -200,6 +201,34 @@ RUN ARCH=$(dpkg --print-architecture) \
  && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx \
  && docker --version \
  && docker buildx version
+
+# git-lfs: part of git, not a tool. The base ships git but not git-lfs,
+# while GitHub-hosted runners ship both, so `actions/checkout` with
+# `lfs: true` fails here with "Unable to locate executable file: git-lfs"
+# (truvity/docs' release job; owner decision D627). actions/checkout runs
+# `git lfs` as an external executable before any devbox environment
+# exists, which is why devbox cannot deliver it. Static release binary,
+# arch-explicit, verified against that release's own sha256sums.asc in
+# the same build (same shape as sluisctl below; the file's names carry a
+# leading `*`). `git lfs install --system` writes the clean/smudge/process
+# filters to /etc/gitconfig, so every user and every checkout gets them,
+# as on hosted runners.
+# renovate: datasource=github-releases depName=git-lfs/git-lfs
+ARG GIT_LFS_VERSION=v3.8.0
+RUN ARCH=$(dpkg --print-architecture) \
+ && F="git-lfs-linux-${ARCH}-${GIT_LFS_VERSION}.tar.gz" \
+ && cd /tmp \
+ && curl -fsSLO "https://github.com/git-lfs/git-lfs/releases/download/${GIT_LFS_VERSION}/sha256sums.asc" \
+ && curl -fsSLO "https://github.com/git-lfs/git-lfs/releases/download/${GIT_LFS_VERSION}/${F}" \
+ && awk -v f="*${F}" '$2 == f' sha256sums.asc | grep . | sha256sum -c - \
+ && tar -xzf "${F}" --strip-components=1 --wildcards '*/git-lfs' \
+ && install -m 0755 git-lfs /usr/local/bin/git-lfs \
+ && rm -f sha256sums.asc "${F}" git-lfs \
+ && git lfs install --system \
+ && git lfs version \
+ && git config --system --get filter.lfs.clean \
+ && git config --system --get filter.lfs.smudge \
+ && git config --system --get filter.lfs.process
 
 # devbox binary (its packages come per job, from the repo's devbox.json).
 # Straight from the GitHub release with explicit arch: the official

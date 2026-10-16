@@ -537,9 +537,25 @@ jobs:
           # time and QEMU here would buy no review signal for minutes of
           # emulation.
           for img in runner nix-worker cache-redirect; do
-            docker buildx build --platform linux/amd64 \
+            load=()
+            # The runner is --load'ed for the contents test below.
+            [ "$img" = runner ] && load=(--load --tag ci-plane-runner:test)
+            docker buildx build --platform linux/amd64 "${load[@]}" \
               --file "image/${img}/Dockerfile" image/
           done
+          # Contents test: actions/checkout with `lfs: true` execs
+          # `git lfs` as the runner user, with no devbox environment, and
+          # fails "Unable to locate executable file: git-lfs" without it
+          # (D627). The system-wide filters must be configured too.
+          docker run --rm --user runner --entrypoint bash ci-plane-runner:test -c '
+            set -euo pipefail
+            command -v git-lfs
+            git-lfs version
+            git lfs version
+            for k in clean smudge process; do
+              test -n "$(git config --system --get "filter.lfs.$k")"
+            done
+            test "$(git config --system --get filter.lfs.required)" = true'
           # The release images assemble from a base that does not exist
           # until a release runs, so they are LINTED rather than built —
           # what matters about them is that they execute nothing, and
