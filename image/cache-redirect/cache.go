@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -186,7 +187,7 @@ func (c *Cache) redirect(w http.ResponseWriter, r *http.Request, o object) {
 }
 
 func (c *Cache) storeError(w http.ResponseWriter, o object, op string, err error) {
-	c.log.Error("store", "op", op, "frontend", o.frontend, "key", o.key, "err", err)
+	c.log.Error("store", "op", op, "frontend", o.frontend, "key", logSafe(o.key), "err", err)
 	c.metrics.Request(o.frontend, resultStoreError)
 	http.Error(w, "cache store error", http.StatusBadGateway)
 }
@@ -312,7 +313,7 @@ func (c *Cache) leadSmall(w http.ResponseWriter, r *http.Request, o object, f *f
 	n, err := c.store.Put(c.bg, o.key, bytes.NewReader(body), o.contentType)
 	c.metrics.Upload(o.frontend, n, err)
 	if err != nil {
-		c.log.Error("store", "op", "put", "frontend", o.frontend, "key", o.key, "err", err)
+		c.log.Error("store", "op", "put", "frontend", o.frontend, "key", logSafe(o.key), "err", err)
 		return
 	}
 	f.stored = true
@@ -363,19 +364,19 @@ func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *f
 		_, err := io.Copy(io.Discard, fr)
 		if err != nil {
 			c.metrics.Request(o.frontend, resultUpstreamError)
-			c.log.Warn("upstream", "frontend", o.frontend, "key", o.key, "err", err, "bytes", fr.n)
+			c.log.Warn("upstream", "frontend", o.frontend, "key", logSafe(o.key), "err", err, "bytes", fr.n)
 			panic(http.ErrAbortHandler)
 		}
 		f.res = cached{status: http.StatusOK}
 		c.metrics.Request(o.frontend, resultNoIndex)
-		c.log.Info("passed through, no index", "frontend", o.frontend, "key", o.key, "bytes", fr.n)
+		c.log.Info("passed through, no index", "frontend", o.frontend, "key", logSafe(o.key), "bytes", fr.n)
 		return
 	}
 	n, err := c.store.Put(c.bg, o.key, fr, o.contentType)
 	c.metrics.Upload(o.frontend, n, err)
 	if err != nil && fr.err == nil {
 		// The store failed and upstream did not: finish the client's copy.
-		c.log.Error("store", "op", "put", "frontend", o.frontend, "key", o.key, "err", err)
+		c.log.Error("store", "op", "put", "frontend", o.frontend, "key", logSafe(o.key), "err", err)
 		_, _ = io.Copy(io.Discard, fr)
 	}
 	var ve *verifyError
@@ -384,7 +385,7 @@ func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *f
 		// narinfo announced: nothing is committed.
 		f.res = cached{status: http.StatusOK}
 		c.metrics.Request(o.frontend, resultVerifyFailed)
-		c.log.Warn("verify failed", "frontend", o.frontend, "key", o.key, "err", ve, "bytes", fr.n)
+		c.log.Warn("verify failed", "frontend", o.frontend, "key", logSafe(o.key), "err", ve, "bytes", fr.n)
 		return
 	}
 	if !errors.Is(fr.err, io.EOF) {
@@ -392,13 +393,13 @@ func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *f
 		// committed, and the client must see a broken response rather
 		// than a clean end it would take for the whole object.
 		c.metrics.Request(o.frontend, resultUpstreamError)
-		c.log.Warn("upstream", "frontend", o.frontend, "key", o.key, "err", fr.err, "bytes", fr.n)
+		c.log.Warn("upstream", "frontend", o.frontend, "key", logSafe(o.key), "err", fr.err, "bytes", fr.n)
 		panic(http.ErrAbortHandler)
 	}
 	f.res = cached{status: http.StatusOK}
 	f.stored = err == nil
 	c.metrics.Request(o.frontend, resultMiss)
-	c.log.Info("pulled through", "frontend", o.frontend, "key", o.key, "bytes", fr.n,
+	c.log.Info("pulled through", "frontend", o.frontend, "key", logSafe(o.key), "bytes", fr.n,
 		"stored", f.stored, "seconds", time.Since(start).Seconds())
 }
 
@@ -431,7 +432,7 @@ func (c *Cache) fetchOrAnswer(w http.ResponseWriter, r *http.Request, o object, 
 }
 
 func (c *Cache) upstreamError(w http.ResponseWriter, o object, err error) {
-	c.log.Warn("upstream", "frontend", o.frontend, "url", o.upstream, "err", err)
+	c.log.Warn("upstream", "frontend", o.frontend, "url", logSafe(o.upstream), "err", err)
 	c.metrics.Request(o.frontend, resultUpstreamError)
 	http.Error(w, "upstream fetch failed", http.StatusBadGateway)
 }
@@ -636,4 +637,15 @@ func writeCached(w http.ResponseWriter, head bool, v cached) {
 	if !head {
 		_, _ = w.Write(v.body)
 	}
+}
+
+// logSafe returns s with line breaks replaced, for logging values taken from
+// the request (object keys, upstream URLs). The JSON handler already escapes
+// control characters, so this changes nothing today; it keeps every log entry
+// on one line under any handler (a text handler, a wrapper) and is the form
+// the code scanner recognises as a log-injection sanitizer. Use it only on
+// the logged copy, never on a key used for storage or lookup.
+func logSafe(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "\r", " ")
 }

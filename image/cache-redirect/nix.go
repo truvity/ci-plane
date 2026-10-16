@@ -105,7 +105,7 @@ func (x *narIndex) record(rec narRecord) {
 		return
 	}
 	if _, err := x.store.Put(x.bg, x.key(rec.URL), strings.NewReader(string(b)), "application/json"); err != nil {
-		x.log.Error("store", "op", "put", "frontend", frontendNix, "key", x.key(rec.URL), "err", err)
+		x.log.Error("store", "op", "put", "frontend", frontendNix, "key", logSafe(x.key(rec.URL)), "err", err)
 		// Memory still serves this replica's own NAR requests.
 	}
 	x.mem.Put(rec.URL, cached{status: http.StatusOK, body: b}, 0)

@@ -7,6 +7,10 @@ line is summarised in one section.
 
 ## Unreleased
 
+### cache-redirect: logged request values are single-line
+
+- **Changed: request-derived values (object keys, upstream URLs) are passed through `logSafe` before they are logged.** Line breaks become spaces in the logged copy only; storage keys and lookups are untouched. The JSON log handler already escapes control characters, so there is no behaviour change; this keeps entries on one line under any handler and satisfies the code scanner's log-injection check.
+
 ## v6.7.0
 
 ### runner: git-lfs is in the image
