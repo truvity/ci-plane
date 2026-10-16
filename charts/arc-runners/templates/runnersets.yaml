@@ -280,9 +280,14 @@ spec:
       {{- with $root.Values.runnerServiceAccountName }}
       serviceAccountName: {{ . }}
       {{- end }}
-      {{- if $root.Values.nixBuilders.enabled }}
+      {{- /*
+      Never automounted, with or without nixBuilders: a runner pod must
+      not carry a Kubernetes API token a job could read. The only token a
+      job may hold is an audience-bound projected volume (nixBuilders'
+      login token, projectedServiceAccountTokens), which does not depend
+      on the automount.
+      */}}
       automountServiceAccountToken: false
-      {{- end }}
       {{- /*
       hostUsers: false is the pod-level half of nixSandbox (the other
       half is the runner container's procMount/seccompProfile below).

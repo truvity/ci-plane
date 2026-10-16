@@ -61,6 +61,17 @@ for chart_dir in charts/*/; do
       continue
     fi
     rendered=$((rendered + 1))
+    # Every runner pod template must opt out of the service-account
+    # automount, nixBuilders on or off: a job must not read a Kubernetes
+    # API token. Counted per AutoscalingRunnerSet document.
+    if [ "$chart" = arc-runners ]; then
+      bad=$(awk -v RS='\n---\n' '/kind: AutoscalingRunnerSet/ && !/\n      automountServiceAccountToken: false\n/ {n++} END {print n+0}' <<< "$out")
+      sets=$(grep -c '^kind: AutoscalingRunnerSet' <<< "$out")
+      if [ "$bad" -ne 0 ] || [ "$sets" -eq 0 ]; then
+        echo "RUNNER POD AUTOMOUNTS A TOKEN (or no runner set rendered): $values ($bad of $sets sets lack automountServiceAccountToken: false)"
+        fail=1
+      fi
+    fi
     # A case named talos-* is the proof the chart works with no Karpenter
     # (and no EKS): its render must not mention either.
     case "$name" in talos*)

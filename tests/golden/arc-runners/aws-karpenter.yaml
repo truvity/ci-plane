@@ -470,6 +470,7 @@ spec:
       annotations:
         karpenter.sh/do-not-disrupt: "true"
     spec:
+      automountServiceAccountToken: false
       tolerations:
         - key: arch
           operator: Exists
@@ -563,6 +564,7 @@ spec:
       annotations:
         karpenter.sh/do-not-disrupt: "true"
     spec:
+      automountServiceAccountToken: false
       tolerations:
         - key: arch
           operator: Exists
@@ -656,6 +658,7 @@ spec:
       annotations:
         karpenter.sh/do-not-disrupt: "true"
     spec:
+      automountServiceAccountToken: false
       tolerations:
         - key: arch
           operator: Exists

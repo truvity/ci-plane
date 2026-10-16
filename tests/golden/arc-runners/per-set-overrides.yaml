@@ -488,6 +488,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         cloud.google.com/gke-nodepool: ci-default
       affinity:
@@ -574,6 +575,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         cloud.google.com/gke-nodepool: ci-default
       affinity:
@@ -660,6 +662,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/hostname: hive-8
       affinity:

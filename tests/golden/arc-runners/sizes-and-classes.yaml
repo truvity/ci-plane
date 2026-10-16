@@ -725,6 +725,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
@@ -802,6 +803,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/hostname: node-1
       affinity:
@@ -894,6 +896,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: big
       affinity:
@@ -986,6 +989,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
@@ -1073,6 +1077,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
@@ -1160,6 +1165,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
@@ -1247,6 +1253,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
@@ -1334,6 +1341,7 @@ spec:
       labels:
         ci-plane.io/packing-group: runners
     spec:
+      automountServiceAccountToken: false
       nodeSelector:
         example.com/pool: shared
       tolerations:
