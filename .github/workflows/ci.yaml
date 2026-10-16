@@ -1,7 +1,7 @@
 # PR gate: charts must lint and template with defaults AND with an
-# estate-shaped values overlay; the image must build (amd64 only — the
-# QEMU arm64 half is the slow part of a release and buys no review
-# signal; the release builds both).
+# estate-shaped values overlay; the images must build on both
+# architectures, each on a native runner (amd64 also runs the contents
+# and e2e tests; arm64 builds the bases only).
 name: CI
 
 on:
@@ -533,9 +533,8 @@ jobs:
       - name: Build (amd64, no push)
         run: |
           set -euo pipefail
-          # Every base, amd64 only: the arm64 half is native at release
-          # time and QEMU here would buy no review signal for minutes of
-          # emulation.
+          # Every base, amd64 here; image-arm64 below builds the same
+          # bases on a native arm64 runner.
           for img in runner nix-worker cache-redirect; do
             load=()
             # The runner is --load'ed for the contents test below.
@@ -578,6 +577,24 @@ jobs:
       - name: nix-worker principals e2e
         run: ./hack/nix-worker-principals-e2e.sh
 
+  # The same bases on a native arm64 runner, no push. Nix's installer runs
+  # with its seccomp filter on (no `filter-syscalls = false` any more: that
+  # was only for the QEMU-emulated arm64 build), so a filter that fails to
+  # load on arm64 fails here, not in a release.
+  image-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build (arm64, no push)
+        run: |
+          set -euo pipefail
+          for img in runner nix-worker cache-redirect; do
+            docker buildx build --platform linux/arm64 \
+              --file "image/${img}/Dockerfile" image/
+          done
+
   # The Justfile's gate, each recipe its own job through the shared check
   # workflow: chart lint, the golden renders and refused fixtures, and the
   # leak canary. `vuln` is not here -- it runs from security.yaml, which
@@ -594,9 +611,9 @@ jobs:
 
   # A stable name for branch protection to require.
   check:
-    needs: [charts, go, image, recipes]
+    needs: [charts, go, image, image-arm64, recipes]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: '[ "${{ needs.charts.result }}" = "success" ] && [ "${{ needs.go.result }}" = "success" ] && [ "${{ needs.image.result }}" = "success" ] && [ "${{ needs.recipes.result }}" = "success" ]'
+      - run: '[ "${{ needs.charts.result }}" = "success" ] && [ "${{ needs.go.result }}" = "success" ] && [ "${{ needs.image.result }}" = "success" ] && [ "${{ needs.image-arm64.result }}" = "success" ] && [ "${{ needs.recipes.result }}" = "success" ]'

@@ -183,16 +183,12 @@ ENV USER=runner \
 # from the multicall alias below.
 #
 # PINNED, unlike the unversioned nixos.org/nix/install the shared image
-# used: see the note at the top. filter-syscalls off FOR THE BUILD ONLY,
-# because the arm64 half builds under QEMU user emulation where nix's
-# seccomp BPF load fails with "Invalid argument"; real arm64 hardware at
-# runtime is unaffected and the baked nix.conf stays clean.
+# used: see the note at the top.
 # Downloaded to a file rather than `sh <(curl ...)`: process
 # substitution is bash, and /bin/sh here is dash. The runner image gets
 # away with the <() form only because it symlinks sh to bash on its
 # first layer -- a dependency this image deliberately does not inherit.
-RUN NIX_CONFIG="filter-syscalls = false" \
-    curl -fsSL -o /tmp/nix-install "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" \
+RUN curl -fsSL -o /tmp/nix-install "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" \
  && sh /tmp/nix-install --no-daemon \
  && rm -f /tmp/nix-install \
  && mkdir -p /home/runner/.config/nix \

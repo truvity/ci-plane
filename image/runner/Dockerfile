@@ -301,10 +301,6 @@ ENV USER=runner \
 # require-sigs=false it forced: everything now originates upstream,
 # whose narinfo signatures pass through the proxy intact and verify
 # against nix's default trusted key.
-# filter-syscalls off FOR THE BUILD ONLY: the arm64 half runs under
-# QEMU user emulation, where nix's seccomp BPF load fails ("Invalid
-# argument"); real arm64 hardware at runtime is unaffected and the
-# baked nix.conf stays clean.
 # Re-declared INSIDE the stage: an ARG before the first FROM is global and
 # is NOT in scope in a build stage until named again. Without this line
 # ${NIX_SUBSTITUTERS} expands to empty and the image ships
@@ -314,8 +310,7 @@ ENV USER=runner \
 # so the value comes from the global ARG or the caller's --build-arg.
 ARG NIX_SUBSTITUTERS
 ARG NIX_VERSION
-RUN NIX_CONFIG="filter-syscalls = false" \
-    sh <(curl -fsSL "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install") --no-daemon \
+RUN sh <(curl -fsSL "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install") --no-daemon \
  && mkdir -p /home/runner/.config/nix \
  && printf '%s\n' \
       'experimental-features = nix-command flakes' \
