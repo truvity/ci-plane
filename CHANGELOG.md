@@ -7,6 +7,8 @@ line is summarised in one section.
 
 ## Unreleased
 
+## v6.6.0
+
 ### cache-redirect: a Nix and Go cache whose hits are redirects (`cacheRedirect`)
 
 - **New image: `ghcr.io/truvity/ci-plane/cache-redirect`** (image/cache-redirect, its own Go module; a static binary on distroless, built and published by every release like the other two, digest stamped into `cacheRedirectImage`). A pull-through cache for the Nix binary cache (`/nix`) and the GOPROXY protocol (`/goproxy`) that keeps its index in an S3 or S3-compatible bucket and answers a hit on a large immutable object (a NAR, a module `.zip`) with a 302 to a presigned GET URL (`-presign-ttl`, default 5m), so the bytes flow from the object store to the runner and never through the pod. Small objects (narinfo, `.info`, `.mod`, sumdb tiles) are served directly. A miss is fetched from upstream once per key (concurrent requests wait for that one fetch), streamed to its client while uploaded, and committed only when the upstream body is whole (its `Content-Length`, and a NAR's file hash from its name); a truncated or failed fetch is aborted and never stored. Upstream 404/410 reach the client unchanged and are never stored; a store 403 is a 502, never a miss. Go's mutable endpoints (`@v/list`, `@latest`, a non-canonical `<query>.info`, sumdb `lookup`/`latest`) are passed through with a 30s in-memory TTL; the checksum database `sum.golang.org` is proxied (tiles stored). Metrics on `/metrics`: `cache_redirect_requests_total{frontend,result}`, `cache_redirect_uploads_total`, `cache_redirect_upload_bytes_total`, `cache_redirect_upstream_request_duration_seconds`, `cache_redirect_fetches_in_flight`. See docs/architecture.md ("cache-redirect").
