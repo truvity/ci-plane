@@ -60,10 +60,8 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # NATIVE, both. The arm64 half used to run under QEMU user
-          # emulation -- which is also why the runner image carries
-          # `filter-syscalls = false`: nix's seccomp load fails there.
-          # That workaround can be revisited now, on evidence.
+          # NATIVE, both: no QEMU, so nix's seccomp filter loads as it
+          # does on the hardware the images run on.
           - arch: amd64
             runs-on: ubuntu-latest
           - arch: arm64

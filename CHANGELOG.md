@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## Unreleased
+
+### Changed
+
+- **Images: Nix is installed with its seccomp filter on.** The runner and nix-worker images no longer set `filter-syscalls = false` for the Nix install step. It existed only because the arm64 half used to build under QEMU user emulation, where Nix's seccomp BPF load fails; both architectures build natively now. The baked `nix.conf` is unchanged (it never carried the setting). Pull-request CI now builds every base on a native arm64 runner too (`image-arm64`), so an arm64 regression fails before a release. The nix-worker seed step (`nix-worker-seed.sh`, a `nix copy` between two local stores at pod start) keeps its own `filter-syscalls = false`; it is not a build and was not added for QEMU.
+
 ## v7.0.1
 
 ### Security / Fixed
