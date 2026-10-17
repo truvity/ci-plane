@@ -201,6 +201,8 @@ github.com/texttheater/golang-levenshtein v1.0.1 h1:+cRNoVrfiwufQPhoMzB6N0Yf/Mqa
 github.com/texttheater/golang-levenshtein v1.0.1/go.mod h1:PYAKrbF5sAiq9wd+H82hs7gNaen0CplQ9uvm6+enD/8=
 github.com/truvity/k8s v0.28.0 h1:y8qnD2OaRPW7dkt7/5EOKC9xAvO4+L07ZdyNggBzc54=
 github.com/truvity/k8s v0.28.0/go.mod h1:mVfBlfY6VjJQJQ40dLwrHTdBwInolRZxblUMbyFa8LQ=
+github.com/truvity/k8s v0.29.0 h1:4dLmEKThwmcUHO45dqtdRxhwq5HQaUBt4ikAKZxed98=
+github.com/truvity/k8s v0.29.0/go.mod h1:mVfBlfY6VjJQJQ40dLwrHTdBwInolRZxblUMbyFa8LQ=
 github.com/uber/jaeger-client-go v2.30.0+incompatible h1:D6wyKGCecFaSRUpo8lCVbaOOb6ThwMmTEbhRwtKR97o=
 github.com/uber/jaeger-client-go v2.30.0+incompatible/go.mod h1:WVhlPFC8FDjOFMMWRy2pZqQJSXxYSwNYOkTr/Z6d3Kk=
 github.com/uber/jaeger-lib v2.4.1+incompatible h1:td4jdvLcExb4cBISKIpHuGoVXh+dVKhn2Um6rjCsSsg=
