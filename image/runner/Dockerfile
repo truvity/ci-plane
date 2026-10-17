@@ -251,7 +251,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # file that was never downloaded. `grep .` fails the build on no match.
 #
 # renovate: datasource=github-releases depName=truvity/sluis
-ARG SLUISCTL_VERSION=1.74.0
+ARG SLUISCTL_VERSION=1.76.8
 RUN ARCH=$(dpkg --print-architecture) \
  && cd /tmp \
  && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
