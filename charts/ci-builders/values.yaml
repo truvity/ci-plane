@@ -512,7 +512,7 @@ bazelRemote:
     registry: docker.io
     repository: buchgr/bazel-remote-cache
     # renovate: datasource=docker depName=buchgr/bazel-remote-cache
-    tag: v2.6.2
+    tag: v2.6.3
   # Bound to an EKS Pod Identity association (this namespace + this
   # ServiceAccount name) when `s3.enabled`. Empty renders no
   # serviceAccountName, so the pod keeps using the namespace's default
@@ -561,7 +561,7 @@ npmCache:
     registry: docker.io
     repository: verdaccio/verdaccio
     # renovate: datasource=docker depName=verdaccio/verdaccio
-    tag: "6.10.4"
+    tag: "6.10.5"
   size: 20Gi
   resources:
     requests:
