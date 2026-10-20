@@ -896,7 +896,7 @@ spec:
         kind: PushSecretMetadata
         spec:
           description: BuildKit client credential outside, pushed by External Secrets
-          kmsKeyID: arn:aws:kms:eu-example-1:444455556666:key/1234abcd-12ab-34cd-56ef-1234567890ab
+          kmsKeyID: alias/example-client
           secretType: SecureString
           tags:
             component: ci
@@ -909,7 +909,7 @@ spec:
         kind: PushSecretMetadata
         spec:
           description: BuildKit client credential outside, pushed by External Secrets
-          kmsKeyID: arn:aws:kms:eu-example-1:444455556666:key/1234abcd-12ab-34cd-56ef-1234567890ab
+          kmsKeyID: alias/example-client
           secretType: SecureString
           tags:
             component: ci
@@ -922,7 +922,7 @@ spec:
         kind: PushSecretMetadata
         spec:
           description: BuildKit client credential outside, pushed by External Secrets
-          kmsKeyID: arn:aws:kms:eu-example-1:444455556666:key/1234abcd-12ab-34cd-56ef-1234567890ab
+          kmsKeyID: alias/example-client
           secretType: SecureString
           tags:
             component: ci

@@ -24,7 +24,7 @@ buildkitd:
             storeRef:
               name: example-push
             refreshInterval: 30m
-            kmsKeyId: arn:aws:kms:eu-example-1:444455556666:key/1234abcd-12ab-34cd-56ef-1234567890ab
+            kmsKeyId: alias/example-client
             tags:
               component: ci
             caPem: |
