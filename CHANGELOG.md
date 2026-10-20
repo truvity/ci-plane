@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.4.0
+
+### Added: bazel-remote's gRPC port declares HTTP/2
+
+- **ci-builders: the `bazel-remote` Service's `grpc` port (9092) carries `appProtocol: kubernetes.io/h2c`.** The port speaks HTTP/2 without TLS. A gateway that reaches it through an HTTPRoute (Envoy Gateway reads the field) now talks HTTP/2 to the pod instead of HTTP/1.1, so moon's and Bazel's gRPC cache can be published on a private gateway without a GRPCRoute. kube-proxy and in-cluster clients ignore the field. The only render change is that line.
+
 ## v7.3.0
 
 ### Added: ci-builders `buildkitd.mtls.mode: inPlace`
