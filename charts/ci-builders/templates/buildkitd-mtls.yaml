@@ -1,10 +1,15 @@
 {{- /*
-The mutual-TLS BuildKit builders: a second StatefulSet per
-architecture beside the plain one, never a flag on it. buildkitd applies
-its TLS settings to every tcp:// listener of the process and two daemons
-cannot share a cache directory, so serving plain TCP to the runners that
-have not moved and mTLS to the ones that have takes two daemons with a
-cache each. The values.yaml comment on buildkitd.mtls has the sequence.
+The mutual-TLS BuildKit builders. mode "parallel" (the default): a second
+StatefulSet per architecture beside the plain one, never a flag on it.
+buildkitd applies its TLS settings to every tcp:// listener of the process
+and two daemons cannot share a cache directory, so serving plain TCP to the
+runners that have not moved and mTLS to the ones that have takes two
+daemons with a cache each. The values.yaml comment on buildkitd.mtls has the sequence.
+
+mode "inPlace": no second set. The plain StatefulSet, Service and cache
+volume (buildkitd.yaml) become the TLS ones, so the warm cache is kept
+and no node is added; this file then renders only what both modes share
+(the server Certificates and the client CA).
 
 The builders accept a client only when its certificate chains to the ONE
 client CA (--tlscacert: the daemon then requires and verifies a client
@@ -31,6 +36,8 @@ names clients dial (buildkitd.mtls.serverCertificate).
 {{- if $ca.create }}
 {{- if not $ca.requesterNamespaces }}{{ fail "buildkitd.mtls.clientCA.requesterNamespaces is required and non-empty while clientCA.create is true: the policy admits requests from those namespaces and no others" }}{{ end }}
 {{- end }}
+{{- $mode := $m.mode | default "parallel" }}
+{{- if not (has $mode (list "parallel" "inPlace")) }}{{ fail (printf "buildkitd.mtls.mode %q is not one of parallel, inPlace" $mode) }}{{ end }}
 {{- $tlsDir := "/etc/buildkit/tls" }}
 {{- $caDir := "/etc/buildkit/client-ca" }}
 {{- range $arch := $b.archs }}
@@ -59,6 +66,7 @@ spec:
   issuerRef:
     {{- toYaml $cert.issuerRef | nindent 4 }}
 {{- end }}
+{{- if eq $mode "parallel" }}
 ---
 apiVersion: v1
 kind: Service
@@ -213,6 +221,7 @@ spec:
       ports:
         - port: 1234
           protocol: TCP
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if $ca.create }}

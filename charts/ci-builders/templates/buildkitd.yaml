@@ -1,3 +1,14 @@
+{{- /*
+buildkitd.mtls.mode "inPlace" turns THESE builders (the buildkitd-<arch>
+StatefulSets, their Services and cache volumes) into the TLS ones: the
+server certificate and client CA are mounted, --tlscert/--tlskey/--tlscacert
+are set and the plain tcp listener is gone (buildkitd applies its TLS
+settings to every tcp:// listener, so it cannot serve both). The unix
+socket stays, for the readiness probe. The default "parallel" renders the
+plain builders as before and the TLS ones beside them (buildkitd-mtls.yaml).
+*/ -}}
+{{- $mtlsInPlace := and .Values.buildkitd.mtls.enabled (eq (.Values.buildkitd.mtls.mode | default "parallel") "inPlace") }}
+{{- if and $mtlsInPlace .Values.buildkitd.mtls.retirePlain }}{{ fail "buildkitd.mtls.retirePlain does not apply with mtls.mode inPlace: there is no plain builder to retire, the builders themselves serve TLS" }}{{ end }}
 {{- if and .Values.buildkitd.mtls.retirePlain (not .Values.buildkitd.mtls.enabled) }}{{ fail "buildkitd.mtls.retirePlain needs buildkitd.mtls.enabled: retiring the plain builders with no TLS ones would leave the runners no builder at all" }}{{ end }}
 {{- if and .Values.buildkitd.enabled (not .Values.buildkitd.mtls.retirePlain) }}
 {{- $b := .Values.buildkitd }}
@@ -10,7 +21,10 @@
 {{- else }}{{ fail (printf "sizes.%s.%s does not apply to buildkitd (it takes resources and maxParallelism)" $b.size $k) }}{{ end }}
 {{- end }}
 {{- end }}
+{{- $tlsDir := "/etc/buildkit/tls" }}
+{{- $caDir := "/etc/buildkit/client-ca" }}
 {{- range $arch := $b.archs }}
+{{- $secret := printf "buildkitd-mtls-%s-tls" $arch }}
 ---
 apiVersion: v1
 kind: Service
@@ -39,6 +53,13 @@ metadata:
   labels:
     app.kubernetes.io/name: buildkitd
     app.kubernetes.io/part-of: ci-builders
+  {{- if and $mtlsInPlace $b.mtls.reloader.enabled }}
+  annotations:
+    # stakater/Reloader: buildkitd reads its certificate once, at start, so
+    # a renewed server certificate (or a replaced client CA) restarts the pod.
+    secret.reloader.stakater.com/reload: {{ $secret }}
+    configmap.reloader.stakater.com/reload: {{ $b.mtls.clientCA.configMapName }}
+  {{- end }}
 spec:
   serviceName: buildkitd-{{ $arch }}
   replicas: 1
@@ -84,6 +105,16 @@ spec:
           args:
             - --addr
             - tcp://0.0.0.0:1234
+            {{- if $mtlsInPlace }}
+            - --addr
+            - unix:///run/user/1000/buildkit/buildkitd.sock
+            - --tlscert
+            - {{ $tlsDir }}/tls.crt
+            - --tlskey
+            - {{ $tlsDir }}/tls.key
+            - --tlscacert
+            - {{ $caDir }}/ca.crt
+            {{- end }}
             - --oci-worker-no-process-sandbox
             {{- if $b.maxParallelism }}
             - {{ printf "--oci-max-parallelism=%d" (int $b.maxParallelism) }}
@@ -98,9 +129,15 @@ spec:
               type: Unconfined
           readinessProbe:
             exec:
+              {{- if $mtlsInPlace }}
+              # The unix socket, which buildkitd leaves plain: the tcp://
+              # listener demands a client certificate.
+              command: ["buildctl", "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "debug", "workers"]
+              {{- else }}
               # --addr: buildctl defaults to the unix socket; the daemon
               # listens on TCP for the runners.
               command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+              {{- end }}
             initialDelaySeconds: 5
             periodSeconds: 30
           resources:
@@ -108,6 +145,27 @@ spec:
           volumeMounts:
             - name: cache
               mountPath: /home/user/.local/share/buildkit
+            {{- if $mtlsInPlace }}
+            - name: tls
+              mountPath: {{ $tlsDir }}
+              readOnly: true
+            - name: client-ca
+              mountPath: {{ $caDir }}
+              readOnly: true
+            {{- end }}
+      {{- if $mtlsInPlace }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ $secret }}
+            defaultMode: 0440
+        - name: client-ca
+          configMap:
+            name: {{ $b.mtls.clientCA.configMapName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: cache

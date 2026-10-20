@@ -1,0 +1,31 @@
+# The plain builders turned into the TLS ones, in place: same StatefulSet
+# names, Services and cache volumes, no second set. The client CA is built by
+# the chart; the server Secret is mounted with Reloader annotations.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    mode: inPlace
+    serverCertificate:
+      issuerRef:
+        name: example-private
+      dnsNames:
+        arm64: [buildkitd-arm64.example.private]
+        amd64: [buildkitd-amd64.example.private]
+    clientCA:
+      create: true
+      requesterNamespaces: [arc-runners-example]
+    networkPolicy:
+      additionalIngress:
+        - name: buildkitd-from-gateway
+          from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: gateway
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

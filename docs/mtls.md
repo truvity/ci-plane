@@ -28,6 +28,38 @@ plain `buildkitd-<arch>`:
 The TLS builders start with a cold cache. The warm layer is
 `cache-to type=registry`, which a new builder reads from the first build.
 
+## In place: the existing builders become the TLS ones
+
+`buildkitd.mtls.mode: inPlace` is the other way to the same end, for an
+estate that wants neither a second node nor a cold cache. No second set
+renders. The plain StatefulSet `buildkitd-<arch>` itself is changed:
+
+- the server Secret and the client CA ConfigMap are mounted, and
+  `--tlscert/--tlskey/--tlscacert` are set;
+- the plain `tcp://` listener is gone (one process cannot serve both; every
+  `tcp://` `--addr` is wrapped in the same TLS config);
+- the unix socket stays plain, for the readiness probe;
+- the Service, the `cache` volume claim and the node are the same, so the
+  warm cache survives the restart.
+
+There is no period in which both kinds are served. Every client of the
+builders must dial with TLS from the moment the pod restarts, so the runners'
+`buildkitTLS` and the endpoint they dial change in the **same release**. The
+sequence:
+
+1. Run the CI components that understand `CI_BUILDKIT_TLS_DIR` (callers on
+   the release that carries them), and have the client CA, its policy and
+   bundle in place (`clientCA.create: true` renders them whatever the mode).
+2. In one change: `buildkitd.mtls.mode: inPlace` (with `enabled: true`), the
+   runners' `buildkitTLS`, and the clients' endpoint and TLS variables. The
+   builder pods restart once, onto the same volumes.
+3. Rollback is the same change reversed: `mode: parallel` brings the plain
+   listener back on the same cache, with the clients moved back.
+
+`retirePlain` is refused in this mode: there is no plain set to retire. The
+`mtls.networkPolicy.additionalIngress` entries admit the `buildkitd` pods
+(the private gateway, for example), not a second set.
+
 ## The pieces
 
 | What | Where | Notes |
@@ -58,9 +90,15 @@ admit any certificate it issues for any other workload.
   renews the Secret in place, and the daemon keeps serving the old pair until
   the pod restarts. The restart must happen before the old certificate
   expires, which with 90 days / renewal at 60 interrupts running builds on that
-  builder: schedule it in a quiet window (`kubectl rollout restart
-  statefulset/buildkitd-mtls-<arch>`), and alert on a `Certificate` that is
-  not Ready. There is no in-process reload to rely on.
+  builder. There is no in-process reload to rely on. With
+  `mode: inPlace` the StatefulSets carry stakater/Reloader annotations
+  (`buildkitd.mtls.reloader.enabled`, default on): where Reloader runs it
+  restarts the pod when the Secret (or the client CA ConfigMap) changes, and
+  that restart interrupts the builds running on that builder, once per
+  renewal. Without Reloader, or in `parallel` mode, schedule it in a quiet
+  window (`kubectl rollout restart statefulset/buildkitd-<arch>`, or
+  `buildkitd-mtls-<arch>` in `parallel`), and alert on a `Certificate` that
+  is not Ready.
 
 ## Fargate and other runners outside the cluster
 
