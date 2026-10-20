@@ -437,6 +437,15 @@ extraCACertificates:
 buildkitTLS:
   enabled: false
   mountPath: /var/run/buildkit-tls
+  # CI_BUILDKIT_TLS_SERVERNAME: the name the builders' certificate is
+  # verified against (the buildx driver opt `servername`), for a runner
+  # that dials an address which is not a SAN on that certificate -- the
+  # in-cluster Service name while the runners have not moved to the
+  # private names. ONE value serves both architectures' builders, so the
+  # certificates of both must carry it (ci-builders'
+  # buildkitd.mtls.serverCertificate.dnsNames lists it for each arch).
+  # Empty = not set: the endpoint's own host is verified.
+  serverName: ""
   # The Secret holding tls.crt and tls.key (cert-manager's layout), in the
   # release namespace.
   secretName: buildkit-client-tls

@@ -15,7 +15,7 @@ line is summarised in one section.
 ### Added: mutual-TLS BuildKit builders
 
 - **ci-builders: mutual-TLS BuildKit builders (`buildkitd.mtls`, off by default).** A second, TLS-only StatefulSet and Service per architecture, `buildkitd-mtls-<arch>`, beside the plain `buildkitd-<arch>`. buildkitd applies its TLS settings to every `tcp://` listener of the process, so plain and mTLS cannot share a daemon, and two daemons cannot share a cache; the new builders have a cache of their own. The server certificate is a cert-manager `Certificate` from an issuer and names you give (`mtls.serverCertificate`); clients are verified against one dedicated client CA (`mtls.clientCA`), which the chart can build (`create: true`: CA `ClusterIssuer`, `CertificateRequestPolicy`, trust-manager `Bundle`). `mtls.retirePlain: true` stops rendering the plain builders once nothing uses them. With the key off, every render is byte-identical. See [docs/mtls.md](docs/mtls.md).
-- **arc-runners: `buildkitTLS` (off by default).** Mounts a client certificate (a Secret, optionally the `Certificate` that produces it) and a trust bundle at `buildkitTLS.mountPath` as `ca.pem`, `cert.pem` and `key.pem`, and sets `CI_BUILDKIT_TLS_DIR` on the runner container.
+- **arc-runners: `buildkitTLS` (off by default).** Mounts a client certificate (a Secret, optionally the `Certificate` that produces it) and a trust bundle at `buildkitTLS.mountPath` as `ca.pem`, `cert.pem` and `key.pem`, and sets `CI_BUILDKIT_TLS_DIR` on the runner container (and `CI_BUILDKIT_TLS_SERVERNAME` from `buildkitTLS.serverName`, when set).
 
 ## v7.1.0
 

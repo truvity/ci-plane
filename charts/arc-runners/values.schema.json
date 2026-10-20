@@ -313,6 +313,7 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "mountPath": {"type": "string", "minLength": 1},
+        "serverName": {"type": "string"},
         "secretName": {"type": "string"},
         "certificate": {
           "type": "object",

@@ -435,7 +435,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-large
     actions.github.com/cleanup-manager-role-name: preview-large-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-large-gha-rs-manager
-    actions.github.com/values-hash: 35867ca612a147fe8dcc21c271e2e842322bdfee81b1b85bd90e719407a507e
+    actions.github.com/values-hash: 93980378aa60dc935ceea51df96f40ef68128882012bf8ab33673d56b3fb21f
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -492,6 +492,8 @@ spec:
             # TLS when this directory holds ca.pem, cert.pem and key.pem.
             - name: CI_BUILDKIT_TLS_DIR
               value: "/var/run/buildkit-tls"
+            - name: CI_BUILDKIT_TLS_SERVERNAME
+              value: "buildkitd.example.private"
           resources:
             limits:
               cpu: "4"
@@ -547,7 +549,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-medium
     actions.github.com/cleanup-manager-role-name: preview-medium-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-medium-gha-rs-manager
-    actions.github.com/values-hash: 72623d962d206347c2037704ec13a6c0155f1239662e17d49d45a8527e669b8
+    actions.github.com/values-hash: 7199559710a9bcf22dd85ec3cbec3f7d123aa83713f83cf7ca35daddb166f89
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -604,6 +606,8 @@ spec:
             # TLS when this directory holds ca.pem, cert.pem and key.pem.
             - name: CI_BUILDKIT_TLS_DIR
               value: "/var/run/buildkit-tls"
+            - name: CI_BUILDKIT_TLS_SERVERNAME
+              value: "buildkitd.example.private"
           resources:
             limits:
               cpu: "4"
@@ -659,7 +663,7 @@ metadata:
     actions.github.com/runner-scale-set-name: preview-small
     actions.github.com/cleanup-manager-role-name: preview-small-gha-rs-manager
     actions.github.com/cleanup-manager-role-binding: preview-small-gha-rs-manager
-    actions.github.com/values-hash: 6a3ae8a1a798e18339b4089c1c4223a44102db8dbe8880ebd349b474ae6c79c
+    actions.github.com/values-hash: 4e1331c19e0194d8077c6693b99d412b0efd919a4704b794b93cbec93d1ef6a
 spec:
   githubConfigUrl: https://github.com/example
   githubConfigSecret: arc-github-app
@@ -716,6 +720,8 @@ spec:
             # TLS when this directory holds ca.pem, cert.pem and key.pem.
             - name: CI_BUILDKIT_TLS_DIR
               value: "/var/run/buildkit-tls"
+            - name: CI_BUILDKIT_TLS_SERVERNAME
+              value: "buildkitd.example.private"
           resources:
             limits:
               cpu: "2"

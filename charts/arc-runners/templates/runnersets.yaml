@@ -54,7 +54,7 @@ projected tokens sharing a mount path).
 {{- if not .Values.buildkitTLS.ca.configMapName }}{{ fail "buildkitTLS.ca.configMapName is required when buildkitTLS.enabled: the runner needs the bundle the builders' certificate verifies against (ca.pem)" }}{{ end }}
 {{- if and .Values.buildkitTLS.certificate.create (not .Values.buildkitTLS.certificate.issuerRef.name) }}{{ fail "buildkitTLS.certificate.issuerRef.name is required when buildkitTLS.certificate.create is true" }}{{ end }}
 {{- range $e := .Values.extraEnv }}
-{{- if eq $e.name "CI_BUILDKIT_TLS_DIR" }}{{ fail "buildkitTLS.enabled with an extraEnv entry named CI_BUILDKIT_TLS_DIR: the chart sets it; drop the extraEnv entry" }}{{ end }}
+{{- if has $e.name (list "CI_BUILDKIT_TLS_DIR" "CI_BUILDKIT_TLS_SERVERNAME") }}{{ fail (printf "buildkitTLS.enabled with an extraEnv entry named %s: the chart sets it; drop the extraEnv entry" $e.name) }}{{ end }}
 {{- end }}
 {{- end }}
 {{- if .Values.awsConfig.enabled }}
@@ -533,6 +533,10 @@ spec:
             # TLS when this directory holds ca.pem, cert.pem and key.pem.
             - name: CI_BUILDKIT_TLS_DIR
               value: {{ $root.Values.buildkitTLS.mountPath | quote }}
+            {{- with $root.Values.buildkitTLS.serverName }}
+            - name: CI_BUILDKIT_TLS_SERVERNAME
+              value: {{ . | quote }}
+            {{- end }}
             {{- end }}
           {{- with $p.resources }}
           resources:

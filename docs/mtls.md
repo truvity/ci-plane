@@ -36,6 +36,13 @@ The TLS builders start with a cold cache. The warm layer is
 | Client CA | `buildkitd.mtls.clientCA` | The only authority the builders accept clients from. `create: true` builds it: self-signed Issuer and CA Certificate in cert-manager's namespace, a CA `ClusterIssuer`, an approver-policy `CertificateRequestPolicy` (one common name, client auth, ECDSA, listed namespaces), and a trust-manager `Bundle` publishing the CA certificate, never its key, to the ConfigMap the builders read. |
 | Client certificate | `arc-runners` `buildkitTLS` | `certificate.create: true` renders the `Certificate` in the release namespace; the Secret is mounted with the trust bundle as `ca.pem`, `cert.pem`, `key.pem` at `mountPath`, and `CI_BUILDKIT_TLS_DIR` points there. |
 
+A runner that dials an address which is not a SAN on the builders'
+certificate (the in-cluster Service name, before the runners move to the
+private names) sets `buildkitTLS.serverName`, which becomes
+`CI_BUILDKIT_TLS_SERVERNAME` (the buildx `servername` driver option). It is
+one value for both architectures, so list that name in both architectures'
+`serverCertificate.dnsNames`.
+
 The client CA is dedicated on purpose. Reusing a general private CA would
 admit any certificate it issues for any other workload.
 
