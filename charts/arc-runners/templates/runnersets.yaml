@@ -49,6 +49,14 @@ because the schema cannot express either: a cross-key constraint
 (awsConfig vs. a NAMED extraEnv entry) and a cross-item one (no two
 projected tokens sharing a mount path).
 */}}
+{{- if .Values.buildkitTLS.enabled }}
+{{- if not .Values.buildkitTLS.secretName }}{{ fail "buildkitTLS.secretName is required when buildkitTLS.enabled" }}{{ end }}
+{{- if not .Values.buildkitTLS.ca.configMapName }}{{ fail "buildkitTLS.ca.configMapName is required when buildkitTLS.enabled: the runner needs the bundle the builders' certificate verifies against (ca.pem)" }}{{ end }}
+{{- if and .Values.buildkitTLS.certificate.create (not .Values.buildkitTLS.certificate.issuerRef.name) }}{{ fail "buildkitTLS.certificate.issuerRef.name is required when buildkitTLS.certificate.create is true" }}{{ end }}
+{{- range $e := .Values.extraEnv }}
+{{- if eq $e.name "CI_BUILDKIT_TLS_DIR" }}{{ fail "buildkitTLS.enabled with an extraEnv entry named CI_BUILDKIT_TLS_DIR: the chart sets it; drop the extraEnv entry" }}{{ end }}
+{{- end }}
+{{- end }}
 {{- if .Values.awsConfig.enabled }}
 {{- if not .Values.awsConfig.profile }}{{ fail "awsConfig.profile is required when awsConfig.enabled" }}{{ end }}
 {{- if not .Values.awsConfig.credentialProcess }}{{ fail "awsConfig.credentialProcess is required when awsConfig.enabled" }}{{ end }}
@@ -213,6 +221,7 @@ what a job loses.
 {{- $hasExtraCA := or $root.Values.extraCACertificates.configMapName $root.Values.extraCACertificates.secretName }}
 {{- /* Absent from the hash while off, like the keys above. */}}
 {{- if $hasExtraCA }}{{ $_ := set $spec "extraCACertificates" $root.Values.extraCACertificates }}{{ end }}
+{{- if $root.Values.buildkitTLS.enabled }}{{ $_ := set $spec "buildkitTLS" (omit $root.Values.buildkitTLS "certificate") }}{{ end }}
 {{- if $root.Values.projectedServiceAccountTokens }}{{ $_ := set $spec "projectedServiceAccountTokens" $root.Values.projectedServiceAccountTokens }}{{ end }}
 {{- if $root.Values.extraVolumes }}{{ $_ := set $spec "extraVolumes" $root.Values.extraVolumes }}{{ end }}
 {{- if $root.Values.extraVolumeMounts }}{{ $_ := set $spec "extraVolumeMounts" $root.Values.extraVolumeMounts }}{{ end }}
@@ -233,8 +242,8 @@ for the default case, same rule the keys above already follow for the
 values-hash).
 */}}
 {{- $hasInitContainers := or $root.Values.nixBuilders.enabled (gt (len $root.Values.extraInitContainers) 0) }}
-{{- $hasVolumeMounts := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA (gt (len $root.Values.extraVolumeMounts) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
-{{- $hasVolumes := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA (gt (len $root.Values.extraVolumes) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
+{{- $hasVolumeMounts := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA $root.Values.buildkitTLS.enabled (gt (len $root.Values.extraVolumeMounts) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
+{{- $hasVolumes := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA $root.Values.buildkitTLS.enabled (gt (len $root.Values.extraVolumes) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -519,6 +528,12 @@ spec:
             - name: AWS_PROFILE
               value: {{ $root.Values.awsConfig.profile | quote }}
             {{- end }}
+            {{- if $root.Values.buildkitTLS.enabled }}
+            # The shared CI workflows register the BuildKit builders with
+            # TLS when this directory holds ca.pem, cert.pem and key.pem.
+            - name: CI_BUILDKIT_TLS_DIR
+              value: {{ $root.Values.buildkitTLS.mountPath | quote }}
+            {{- end }}
           {{- with $p.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -556,6 +571,11 @@ spec:
             {{- if $hasExtraCA }}
             - name: extra-ca
               mountPath: {{ $root.Values.extraCACertificates.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $root.Values.buildkitTLS.enabled }}
+            - name: buildkit-tls
+              mountPath: {{ $root.Values.buildkitTLS.mountPath }}
               readOnly: true
             {{- end }}
             {{- if $root.Values.projectedServiceAccountTokens }}
@@ -638,6 +658,28 @@ spec:
               path: {{ $k | quote }}
             {{- end }}
           {{- end }}
+        {{- end }}
+        {{- if $root.Values.buildkitTLS.enabled }}
+        # One directory from two objects: the client certificate pair from
+        # the Secret and the server trust bundle from the ConfigMap, under
+        # the names the CI workflows expect. 0444 for the same reason as
+        # the volumes around it: the runner container runs as `runner`.
+        - name: buildkit-tls
+          projected:
+            defaultMode: 0444
+            sources:
+              - secret:
+                  name: {{ $root.Values.buildkitTLS.secretName }}
+                  items:
+                    - key: tls.crt
+                      path: cert.pem
+                    - key: tls.key
+                      path: key.pem
+              - configMap:
+                  name: {{ $root.Values.buildkitTLS.ca.configMapName }}
+                  items:
+                    - key: {{ $root.Values.buildkitTLS.ca.key }}
+                      path: ca.pem
         {{- end }}
         {{- if $root.Values.projectedServiceAccountTokens }}
         # 0444: read by whatever job-side code the estate points at this

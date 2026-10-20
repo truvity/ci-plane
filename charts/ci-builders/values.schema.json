@@ -159,6 +159,42 @@
           "minimum": 1,
           "description": "Cap on concurrent build steps per daemon (--oci-max-parallelism). Unset = no flag."
         },
+        "mtls": {
+          "type": "object",
+          "description": "Mutual-TLS builders beside the plain ones. Off by default; the values.yaml comment has the sequence.",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "retirePlain": {"type": "boolean", "description": "Stop rendering the plain builders. Refused without enabled."},
+            "serverCertificate": {
+              "type": "object",
+              "properties": {
+                "create": {"type": "boolean"},
+                "dnsNames": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arm64": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "amd64": {"type": "array", "items": {"type": "string", "minLength": 1}}
+                  }
+                }
+              }
+            },
+            "clientCA": {
+              "type": "object",
+              "properties": {
+                "configMapName": {"type": "string", "minLength": 1},
+                "create": {"type": "boolean"},
+                "requesterNamespaces": {"type": "array", "items": {"type": "string", "minLength": 1}}
+              }
+            },
+            "networkPolicy": {
+              "type": "object",
+              "properties": {
+                "additionalIngress": {"$ref": "#/definitions/networkPolicy/properties/additionalIngress"}
+              }
+            }
+          }
+        },
         "archs": {
           "type": "array",
           "items": {

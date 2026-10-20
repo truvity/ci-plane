@@ -1,0 +1,6 @@
+# refuses: buildkitTLS.ca.configMapName is required
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+buildkitTLS:
+  enabled: true

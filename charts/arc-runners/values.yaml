@@ -415,6 +415,54 @@ extraCACertificates:
   # Where the directory is mounted; CI_EXTRA_CA_DIR points here.
   mountPath: /var/run/extra-ca
 
+# buildkitTLS: the client side of the mutual-TLS BuildKit
+# builders (ci-builders' buildkitd.mtls). OFF by default: nothing is
+# rendered, mounted or set, byte-identical to a chart without this key.
+#
+# Enabled, the runner container gets a read-only directory holding
+#
+#   ca.pem    what the client trusts the builders' certificate by
+#   cert.pem  its own client certificate (the ONE client CA's)
+#   key.pem   its key
+#
+# and CI_BUILDKIT_TLS_DIR pointing at it, the contract the shared CI
+# workflows use to register the builders with TLS instead of plain TCP.
+# A job reads the directory when it starts: a renewed certificate reaches
+# the next job, and one in flight keeps the file it read.
+#
+# The directory is readable by every process in the runner container,
+# the jobs' own code included -- the same boundary as the container's
+# other credentials. The certificate admits to the builders and to nothing
+# else; its lifetime is the damage window.
+buildkitTLS:
+  enabled: false
+  mountPath: /var/run/buildkit-tls
+  # The Secret holding tls.crt and tls.key (cert-manager's layout), in the
+  # release namespace.
+  secretName: buildkit-client-tls
+  # create: true also renders the cert-manager Certificate that produces
+  # that Secret, from the issuer the builders' chart (or the estate)
+  # provides: ci-builders' clientCA.issuerName, a ClusterIssuer. Its
+  # common name must be the one that issuer's policy admits.
+  certificate:
+    create: false
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+    commonName: ci-runner
+    duration: 2160h
+    renewBefore: 720h
+    privateKey:
+      algorithm: ECDSA
+      size: 384
+  # ca.pem: the bundle the builders' server certificate verifies against,
+  # from a ConfigMap in the release namespace (e.g. the estate's
+  # trust-manager bundle of its private roots). REQUIRED while enabled.
+  ca:
+    configMapName: ""
+    key: ca-certificates.crt
+
 # NODE CLASSES (v7.0.0): where a runner may run, as data YOU define. A
 # class is a name you choose, mapped to any of nodeSelector, tolerations
 # and affinity; a scale set, a tier preset or the whole release then

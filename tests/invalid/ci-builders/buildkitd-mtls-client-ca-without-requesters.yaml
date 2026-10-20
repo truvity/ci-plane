@@ -1,0 +1,19 @@
+# refuses: clientCA.requesterNamespaces is required
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    serverCertificate:
+      issuerRef: {name: example-private}
+      dnsNames:
+        arm64: [a.example.private]
+        amd64: [b.example.private]
+    clientCA:
+      create: true
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

@@ -307,6 +307,29 @@
         }
       }
     },
+    "buildkitTLS": {
+      "type": "object",
+      "description": "Client side of the mutual-TLS BuildKit builders. Off by default: nothing rendered, mounted or set.",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "mountPath": {"type": "string", "minLength": 1},
+        "secretName": {"type": "string"},
+        "certificate": {
+          "type": "object",
+          "properties": {
+            "create": {"type": "boolean"},
+            "commonName": {"type": "string", "minLength": 1}
+          }
+        },
+        "ca": {
+          "type": "object",
+          "properties": {
+            "configMapName": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
     "awsConfig": {
       "type": "object",
       "description": "Empty/disabled by default: no ConfigMap, no mount, neither AWS_CONFIG_FILE nor AWS_PROFILE set. templates/runnersets.yaml also refuses this alongside an extraEnv entry named AWS_ACCESS_KEY_ID -- a check this schema cannot express.",

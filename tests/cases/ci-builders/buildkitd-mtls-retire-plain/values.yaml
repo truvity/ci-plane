@@ -1,0 +1,17 @@
+# After the cut-over: only the TLS builders. The server Secrets and the
+# client CA ConfigMap come from elsewhere (create: false on both).
+buildkitd:
+  archs: [arm64]
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    retirePlain: true
+    serverCertificate:
+      create: false
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

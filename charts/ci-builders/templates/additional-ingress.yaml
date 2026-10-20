@@ -39,8 +39,11 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end -}}
-{{- if .Values.buildkitd.enabled }}
+{{- if and .Values.buildkitd.enabled (not .Values.buildkitd.mtls.retirePlain) }}
 {{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.networkPolicy.additionalIngress "component" "buildkitd" "port" 1234) }}
+{{- end }}
+{{- if and .Values.buildkitd.enabled .Values.buildkitd.mtls.enabled }}
+{{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.mtls.networkPolicy.additionalIngress "component" "buildkitd-mtls" "port" 1234) }}
 {{- end }}
 {{- if .Values.nixWorkers.enabled }}
 {{- include "ci-builders.additionalIngress" (dict "entries" .Values.nixWorkers.networkPolicy.additionalIngress "component" "nix-worker" "port" 2222) }}

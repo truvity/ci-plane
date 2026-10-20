@@ -1,0 +1,14 @@
+# INF-1700: the client certificate for the mutual-TLS BuildKit builders,
+# mounted into every runner pod with CI_BUILDKIT_TLS_DIR pointing at it,
+# the Certificate rendered by this release.
+githubConfigUrl: https://github.com/example
+controllerServiceAccount:
+  namespace: arc-system
+buildkitTLS:
+  enabled: true
+  certificate:
+    create: true
+    issuerRef:
+      name: ci-buildkit-client
+  ca:
+    configMapName: example-private-ca

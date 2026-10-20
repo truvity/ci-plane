@@ -1,0 +1,16 @@
+# refuses: serverCertificate.issuerRef.name is required
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    serverCertificate:
+      dnsNames:
+        arm64: [a.example.private]
+        amd64: [b.example.private]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
