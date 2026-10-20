@@ -242,9 +242,31 @@ buildkitd:
   # Certificates are re-read only when the daemon starts: a renewed server
   # certificate reaches buildkitd with the next pod restart, which must
   # happen before the old certificate expires (see docs/mtls.md).
+  #
+  # IN PLACE (mode: inPlace). The other way to the same end: no second
+  # set. The plain StatefulSet buildkitd-<arch> is itself changed to serve
+  # mutual TLS (the certificate and client CA mounted, --tls* set, the plain
+  # tcp listener gone), keeping its Service, its cache volume (warm) and its
+  # node, so nothing is added and the cache survives. There is no period in
+  # which both kinds are served: every client must dial with TLS from the
+  # moment the pod restarts, so it is switched in the same change as the
+  # clients (the runners). Rolling back is switching mode back to parallel
+  # (the plain listener returns, the cache still there) and the clients
+  # back with it. retirePlain does not apply. A renewed server certificate
+  # restarts the pod by itself when stakater/Reloader runs in the cluster
+  # (reloader.enabled, the default, adds its annotations in this mode).
   mtls:
     enabled: false
+    # parallel (default): TLS builders beside the plain ones (the sequence
+    # above). inPlace: the plain builders become the TLS ones.
+    mode: parallel
     retirePlain: false
+    # inPlace only: annotate the StatefulSets for stakater/Reloader
+    # (secret.reloader.stakater.com/reload on the server certificate Secret,
+    # configmap.reloader.stakater.com/reload on the client CA ConfigMap).
+    # Harmless where no Reloader runs; then restart by hand (docs/mtls.md).
+    reloader:
+      enabled: true
     # The server certificates (cert-manager), one per arch, mounted at
     # /etc/buildkit/tls. The names are estate facts and belong to the
     # estate's values; so does the issuer.

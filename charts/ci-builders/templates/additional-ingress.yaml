@@ -43,7 +43,10 @@ spec:
 {{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.networkPolicy.additionalIngress "component" "buildkitd" "port" 1234) }}
 {{- end }}
 {{- if and .Values.buildkitd.enabled .Values.buildkitd.mtls.enabled }}
-{{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.mtls.networkPolicy.additionalIngress "component" "buildkitd-mtls" "port" 1234) }}
+{{- /* parallel: the entries admit the TLS set; inPlace: there is no second
+     set, the same entries admit the (now TLS) buildkitd pods. */}}
+{{- $mtlsComponent := ternary "buildkitd" "buildkitd-mtls" (eq (.Values.buildkitd.mtls.mode | default "parallel") "inPlace") }}
+{{- include "ci-builders.additionalIngress" (dict "entries" .Values.buildkitd.mtls.networkPolicy.additionalIngress "component" $mtlsComponent "port" 1234) }}
 {{- end }}
 {{- if .Values.nixWorkers.enabled }}
 {{- include "ci-builders.additionalIngress" (dict "entries" .Values.nixWorkers.networkPolicy.additionalIngress "component" "nix-worker" "port" 2222) }}

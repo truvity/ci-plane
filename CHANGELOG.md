@@ -5,6 +5,13 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.3.0
+
+### Added: ci-builders `buildkitd.mtls.mode: inPlace`
+
+- **ci-builders: `buildkitd.mtls.mode` (`parallel` by default, or `inPlace`).** `parallel` is v7.2.0's behaviour, unchanged: the TLS builders are a second set, `buildkitd-mtls-<arch>`, beside the plain one. `inPlace` turns the plain builders into the TLS ones instead: the existing `buildkitd-<arch>` StatefulSet keeps its name, Service, cache volume (warm) and node, and gains the server-certificate and client-CA mounts and `--tlscert/--tlskey/--tlscacert`. Its `tcp://` listener is then TLS-only (buildkitd cannot serve plain and TLS on tcp from one process); the unix socket stays for the readiness probe. The server `Certificate`s, the client CA, its policy and the trust bundle render as before; the parallel `buildkitd-mtls-<arch>` StatefulSets, Services and policies do not. `buildkitd.mtls.networkPolicy.additionalIngress` admits the `buildkitd` pods in this mode. With `mode` unset every render is byte-identical to v7.2.0. **Adoption:** every client of the builders must dial with TLS from the moment the pod restarts, so switch the runners (`arc-runners` `buildkitTLS`, and the endpoint they dial) in the same change. **Rollback:** set `mode: parallel` (the plain listener returns, the cache is still there) and move the clients back. `retirePlain` is refused in this mode (there is no plain set to retire). See [docs/mtls.md](docs/mtls.md).
+- **ci-builders: Reloader annotations (`buildkitd.mtls.reloader.enabled`, default `true`; `inPlace` only).** The `buildkitd-<arch>` StatefulSets carry `secret.reloader.stakater.com/reload` for the server certificate Secret and `configmap.reloader.stakater.com/reload` for the client CA ConfigMap, so [stakater/Reloader](https://github.com/stakater/Reloader), where it runs, restarts the pod when cert-manager renews the certificate (buildkitd reads it only at start). Where no Reloader runs the annotations do nothing.
+
 ## v7.2.0
 
 ### Added: runner CA certificates, supplied at runtime

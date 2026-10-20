@@ -161,10 +161,12 @@
         },
         "mtls": {
           "type": "object",
-          "description": "Mutual-TLS builders beside the plain ones. Off by default; the values.yaml comment has the sequence.",
+          "description": "Mutual-TLS builders, beside the plain ones or in place of them. Off by default; the values.yaml comment has the sequence.",
           "properties": {
             "enabled": {"type": "boolean"},
-            "retirePlain": {"type": "boolean", "description": "Stop rendering the plain builders. Refused without enabled."},
+            "mode": {"type": "string", "enum": ["parallel", "inPlace"], "description": "parallel: TLS builders beside the plain ones. inPlace: the plain builders become the TLS ones, keeping their cache."},
+            "reloader": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+            "retirePlain": {"type": "boolean", "description": "Stop rendering the plain builders. Refused without enabled, and with mode inPlace."},
             "serverCertificate": {
               "type": "object",
               "properties": {
