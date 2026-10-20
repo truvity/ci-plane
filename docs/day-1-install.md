@@ -349,6 +349,6 @@ Point `runs-on` at the scale-set names (via org variables so a rename
 is one change, not N). Runners reach the caches by cluster DNS:
 `buildkitd-<arch>.<namespace>.svc:1234` (buildx `--driver remote`),
 `cache-redirect.<namespace>.svc/nix` (nix substituter) and `/goproxy` (GOPROXY),
-`bazel-remote.<namespace>.svc:9092` (moon remote cache),
+`bazel-remote.<namespace>.svc:9092` (moon remote cache; the port declares `appProtocol: kubernetes.io/h2c`, so a gateway can publish it over an HTTPRoute),
 `npm-cache.<namespace>.svc` (yarn/npm/pnpm `npmRegistryServer`, public
 packages, behind a health-probe fallback to registry.npmjs.org).

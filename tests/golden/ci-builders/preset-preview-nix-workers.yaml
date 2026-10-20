@@ -306,6 +306,11 @@ spec:
     - name: grpc
       port: 9092
       targetPort: grpc
+      # The gRPC port speaks HTTP/2 without TLS. Declared so a gateway that
+      # reaches it over an HTTPRoute (Envoy Gateway reads this field) talks
+      # HTTP/2 to the pod rather than HTTP/1.1; kube-proxy and in-cluster
+      # clients ignore it.
+      appProtocol: kubernetes.io/h2c
 
 ---
 # Source: ci-builders/templates/buildkitd.yaml
