@@ -186,7 +186,53 @@
               "properties": {
                 "configMapName": {"type": "string", "minLength": 1},
                 "create": {"type": "boolean"},
-                "requesterNamespaces": {"type": "array", "items": {"type": "string", "minLength": 1}}
+                "requesterNamespaces": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "externalClients": {
+                  "description": "Client identities for runners outside the cluster, by name: each its own Certificate, policy and optional PushSecret. Needs create: true.",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["commonName"],
+                    "properties": {
+                      "commonName": {"type": "string", "minLength": 1},
+                      "secretName": {"type": "string"},
+                      "duration": {"type": "string"},
+                      "renewBefore": {"type": "string"},
+                      "privateKey": {"type": "object"},
+                      "push": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "enabled": {"type": "boolean"},
+                          "storeRef": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {"type": "string"},
+                              "kind": {"type": "string", "enum": ["ClusterSecretStore", "SecretStore"]}
+                            }
+                          },
+                          "refreshInterval": {"type": "string"},
+                          "names": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "ca": {"type": "string", "minLength": 1},
+                              "cert": {"type": "string", "minLength": 1},
+                              "key": {"type": "string", "minLength": 1}
+                            }
+                          },
+                          "secretType": {"type": "string", "enum": ["SecureString", "String"]},
+                          "kmsKeyId": {"type": "string"},
+                          "description": {"type": "string"},
+                          "tags": {"type": "object", "additionalProperties": {"type": "string"}},
+                          "caPem": {"type": "string"}
+                        }
+                      }
+                    }
+                  }
+                }
               }
             },
             "networkPolicy": {

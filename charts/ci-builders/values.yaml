@@ -325,6 +325,34 @@ buildkitd:
         enabled: true
       bundle:
         enabled: true
+      # Client identities for runners OUTSIDE the cluster (serverless
+      # runners, say), each an identity of its own, not a copy of the
+      # in-cluster runners' (commonName above). Needs create: true. Per
+      # entry, in the RELEASE namespace (which must not be in
+      # requesterNamespaces): a cert-manager Certificate with the entry's
+      # own common name, a CertificateRequestPolicy that admits exactly
+      # that name from exactly this namespace, and, with push.enabled, an
+      # External Secrets PushSecret that copies ca.pem (push.caPem, the
+      # bundle the client trusts the builders' server certificate by),
+      # cert.pem and key.pem to a store the estate owns. The builders still
+      # verify only the chain to the one client CA; the policy decides who
+      # is issued one. docs/mtls.md#clients-outside-the-cluster.
+      externalClients: {}
+      #  outside:
+      #    commonName: ci-runner-outside       # not clientCA.commonName
+      #    secretName: ""                      # default buildkit-client-<name>-tls
+      #    duration: 2160h
+      #    renewBefore: 720h
+      #    privateKey: {algorithm: ECDSA, size: 384}
+      #    push:
+      #      enabled: false
+      #      storeRef: {name: "", kind: ClusterSecretStore}
+      #      refreshInterval: 1h               # shorter than the renewal margin
+      #      names: {ca: ca, cert: cert, key: key}   # remote names, relative to the store's own prefix
+      #      secretType: SecureString
+      #      kmsKeyId: ""                      # empty: the provider's default key
+      #      tags: {}
+      #      caPem: ""                         # required while push.enabled
     networkPolicy:
       # Who may reach the TLS builders: buildkitd.networkPolicy.
       # consumerNamespaces (the same runners) and these additive

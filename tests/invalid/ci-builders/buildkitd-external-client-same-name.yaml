@@ -1,0 +1,23 @@
+# refuses: is also a's
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    serverCertificate:
+      issuerRef: {name: example-private}
+      dnsNames:
+        arm64: [a.example.private]
+        amd64: [b.example.private]
+    clientCA:
+      requesterNamespaces: [arc-runners-example]
+      create: true
+      externalClients:
+        a: {commonName: ci-runner-x}
+        b: {commonName: ci-runner-x}
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

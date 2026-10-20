@@ -1,0 +1,22 @@
+# refuses: push.storeRef.name is required
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    serverCertificate:
+      issuerRef: {name: example-private}
+      dnsNames:
+        arm64: [a.example.private]
+        amd64: [b.example.private]
+    clientCA:
+      requesterNamespaces: [arc-runners-example]
+      create: true
+      externalClients:
+        outside: {commonName: ci-runner-outside, push: {enabled: true, caPem: "x"}}
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

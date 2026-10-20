@@ -1,0 +1,170 @@
+{{- /*
+Client certificates for runners that live OUTSIDE this cluster (for example
+serverless runners), beside the in-cluster runners' own (arc-runners
+buildkitTLS). Each entry of buildkitd.mtls.clientCA.externalClients is one
+identity of its own, not a copy of the runners':
+
+  - a cert-manager Certificate in the release namespace, from the client CA's
+    ClusterIssuer, with the entry's own common name;
+  - an approver-policy CertificateRequestPolicy that admits exactly that
+    common name, from exactly the release namespace, and no other request;
+  - with push.enabled, an External Secrets PushSecret that copies the issued
+    pair, and the CA bundle the client trusts the builders by, to a secret
+    store the estate owns (for example Parameter Store). A renewal then
+    reaches the store without a human: cert-manager renews the Secret, the
+    PushSecret pushes it on the next change and every refreshInterval.
+
+The builders still verify one thing, the chain to the ONE client CA
+(--tlscacert); the policy is where a second identity is admitted or not.
+Needs buildkitd.mtls.clientCA.create: true.
+*/ -}}
+{{- if and .Values.buildkitd.enabled .Values.buildkitd.mtls.enabled }}
+{{- $ca := .Values.buildkitd.mtls.clientCA }}
+{{- $ext := $ca.externalClients | default dict }}
+{{- if $ext }}
+{{- if not $ca.create }}{{ fail "buildkitd.mtls.clientCA.externalClients needs clientCA.create: true: the identities are issued by, and admitted through, the client CA this chart builds" }}{{ end }}
+{{- $issuer := $ca.issuerName }}
+{{- $seenCN := dict }}
+{{- range $name, $e := $ext }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s: the name must be a DNS label (lower-case letters, digits, '-')" $name) }}{{ end }}
+{{- if not $e.commonName }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s.commonName is required: the one common name its policy admits" $name) }}{{ end }}
+{{- if eq $e.commonName $ca.commonName }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s.commonName %q is the in-cluster runners' own (clientCA.commonName): an external client is an identity of its own" $name $e.commonName) }}{{ end }}
+{{- if hasKey $seenCN $e.commonName }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s.commonName %q is also %s's" $name $e.commonName (get $seenCN $e.commonName)) }}{{ end }}
+{{- $_ := set $seenCN $e.commonName $name }}
+{{- if has $.Release.Namespace ($ca.requesterNamespaces | default list) }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s lives in the release namespace %s, which is also in requesterNamespaces: the in-cluster runners' policy and this identity's would both admit requests from it" $name $.Release.Namespace) }}{{ end }}
+{{- $secret := $e.secretName | default (printf "buildkit-client-%s-tls" $name) }}
+{{- $push := $e.push | default dict }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: buildkit-client-{{ $name }}
+  labels:
+    app.kubernetes.io/name: buildkit-client-{{ $name }}
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  secretName: {{ $secret }}
+  commonName: {{ $e.commonName | quote }}
+  usages:
+    - digital signature
+    - client auth
+  duration: {{ $e.duration | default "2160h" }}
+  renewBefore: {{ $e.renewBefore | default "720h" }}
+  privateKey:
+    {{- toYaml ($e.privateKey | default (dict "algorithm" "ECDSA" "size" 384)) | nindent 4 }}
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $issuer }}
+    kind: ClusterIssuer
+    group: cert-manager.io
+{{- if $ca.policy.enabled }}
+---
+# Admits exactly this identity: its common name, client auth, ECDSA, from the
+# release namespace only. The in-cluster runners' policy ({{ $issuer }}) does
+# not bind here, so it cannot admit this namespace's requests, and this one
+# does not admit theirs.
+apiVersion: policy.cert-manager.io/v1alpha1
+kind: CertificateRequestPolicy
+metadata:
+  name: {{ $issuer }}-{{ $name }}
+spec:
+  allowed:
+    commonName:
+      required: true
+      value: {{ $e.commonName | quote }}
+    usages:
+      - client auth
+      - digital signature
+      - key encipherment
+    isCA: false
+  constraints:
+    privateKey:
+      algorithm: ECDSA
+      minSize: 256
+      maxSize: 521
+  selector:
+    issuerRef:
+      name: {{ $issuer }}
+      kind: ClusterIssuer
+      group: cert-manager.io
+    namespace:
+      matchNames:
+        - {{ $.Release.Namespace | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $issuer }}-{{ $name }}-policy-use
+rules:
+  - apiGroups: ["policy.cert-manager.io"]
+    resources: ["certificaterequestpolicies"]
+    verbs: ["use"]
+    resourceNames: [{{ printf "%s-%s" $issuer $name | quote }}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $issuer }}-{{ $name }}-policy-use
+  namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $issuer }}-{{ $name }}-policy-use
+subjects:
+  - kind: ServiceAccount
+    name: {{ $ca.requester.name }}
+    namespace: {{ $ca.requester.namespace }}
+{{- end }}
+{{- if $push.enabled }}
+{{- if not (dig "storeRef" "name" "" $push) }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s.push.storeRef.name is required while push.enabled is true" $name) }}{{ end }}
+{{- if not $push.caPem }}{{ fail (printf "buildkitd.mtls.clientCA.externalClients.%s.push.caPem is required while push.enabled is true: the PEM bundle the client trusts the builders' server certificate by" $name) }}{{ end }}
+{{- $names := $push.names | default dict }}
+{{- $meta := dict "secretType" ($push.secretType | default "SecureString") "description" ($push.description | default (printf "BuildKit client credential %s, pushed by External Secrets" $name)) }}
+{{- if $push.kmsKeyId }}{{ $_ := set $meta "kmsKeyID" $push.kmsKeyId }}{{ end }}
+{{- if $push.tags }}{{ $_ := set $meta "tags" $push.tags }}{{ end }}
+---
+# The pair cert-manager issued, and the CA bundle, pushed as three values:
+# ca.pem, cert.pem and key.pem, each to its own remote name (relative to the
+# store's prefix, if it has one). Nothing is deleted from the store if this
+# object goes (deletionPolicy None).
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: buildkit-client-{{ $name }}
+  labels:
+    app.kubernetes.io/name: buildkit-client-{{ $name }}
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  refreshInterval: {{ $push.refreshInterval | default "1h" }}
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: {{ $push.storeRef.name }}
+      kind: {{ $push.storeRef.kind | default "ClusterSecretStore" }}
+  selector:
+    secret:
+      name: {{ $secret }}
+  template:
+    engineVersion: v2
+    mergePolicy: Replace
+    data:
+      ca.pem: |
+        {{- $push.caPem | trim | nindent 8 }}
+      cert.pem: {{ `'{{ index . "tls.crt" }}'` }}
+      key.pem: {{ `'{{ index . "tls.key" }}'` }}
+  data:
+    {{- range $key, $remote := dict "ca.pem" ($names.ca | default "ca") "cert.pem" ($names.cert | default "cert") "key.pem" ($names.key | default "key") }}
+    - match:
+        secretKey: {{ $key }}
+        remoteRef:
+          remoteKey: {{ $remote | quote }}
+      metadata:
+        apiVersion: kubernetes.external-secrets.io/v1alpha1
+        kind: PushSecretMetadata
+        spec:
+          {{- toYaml $meta | nindent 10 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
