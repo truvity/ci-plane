@@ -1,0 +1,29 @@
+# The TLS builders beside the plain ones, with the client CA built by the
+# chart (cert-manager, approver-policy and trust-manager objects).
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    enabled: true
+    serverCertificate:
+      issuerRef:
+        name: example-private
+      dnsNames:
+        arm64: [buildkitd-arm64.example.private]
+        amd64: [buildkitd-amd64.example.private]
+    clientCA:
+      create: true
+      requesterNamespaces: [arc-runners-example, arc-runners-other]
+    networkPolicy:
+      additionalIngress:
+        - name: buildkitd-mtls-from-gateway
+          from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: gateway
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

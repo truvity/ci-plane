@@ -214,6 +214,102 @@ buildkitd:
     arm64: {}
     amd64: {}
 
+  # mutual TLS. OFF by default: nothing below renders and the
+  # plain builders above are untouched.
+  #
+  # WHY A SECOND SET OF BUILDERS, NOT A FLAG ON THE FIRST. buildkitd's TLS
+  # is one setting for the whole process: --tlscert/--tlskey/--tlscacert
+  # wrap EVERY tcp:// --addr in the same tls.Config (cmd/buildkitd,
+  # getListener; only unix:// sockets stay plain). One daemon cannot serve
+  # plain TCP to the runners that have not moved yet and mTLS to the ones
+  # that have, and two daemons cannot share one cache directory. So the
+  # transition is a second, TLS-only StatefulSet per arch, with its own
+  # cache volume (cold at first; the warm layer is cache-to
+  # type=registry), beside the plain one:
+  #
+  #   1. enabled: true         both sets run; clients move at their pace
+  #                            (plain endpoint -> mTLS endpoint is a client
+  #                            setting, and reverting it is the rollback).
+  #   2. retirePlain: true     once no client uses the plain endpoint, the
+  #                            plain StatefulSets, Services and policies go
+  #                            (their cache volumes are left to the PVC
+  #                            retention of the cluster; delete by hand).
+  #
+  # Objects are named buildkitd-mtls-<arch> and labelled
+  # app.kubernetes.io/name: buildkitd-mtls, so a plain Service can never
+  # select a TLS pod (nor the reverse).
+  #
+  # Certificates are re-read only when the daemon starts: a renewed server
+  # certificate reaches buildkitd with the next pod restart, which must
+  # happen before the old certificate expires (see docs/mtls.md).
+  mtls:
+    enabled: false
+    retirePlain: false
+    # The server certificates (cert-manager), one per arch, mounted at
+    # /etc/buildkit/tls. The names are estate facts and belong to the
+    # estate's values; so does the issuer.
+    serverCertificate:
+      # false = bring your own: a Secret named buildkitd-mtls-<arch>-tls
+      # with tls.crt and tls.key must exist in the release namespace.
+      create: true
+      issuerRef:
+        name: ""
+        kind: ClusterIssuer
+        group: cert-manager.io
+      # dnsNames per arch: the names clients dial (the SNI the gateway
+      # routes on). The first one is also the certificate's common name.
+      #   dnsNames:
+      #     arm64: [buildkitd-arm64.example.private]
+      #     amd64: [buildkitd-amd64.example.private]
+      dnsNames: {}
+      duration: 2160h
+      renewBefore: 720h
+      privateKey:
+        algorithm: ECDSA
+        size: 384
+    # The ONE client CA: the only authority the builders accept client
+    # certificates from (--tlscacert). Dedicated, so a certificate the
+    # estate's general private CA issues for some other workload does not
+    # open a builder. Its public half is read from a ConfigMap, key ca.crt,
+    # mounted at /etc/buildkit/client-ca.
+    clientCA:
+      configMapName: buildkitd-client-ca
+      # true = this chart also builds the CA (the cnpg-cluster chart's
+      # pattern): a self-signed Issuer and the CA Certificate in
+      # `namespace`, a ClusterIssuer that signs with it, an
+      # approver-policy CertificateRequestPolicy bounding what that issuer
+      # may sign, and a trust-manager Bundle publishing the CA
+      # certificate (never its key) to the ConfigMap above. Needs
+      # cert-manager, approver-policy and trust-manager; an estate whose
+      # approver-policy only acts on signers it is told about must list
+      # clusterissuers.cert-manager.io/<issuerName>.
+      create: false
+      issuerName: ci-buildkit-client
+      # cert-manager's cluster resource namespace: where a ClusterIssuer
+      # reads its CA Secret.
+      namespace: cert-manager
+      duration: 87600h
+      # Common name every client certificate must carry (the policy
+      # refuses any other), and the namespaces that may request them
+      # (the runner namespaces, e.g. arc-runners-<company>).
+      commonName: ci-runner
+      requesterNamespaces: []
+      # The ServiceAccount cert-manager requests as, that must `use` the
+      # policy.
+      requester:
+        name: cert-manager
+        namespace: cert-manager
+      policy:
+        enabled: true
+      bundle:
+        enabled: true
+    networkPolicy:
+      # Who may reach the TLS builders: buildkitd.networkPolicy.
+      # consumerNamespaces (the same runners) and these additive
+      # entries, e.g. the private gateway's namespace. Same entry shape
+      # as buildkitd.networkPolicy.additionalIngress.
+      additionalIngress: []
+
 nixWorkers:
   # Persistent remote Nix builders, one native worker per architecture.
   # Disabled by default because enabling requires at least one public key

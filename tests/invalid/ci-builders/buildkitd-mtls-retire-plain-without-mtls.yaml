@@ -1,0 +1,12 @@
+# refuses: retirePlain needs buildkitd.mtls.enabled
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  mtls:
+    retirePlain: true
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nixWorkers:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

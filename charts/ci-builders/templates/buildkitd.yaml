@@ -1,4 +1,5 @@
-{{- if .Values.buildkitd.enabled }}
+{{- if and .Values.buildkitd.mtls.retirePlain (not .Values.buildkitd.mtls.enabled) }}{{ fail "buildkitd.mtls.retirePlain needs buildkitd.mtls.enabled: retiring the plain builders with no TLS ones would leave the runners no builder at all" }}{{ end }}
+{{- if and .Values.buildkitd.enabled (not .Values.buildkitd.mtls.retirePlain) }}
 {{- $b := .Values.buildkitd }}
 {{- /* buildkitd.size (values.sizes): its resources and maxParallelism replace
      the component's own. A copy, so the release-wide values stay as given. */}}

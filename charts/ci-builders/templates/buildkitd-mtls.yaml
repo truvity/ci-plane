@@ -1,0 +1,344 @@
+{{- /*
+The mutual-TLS BuildKit builders (INF-1700): a second StatefulSet per
+architecture beside the plain one, never a flag on it. buildkitd applies
+its TLS settings to every tcp:// listener of the process and two daemons
+cannot share a cache directory, so serving plain TCP to the runners that
+have not moved and mTLS to the ones that have takes two daemons with a
+cache each. The values.yaml comment on buildkitd.mtls has the sequence.
+
+The builders accept a client only when its certificate chains to the ONE
+client CA (--tlscacert: the daemon then requires and verifies a client
+certificate). Their own certificate is the one cert-manager issued for the
+names clients dial (buildkitd.mtls.serverCertificate).
+*/ -}}
+{{- if and .Values.buildkitd.enabled .Values.buildkitd.mtls.enabled }}
+{{- $b := .Values.buildkitd }}
+{{- /* buildkitd.size, exactly as buildkitd.yaml reads it. */}}
+{{- if $b.size }}
+{{- $b = deepCopy $b }}
+{{- range $k, $v := (include "ci-builders.sizeOf" (dict "root" $ "size" $b.size "name" "buildkitd") | fromJson) }}
+{{- if has $k (list "resources" "maxParallelism") }}{{ $_ := set $b $k $v }}
+{{- else }}{{ fail (printf "sizes.%s.%s does not apply to buildkitd (it takes resources and maxParallelism)" $b.size $k) }}{{ end }}
+{{- end }}
+{{- end }}
+{{- $m := $b.mtls }}
+{{- $cert := $m.serverCertificate }}
+{{- $ca := $m.clientCA }}
+{{- if not $ca.configMapName }}{{ fail "buildkitd.mtls.clientCA.configMapName is required: the builders read the client CA certificate (ca.crt) from it" }}{{ end }}
+{{- if $cert.create }}
+{{- if not $cert.issuerRef.name }}{{ fail "buildkitd.mtls.serverCertificate.issuerRef.name is required while serverCertificate.create is true (or set create: false and supply the Secrets)" }}{{ end }}
+{{- end }}
+{{- if $ca.create }}
+{{- if not $ca.requesterNamespaces }}{{ fail "buildkitd.mtls.clientCA.requesterNamespaces is required and non-empty while clientCA.create is true: the policy admits requests from those namespaces and no others" }}{{ end }}
+{{- end }}
+{{- $tlsDir := "/etc/buildkit/tls" }}
+{{- $caDir := "/etc/buildkit/client-ca" }}
+{{- range $arch := $b.archs }}
+{{- $secret := printf "buildkitd-mtls-%s-tls" $arch }}
+{{- if $cert.create }}
+{{- $names := get ($cert.dnsNames | default dict) $arch | default list }}
+{{- if not $names }}{{ fail (printf "buildkitd.mtls.serverCertificate.dnsNames.%s is required and non-empty: the names clients dial" $arch) }}{{ end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: buildkitd-mtls-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: buildkitd-mtls
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  secretName: {{ $secret }}
+  commonName: {{ first $names | quote }}
+  dnsNames:
+    {{- toYaml $names | nindent 4 }}
+  duration: {{ $cert.duration }}
+  renewBefore: {{ $cert.renewBefore }}
+  privateKey:
+    {{- toYaml $cert.privateKey | nindent 4 }}
+    rotationPolicy: Always
+  issuerRef:
+    {{- toYaml $cert.issuerRef | nindent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd-mtls-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: buildkitd-mtls
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  selector:
+    app.kubernetes.io/name: buildkitd-mtls
+    ci-plane.io/arch: {{ $arch }}
+  ports:
+    - name: grpc
+      port: 1234
+      targetPort: 1234
+---
+# Rootless BuildKit, as buildkitd.yaml, with TLS on its one tcp:// listener
+# and a unix socket kept for the readiness probe (buildctl cannot present
+# a client certificate it was never issued, and need not).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buildkitd-mtls-{{ $arch }}
+  labels:
+    app.kubernetes.io/name: buildkitd-mtls
+    app.kubernetes.io/part-of: ci-builders
+spec:
+  serviceName: buildkitd-mtls-{{ $arch }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd-mtls
+      ci-plane.io/arch: {{ $arch }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buildkitd-mtls
+        app.kubernetes.io/part-of: ci-builders
+        ci-plane.io/arch: {{ $arch }}
+      {{- with $b.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- $sched := (index $b.scheduling $arch) | default dict }}
+      {{- $placement := include "ci-builders.placement" (dict "root" $ "sched" $sched "arch" $arch) | fromJson }}
+      {{- with $placement.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $placement.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: enable-userns
+          image: {{ include "ci-builders.image" $b.initImage }}
+          command: ["sysctl", "-w", "user.max_user_namespaces=63359"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: buildkitd
+          image: {{ include "ci-builders.image" $b.image }}
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --addr
+            - unix:///run/user/1000/buildkit/buildkitd.sock
+            - --tlscert
+            - {{ $tlsDir }}/tls.crt
+            - --tlskey
+            - {{ $tlsDir }}/tls.key
+            - --tlscacert
+            - {{ $caDir }}/ca.crt
+            - --oci-worker-no-process-sandbox
+            {{- if $b.maxParallelism }}
+            - {{ printf "--oci-max-parallelism=%d" (int $b.maxParallelism) }}
+            {{- end }}
+          ports:
+            - name: grpc
+              containerPort: 1234
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: Unconfined
+          readinessProbe:
+            exec:
+              # The unix socket, which buildkitd leaves plain: the tcp://
+              # listener demands a client certificate.
+              command: ["buildctl", "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "debug", "workers"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+            - name: tls
+              mountPath: {{ $tlsDir }}
+              readOnly: true
+            - name: client-ca
+              mountPath: {{ $caDir }}
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ $secret }}
+            defaultMode: 0440
+        - name: client-ca
+          configMap:
+            name: {{ $ca.configMapName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $.Values.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $b.cacheSize }}
+{{- if $b.networkPolicy.enabled }}
+---
+# Only the listed consumer namespaces may reach the builders (the same
+# runners as the plain set).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: buildkitd-mtls-{{ $arch }}-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: buildkitd-mtls
+      ci-plane.io/arch: {{ $arch }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range $ns := $b.networkPolicy.consumerNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+        {{- end }}
+      ports:
+        - port: 1234
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- if $ca.create }}
+{{- $issuer := $ca.issuerName }}
+---
+# The root of the client trust: a self-signed issuer whose only job is to
+# sign the CA below. Namespaced, so the allow-all policy for namespaced
+# Issuers admits its requests.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer }}-selfsigned
+  namespace: {{ $ca.namespace }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $issuer }}-ca
+  namespace: {{ $ca.namespace }}
+spec:
+  isCA: true
+  commonName: {{ $issuer }} client CA
+  secretName: {{ $issuer }}-ca
+  duration: {{ $ca.duration }}
+  privateKey:
+    algorithm: ECDSA
+    size: 384
+    rotationPolicy: Never
+  issuerRef:
+    name: {{ $issuer }}-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+# Cluster-scoped, so a runner namespace can neither read the CA key (it is
+# in {{ $ca.namespace }}) nor sign with it: it can only ask, and the policy
+# below decides.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $issuer }}
+spec:
+  ca:
+    secretName: {{ $issuer }}-ca
+{{- if $ca.policy.enabled }}
+---
+# approver-policy: only the listed namespaces may request from this issuer,
+# and only client-auth certificates carrying the one common name, ECDSA.
+# Anything else is denied, including every SAN.
+apiVersion: policy.cert-manager.io/v1alpha1
+kind: CertificateRequestPolicy
+metadata:
+  name: {{ $issuer }}
+spec:
+  allowed:
+    commonName:
+      required: true
+      value: {{ $ca.commonName | quote }}
+    usages:
+      - client auth
+      - digital signature
+      - key encipherment
+    isCA: false
+  constraints:
+    privateKey:
+      algorithm: ECDSA
+      minSize: 256
+      maxSize: 521
+  selector:
+    issuerRef:
+      name: {{ $issuer }}
+      kind: ClusterIssuer
+      group: cert-manager.io
+    namespace:
+      matchNames:
+        {{- toYaml $ca.requesterNamespaces | nindent 8 }}
+---
+# approver-policy approves a request only when its requester may `use` a
+# policy that admits it. The requester of a Certificate is cert-manager
+# itself; bound in the requester namespaces only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $issuer }}-policy-use
+rules:
+  - apiGroups: ["policy.cert-manager.io"]
+    resources: ["certificaterequestpolicies"]
+    verbs: ["use"]
+    resourceNames: [{{ $issuer | quote }}]
+{{- range $ns := $ca.requesterNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $issuer }}-policy-use
+  namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $issuer }}-policy-use
+subjects:
+  - kind: ServiceAccount
+    name: {{ $ca.requester.name }}
+    namespace: {{ $ca.requester.namespace }}
+{{- end }}
+{{- end }}
+{{- if $ca.bundle.enabled }}
+---
+# trust-manager copies the CA CERTIFICATE (never its key) into this
+# release's namespace as the ConfigMap the builders read.
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: {{ $ca.configMapName }}
+spec:
+  sources:
+    - secret:
+        name: {{ $issuer }}-ca
+        key: ca.crt
+  target:
+    configMap:
+      key: ca.crt
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

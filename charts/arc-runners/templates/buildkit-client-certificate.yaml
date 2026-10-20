@@ -1,0 +1,29 @@
+{{- /*
+The runners' client certificate for the mutual-TLS BuildKit builders
+(INF-1700): one cert-manager Certificate per release, in the release
+namespace, producing the Secret buildkitTLS.secretName that every runner
+pod of the release mounts. Rendered only when asked (buildkitTLS.enabled
+and buildkitTLS.certificate.create); otherwise the Secret is the estate's.
+*/ -}}
+{{- if and .Values.buildkitTLS.enabled .Values.buildkitTLS.certificate.create }}
+{{- $c := .Values.buildkitTLS.certificate }}
+{{- if not $c.issuerRef.name }}{{ fail "buildkitTLS.certificate.issuerRef.name is required when buildkitTLS.certificate.create is true" }}{{ end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.buildkitTLS.secretName }}
+spec:
+  secretName: {{ .Values.buildkitTLS.secretName }}
+  commonName: {{ $c.commonName | quote }}
+  usages:
+    - digital signature
+    - client auth
+  duration: {{ $c.duration }}
+  renewBefore: {{ $c.renewBefore }}
+  privateKey:
+    {{- toYaml $c.privateKey | nindent 4 }}
+    rotationPolicy: Always
+  issuerRef:
+    {{- toYaml $c.issuerRef | nindent 4 }}
+{{- end }}
