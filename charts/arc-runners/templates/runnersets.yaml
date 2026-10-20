@@ -56,6 +56,21 @@ projected tokens sharing a mount path).
 {{- if eq $e.name "AWS_ACCESS_KEY_ID" }}{{ fail "awsConfig.enabled with an extraEnv entry named AWS_ACCESS_KEY_ID: the AWS SDK's own credential chain checks environment variables BEFORE a config file's credential_process, so this static key would silently keep winning over the one credential_process mints -- drop it (and its extraEnvFrom Secret, if that is where it comes from) before enabling awsConfig; the two are alternatives for the same job-scoped credential, never both at once" }}{{ end }}
 {{- end }}
 {{- end }}
+{{- /*
+extraCACertificates is release-wide and off while neither source is named.
+The checks the schema cannot express: exactly one source, and key names the
+image's runner-extra-ca would actually pick up (it reads *.pem and *.crt
+only, so any other name would be mounted and then silently ignored).
+*/}}
+{{- $extraCA := .Values.extraCACertificates }}
+{{- if and $extraCA.configMapName $extraCA.secretName }}{{ fail "extraCACertificates names both configMapName and secretName: name exactly one source for the CA certificates" }}{{ end }}
+{{- if or $extraCA.configMapName $extraCA.secretName }}
+{{- range $k := $extraCA.keys }}
+{{- if not (regexMatch "[.](pem|crt)$" (toString $k)) }}{{ fail (printf "extraCACertificates.keys: %q does not end in .pem or .crt -- the runner image only trusts files with those extensions, so this key would be mounted and then ignored" (toString $k)) }}{{ end }}
+{{- end }}
+{{- if not (hasPrefix "/" $extraCA.mountPath) }}{{ fail "extraCACertificates.mountPath must be an absolute path" }}{{ end }}
+{{- else if $extraCA.keys }}{{ fail "extraCACertificates.keys is set but neither configMapName nor secretName names a source" }}
+{{- end }}
 {{- if .Values.projectedServiceAccountTokens }}
 {{- $seenPaths := dict }}
 {{- range $i, $t := .Values.projectedServiceAccountTokens }}
@@ -195,6 +210,9 @@ what a job loses.
 {{- if $nixSandbox.enabled }}{{ $_ := set $spec "nixSandbox" $nixSandbox }}{{ end }}
 {{- if $restricted }}{{ $_ := set $spec "restricted" $root.Values.runnerUser }}{{ end }}
 {{- if $root.Values.awsConfig.enabled }}{{ $_ := set $spec "awsConfig" $root.Values.awsConfig }}{{ end }}
+{{- $hasExtraCA := or $root.Values.extraCACertificates.configMapName $root.Values.extraCACertificates.secretName }}
+{{- /* Absent from the hash while off, like the keys above. */}}
+{{- if $hasExtraCA }}{{ $_ := set $spec "extraCACertificates" $root.Values.extraCACertificates }}{{ end }}
 {{- if $root.Values.projectedServiceAccountTokens }}{{ $_ := set $spec "projectedServiceAccountTokens" $root.Values.projectedServiceAccountTokens }}{{ end }}
 {{- if $root.Values.extraVolumes }}{{ $_ := set $spec "extraVolumes" $root.Values.extraVolumes }}{{ end }}
 {{- if $root.Values.extraVolumeMounts }}{{ $_ := set $spec "extraVolumeMounts" $root.Values.extraVolumeMounts }}{{ end }}
@@ -215,8 +233,8 @@ for the default case, same rule the keys above already follow for the
 values-hash).
 */}}
 {{- $hasInitContainers := or $root.Values.nixBuilders.enabled (gt (len $root.Values.extraInitContainers) 0) }}
-{{- $hasVolumeMounts := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled (gt (len $root.Values.extraVolumeMounts) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
-{{- $hasVolumes := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled (gt (len $root.Values.extraVolumes) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
+{{- $hasVolumeMounts := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA (gt (len $root.Values.extraVolumeMounts) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
+{{- $hasVolumes := or $root.Values.nixBuilders.enabled $root.Values.awsConfig.enabled $hasExtraCA (gt (len $root.Values.extraVolumes) 0) (gt (len $root.Values.projectedServiceAccountTokens) 0) }}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
@@ -384,6 +402,12 @@ spec:
       containers:
         - name: runner
           image: {{ include "arc-runners.runnerImage" $root }}
+          {{- /* extraCACertificates: runner-extra-ca runs first, trusts the
+               mounted CA certificates, then execs the command that follows
+               `--`, so whatever is PID 1 without it still is. Empty while
+               off, which leaves the command lines below byte-identical. */}}
+          {{- $caPrefix := "" }}
+          {{- if $hasExtraCA }}{{ $caPrefix = "\"/usr/local/bin/runner-extra-ca\", \"--\", " }}{{ end }}
           {{- if $watchdog.enabled }}
           # runner-watchdog (runner.watchdog) is PID 1 and runs run.sh as its
           # child, logging its output unchanged. /healthz answers 503 only
@@ -391,7 +415,7 @@ spec:
           # READINESS probe, never liveness -- a restarted runner cannot
           # register again, so the remedy is deleting the EphemeralRunner,
           # which the janitor does for an idle runner that is NotReady.
-          command: ["/usr/local/bin/runner-watchdog", {{ printf "-port=%d" (int $watchdog.port) | quote }}, {{ printf "-grace=%s" $watchdog.grace | quote }},{{ with $watchdog.drillFile }} {{ printf "-drill-file=%s" . | quote }},{{ end }} "--", "/home/runner/run.sh"]
+          command: [{{ $caPrefix }}"/usr/local/bin/runner-watchdog", {{ printf "-port=%d" (int $watchdog.port) | quote }}, {{ printf "-grace=%s" $watchdog.grace | quote }},{{ with $watchdog.drillFile }} {{ printf "-drill-file=%s" . | quote }},{{ end }} "--", "/home/runner/run.sh"]
           ports:
             - name: watchdog
               containerPort: {{ int $watchdog.port }}
@@ -404,7 +428,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           {{- else }}
-          command: ["/home/runner/run.sh"]
+          command: [{{ $caPrefix }}"/home/runner/run.sh"]
           {{- end }}
           {{- with $extraEnvFrom }}
           # Credentials the runner needs that this chart must not know: an
@@ -473,6 +497,11 @@ spec:
               value: /etc/nix-builders
             {{- include "arc-runners.nixBuilderEnv" $root | nindent 12 }}
             {{- end }}
+            {{- if $hasExtraCA }}
+            # Read by runner-extra-ca (see values.yaml's extraCACertificates).
+            - name: CI_EXTRA_CA_DIR
+              value: {{ $root.Values.extraCACertificates.mountPath | quote }}
+            {{- end }}
             {{- if $root.Values.awsConfig.enabled }}
             # JOB-scoped, not CLIENT-scoped: an ephemeral runner's `runner`
             # container is the one place every step of ONE job runs, so
@@ -522,6 +551,11 @@ spec:
             {{- if $root.Values.awsConfig.enabled }}
             - name: aws-config
               mountPath: /var/run/aws-config
+              readOnly: true
+            {{- end }}
+            {{- if $hasExtraCA }}
+            - name: extra-ca
+              mountPath: {{ $root.Values.extraCACertificates.mountPath | quote }}
               readOnly: true
             {{- end }}
             {{- if $root.Values.projectedServiceAccountTokens }}
@@ -583,6 +617,27 @@ spec:
         - name: aws-config
           configMap:
             name: runner-aws-config
+        {{- end }}
+        {{- if $hasExtraCA }}
+        # 0444: the runner container's user is not root, and runner-extra-ca
+        # reads these as that user.
+        - name: extra-ca
+          {{- if $root.Values.extraCACertificates.configMapName }}
+          configMap:
+            name: {{ $root.Values.extraCACertificates.configMapName | quote }}
+            defaultMode: 0444
+          {{- else }}
+          secret:
+            secretName: {{ $root.Values.extraCACertificates.secretName | quote }}
+            defaultMode: 0444
+          {{- end }}
+          {{- with $root.Values.extraCACertificates.keys }}
+          items:
+            {{- range $k := . }}
+            - key: {{ $k | quote }}
+              path: {{ $k | quote }}
+            {{- end }}
+          {{- end }}
         {{- end }}
         {{- if $root.Values.projectedServiceAccountTokens }}
         # 0444: read by whatever job-side code the estate points at this

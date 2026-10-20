@@ -5,6 +5,13 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.2.0
+
+### Added: runner CA certificates, supplied at runtime
+
+- **arc-runners: `extraCACertificates` (off by default).** Names a ConfigMap (`configMapName`) or a Secret (`secretName`) whose `*.pem` / `*.crt` certificates every job on the runner trusts, for an HTTPS endpoint under a private CA. Optional `keys` picks which keys to mount (default: all); `mountPath` defaults to `/var/run/extra-ca`. Off, a render is byte-identical to before. On, the runner container mounts the source read-only, sets `CI_EXTRA_CA_DIR` and starts behind the new `runner-extra-ca` (in front of `runner-watchdog` when that is on). Rendering refuses naming both sources, and a key that does not end in `.pem` or `.crt`. **Adoption:** run a runner image of this release or later first (an older image has no `runner-extra-ca`, so the container cannot start), then set the value.
+- **Runner image: `/usr/local/bin/runner-extra-ca`.** An entrypoint prefix. When `CI_EXTRA_CA_DIR` names a directory it builds a bundle of the system roots plus the certificates in it, as the non-root `runner` user, and exports `SSL_CERT_FILE`, `NIX_SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` before `exec`ing the runner. With the variable unset it does nothing. The image still contains no CA. See docs/architecture.md ("Runner CA certificates").
+
 ## v7.1.0
 
 ### Pulumi package: `deploy/pulumi/runneridentity` v0.3.0 (breaking)

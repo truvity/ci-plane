@@ -160,6 +160,15 @@ COPY --from=gocache /out/go-cache-plugin /usr/local/bin/go-cache-plugin
 COPY --from=gocache /out/nix-worker-client-setup /usr/local/bin/nix-worker-client-setup
 COPY --from=gocache /out/runner-watchdog /usr/local/bin/runner-watchdog
 
+# The entrypoint prefix behind arc-runners' `extraCACertificates`: at
+# container start it makes the CA certificates mounted at $CI_EXTRA_CA_DIR
+# trusted, then execs the runner. In the image, not delivered per job,
+# because it must run before ANY job step does a TLS fetch (including the
+# nix and devbox ones), and the image carries no CA of its own: the
+# certificates arrive at runtime, from the cluster. A plain script with no
+# dependency beyond bash, hence no stage above.
+COPY --chmod=0755 runner-extra-ca.sh /usr/local/bin/runner-extra-ca
+
 # docker client + buildx plugin (daemonless: CLIENT ONLY, builds go to
 # the shared rootless builders over --driver remote). Static binaries,
 # arch-explicit; buildx lands on the system-wide plugin path so no

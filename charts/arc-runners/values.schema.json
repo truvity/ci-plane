@@ -391,6 +391,29 @@
         ]
       }
     },
+    "extraCACertificates": {
+      "type": "object",
+      "description": "Off while neither configMapName nor secretName is set. templates/runnersets.yaml also refuses both being set, and a key not ending in .pem or .crt -- checks this schema cannot express.",
+      "properties": {
+        "configMapName": {
+          "type": "string"
+        },
+        "secretName": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mountPath": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._/-]+$"
+        }
+      }
+    },
     "runner": {
       "type": "object",
       "properties": {
