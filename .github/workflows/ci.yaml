@@ -400,6 +400,15 @@ jobs:
       - name: packing cases
         run: ./hack/packing-cases.sh
 
+      # The runner image's CA entrypoint prefix (image/runner-extra-ca.sh,
+      # arc-runners `extraCACertificates`), run as the non-root user a
+      # runner pod is: the bundle holds the system roots AND the extras,
+      # a ConfigMap-shaped directory works, and a bad directory never
+      # stops the command. The image test below runs the same script in
+      # the built image.
+      - name: extra CA cases
+        run: ./hack/extra-ca-cases.sh
+
       # The health check's host-certificate parser
       # (image/nix-worker-healthcheck.sh) against hand-built
       # certificates -- fresh, low on validity, expired, missing,
@@ -555,6 +564,23 @@ jobs:
               test -n "$(git config --system --get "filter.lfs.$k")"
             done
             test "$(git config --system --get filter.lfs.required)" = true'
+          # Contents test: runner-extra-ca (arc-runners
+          # `extraCACertificates`) in the built image, as the runner
+          # user, with no root: given a directory holding a certificate
+          # it exports a bundle that has the system roots plus that one,
+          # and the command that follows runs.
+          ca=$(mktemp -d)
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+            -keyout "$ca/ca.key" -out "$ca/private-roots.pem" -subj '/CN=ci-plane test root' -days 2
+          rm "$ca/ca.key"
+          chmod 755 "$ca"; chmod 644 "$ca/private-roots.pem"
+          docker run --rm --user runner -v "$ca:/ca:ro" -e CI_EXTRA_CA_DIR=/ca \
+            --entrypoint /usr/local/bin/runner-extra-ca ci-plane-runner:test -- bash -c '
+            set -euo pipefail
+            sys=$(grep -c "BEGIN CERTIFICATE" /etc/ssl/certs/ca-certificates.crt)
+            test "$(grep -c "BEGIN CERTIFICATE" "$SSL_CERT_FILE")" -eq $((sys + 1))
+            test "$(grep -c "BEGIN CERTIFICATE" "$NODE_EXTRA_CA_CERTS")" -eq 1
+            test "$GIT_SSL_CAINFO" = "$SSL_CERT_FILE"'
           # The release images assemble from a base that does not exist
           # until a release runs, so they are LINTED rather than built —
           # what matters about them is that they execute nothing, and

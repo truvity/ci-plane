@@ -233,6 +233,63 @@ What it does not cover: a runner that hangs WHILE it holds a job
 (actions/runner#4569, a cancellation redelivery loop). The job is
 running, so the watchdog judges nothing.
 
+## Runner CA certificates: supplied at runtime, trusted without root
+
+An HTTPS endpoint under a private CA (a cache, a mirror) has to be trusted
+by every client a job runs. The runner image is public and identical for
+every estate, so it carries no CA; the certificates arrive with the pod.
+`extraCACertificates` (off by default) names a ConfigMap or a Secret in the
+release's namespace. The chart mounts it read-only on the runner container
+(default `/var/run/extra-ca`), sets `CI_EXTRA_CA_DIR` to it, and puts the
+image's `/usr/local/bin/runner-extra-ca` in front of the container's
+command (in front of `runner-watchdog` too, which stays PID 1 because the
+script `exec`s the rest of the command line).
+
+At container start `runner-extra-ca` (image/runner-extra-ca.sh) reads every
+`*.pem` and `*.crt` file in `CI_EXTRA_CA_DIR` that holds a PEM certificate.
+Unset, it does nothing. The runner container is the `runner` user and, on a
+`restricted` set, may not be root, so `update-ca-certificates` (which writes
+`/etc/ssl`) is not the mechanism. It builds a bundle in the runner's home
+instead, the system roots followed by the extras, and exports where each
+client looks. Every step of every job inherits the environment, because the
+runner starts under it:
+
+| Variable | Read by | Names |
+|---|---|---|
+| `SSL_CERT_FILE` | Go, OpenSSL, .NET (the runner itself) | the bundle |
+| `NIX_SSL_CERT_FILE` | nix | the bundle |
+| `CURL_CA_BUNDLE` | curl | the bundle |
+| `GIT_SSL_CAINFO` | git (libcurl does not read `SSL_CERT_FILE`) | the bundle |
+| `REQUESTS_CA_BUNDLE` | Python `requests` | the bundle |
+| `NODE_EXTRA_CA_CERTS` | JavaScript actions | the extras alone: Node adds them to its built-in roots |
+
+The bundle includes the system roots on purpose: `SSL_CERT_FILE` replaces,
+not extends, the default trust, and the runner must keep verifying
+github.com. Run as root with `update-ca-certificates` present (not how ARC
+starts it), the script installs the extras into the system store instead
+and exports only `NODE_EXTRA_CA_CERTS`, which Node never reads from there.
+
+**A problem never stops the runner.** A missing directory, no certificate
+in it, an unwritable home: each is one line on stderr
+(`runner-extra-ca: …`) and the command still runs, the same stance as the
+caches this exists for. A source that does not exist (a typo in
+`configMapName`) is different: the pod does not start, which is the visible
+failure that typo should be. The chart refuses, at render time, both
+sources at once, and a key that does not end in `.pem` or `.crt` (it would
+be mounted and then ignored).
+
+What it does not cover: a step that runs in a container the job starts
+(`container:`, `docker run`) has its own trust store, and a rotation of the
+source reaches a pod only when it starts (runners are ephemeral, so the next
+runner has it). The values-hash includes the setting, so changing the
+source's name recycles the listeners.
+
+`hack/extra-ca-cases.sh` runs the script as a non-root user (the system
+roots and the extras both verify against the bundle, a ConfigMap-shaped
+directory works, bad input is reported and survived), and the CI image job
+runs it in the built image. On ECS Fargate runners the image builder adds
+certificates itself, so nothing here applies.
+
 ## The release trigger is the last deliberate control point
 
 With pull-based promotion automated downstream, tag creation is the one

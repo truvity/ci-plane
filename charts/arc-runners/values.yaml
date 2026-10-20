@@ -369,6 +369,52 @@ awsConfig:
   # arrive per job.
   credentialProcess: ""
 
+# extraCACertificates: CA certificates the runner container trusts, supplied
+# at RUNTIME from a ConfigMap or a Secret in this release's namespace. THE
+# CASE THIS EXISTS FOR: an HTTPS endpoint (a cache, a mirror, an internal
+# service) under a private CA. The runner image carries no CA of its own --
+# it is public and the same for every estate -- so the CA arrives with the
+# pod, and a rotation is a change to the ConfigMap, not an image release.
+#
+# EMPTY BY DEFAULT: neither name set renders no volume, no mount, no
+# CI_EXTRA_CA_DIR and no command prefix -- byte-identical to a chart
+# without this key. Name exactly one source (both is a render error).
+#
+# On, the source is mounted read-only at `mountPath` on the runner
+# container, CI_EXTRA_CA_DIR is set to it, and the container's command gains
+# the image's /usr/local/bin/runner-extra-ca as a prefix (in front of
+# runner-watchdog too, when that is on). At container start it trusts every
+# *.pem and *.crt file in the directory IN ADDITION to the system roots,
+# without root: it writes a bundle (system roots + yours) under the runner's
+# home and exports SSL_CERT_FILE, NIX_SSL_CERT_FILE, CURL_CA_BUNDLE,
+# GIT_SSL_CAINFO and REQUESTS_CA_BUNDLE for it, plus NODE_EXTRA_CA_CERTS
+# (your certificates alone) for JavaScript actions. Every step of every job
+# inherits them. A certificate it cannot use (no *.pem/*.crt file, no PEM
+# in it) is logged on the container's stderr and the runner still starts.
+# See docs/architecture.md ("Runner CA certificates").
+#
+# The runner image must carry the script: enable this only with a runner
+# image of the same release or later, or the container cannot start.
+#
+# What a job does NOT inherit: a step that runs in a container the job
+# starts (`container:`, `docker run`) has its own trust store.
+#
+#   extraCACertificates:
+#     configMapName: private-ca        # or secretName: private-ca
+#     keys: [roots.pem]                # optional; default: every key
+extraCACertificates:
+  # The ConfigMap or Secret (not both) holding PEM certificates. Not
+  # optional: a pod whose source is missing does not start, which is the
+  # visible failure a typo should be.
+  configMapName: ""
+  secretName: ""
+  # Which keys to mount, each as a file of the same name. Empty mounts every
+  # key. A key must end in .pem or .crt (rendering refuses others: they
+  # would be mounted and ignored).
+  keys: []
+  # Where the directory is mounted; CI_EXTRA_CA_DIR points here.
+  mountPath: /var/run/extra-ca
+
 # NODE CLASSES (v7.0.0): where a runner may run, as data YOU define. A
 # class is a name you choose, mapped to any of nodeSelector, tolerations
 # and affinity; a scale set, a tier preset or the whole release then
