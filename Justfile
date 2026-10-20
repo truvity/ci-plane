@@ -1,7 +1,7 @@
 # Development commands. Tools come from devbox.json (`devbox shell`, or
-# direnv). CI runs `lint`, `golden` and `leak-canary` as recipes of the
-# shared check workflow (truvity/ci-workflows), each as its own job; the
-# chart assertions, the image builds and the Go jobs are still ci.yaml's
+# direnv). CI runs `lint`, `golden`, `schema` and `leak-canary` as recipes
+# of the shared check workflow (truvity/ci-workflows), each as its own job;
+# the chart assertions, the image builds and the Go jobs are still ci.yaml's
 # own jobs.
 
 charts := "arc-runners ci-builders"
@@ -28,6 +28,12 @@ golden:
 golden-update:
     bash hack/golden.sh update
 
+# Schema-validate the golden renders (kubeconform -strict against the
+# Kubernetes API, and each runner set's pod template as a Pod): the goldens
+# compare text, this proves the API server would accept what they say.
+schema:
+    bash hack/schema.sh
+
 # The reason this repository can be public.
 leak-canary:
     bash hack/leak-canary.sh
@@ -52,4 +58,4 @@ vuln:
     done
 
 # The pull-request gate that runs on a laptop.
-check: lint golden leak-canary
+check: lint golden schema leak-canary

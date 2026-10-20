@@ -646,20 +646,30 @@ spec:
         # 0444: the runner container's user is not root, and runner-extra-ca
         # reads these as that user.
         - name: extra-ca
+          {{- /* `items` belongs to the configMap or secret source, one level
+                 below the volume: beside it the API server (and Argo CD's
+                 schema check) refuses the pod template. */}}
           {{- if $root.Values.extraCACertificates.configMapName }}
           configMap:
             name: {{ $root.Values.extraCACertificates.configMapName | quote }}
             defaultMode: 0444
+            {{- with $root.Values.extraCACertificates.keys }}
+            items:
+              {{- range $k := . }}
+              - key: {{ $k | quote }}
+                path: {{ $k | quote }}
+              {{- end }}
+            {{- end }}
           {{- else }}
           secret:
             secretName: {{ $root.Values.extraCACertificates.secretName | quote }}
             defaultMode: 0444
-          {{- end }}
-          {{- with $root.Values.extraCACertificates.keys }}
-          items:
-            {{- range $k := . }}
-            - key: {{ $k | quote }}
-              path: {{ $k | quote }}
+            {{- with $root.Values.extraCACertificates.keys }}
+            items:
+              {{- range $k := . }}
+              - key: {{ $k | quote }}
+                path: {{ $k | quote }}
+              {{- end }}
             {{- end }}
           {{- end }}
         {{- end }}

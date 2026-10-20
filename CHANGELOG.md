@@ -5,6 +5,13 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.1
+
+### Fixed: arc-runners `extraCACertificates` with `keys`
+
+- **arc-runners: the `extra-ca` volume rendered `items` beside `configMap` (or `secret`) instead of inside it, so the Kubernetes API server, and Argo CD's schema check, refused the runner pod template.** It happened when `extraCACertificates.keys` was set (v7.2.0 onwards); with `keys` empty nothing changed. The chart now renders `items` inside the source, the shape every other volume in the charts already has. A render with `keys` unset is byte-identical to v7.5.0. If a sync of the runner sets stopped with `.spec.template.spec.volumes[name="extra-ca"].items: field not declared in schema`, this release is the fix, and with it the client certificate, `CI_BUILDKIT_TLS_*` and `CI_EXTRA_CA_DIR` reach the runners again.
+- **CI: the golden renders are now validated against the Kubernetes schema (`just schema`).** `kubeconform -strict` runs over every golden, and each AutoscalingRunnerSet's `spec.template.spec` is checked as a `Pod`, so a field in the wrong place inside a CRD's pod template fails the pull request. No chart change.
+
 ## v7.5.0
 
 ### Added: ci-builders `buildkitd.mtls.clientCA.externalClients`
