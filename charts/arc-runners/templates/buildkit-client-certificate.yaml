@@ -1,6 +1,5 @@
 {{- /*
-The runners' client certificate for the mutual-TLS BuildKit builders
-(INF-1700): one cert-manager Certificate per release, in the release
+The runners' client certificate for the mutual-TLS BuildKit builders: one cert-manager Certificate per release, in the release
 namespace, producing the Secret buildkitTLS.secretName that every runner
 pod of the release mounts. Rendered only when asked (buildkitTLS.enabled
 and buildkitTLS.certificate.create); otherwise the Secret is the estate's.

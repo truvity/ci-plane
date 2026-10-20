@@ -1,5 +1,5 @@
 {{- /*
-The mutual-TLS BuildKit builders (INF-1700): a second StatefulSet per
+The mutual-TLS BuildKit builders: a second StatefulSet per
 architecture beside the plain one, never a flag on it. buildkitd applies
 its TLS settings to every tcp:// listener of the process and two daemons
 cannot share a cache directory, so serving plain TCP to the runners that
