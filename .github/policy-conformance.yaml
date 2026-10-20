@@ -1,0 +1,4 @@
+exempt:
+  C18:
+    reason: stays on ARC / tracked in the CI-plane programme
+    paths: [.github/workflows/ci.yaml]
