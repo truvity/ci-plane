@@ -6,6 +6,7 @@ controllerServiceAccount:
   namespace: arc-system
 buildkitTLS:
   enabled: true
+  serverName: buildkitd.example.private
   certificate:
     create: true
     issuerRef:
