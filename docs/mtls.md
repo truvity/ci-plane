@@ -100,18 +100,41 @@ admit any certificate it issues for any other workload.
   `buildkitd-mtls-<arch>` in `parallel`), and alert on a `Certificate` that
   is not Ready.
 
-## Fargate and other runners outside the cluster
+## Clients outside the cluster
 
-A runner outside Kubernetes cannot mount the Secret. The same client
-certificate (`tls.crt`, `tls.key`) and the trust bundle go to AWS Secrets
-Manager and are injected into the task as files named `cert.pem`, `key.pem`
-and `ca.pem` in one directory, with `CI_BUILDKIT_TLS_DIR` set to it.
+A runner outside Kubernetes (a serverless task, a VM) cannot mount the
+Secret. It gets its own client identity instead of a copy of the in-cluster
+runners', and the three files (`ca.pem`, `cert.pem`, `key.pem`) reach it from
+a store the estate owns. `buildkitd.mtls.clientCA.externalClients` renders
+both halves, per client name:
 
-The usual path is an External Secrets Operator `PushSecret` reading the
-`buildkit-client-tls` Secret and writing a Secrets Manager secret (the key
-and certificate as two keys, or as one JSON document). Renewal then flows from
-cert-manager to the secret without a human. Not implemented here: it belongs
-to the estate that owns the Secrets Manager store and the task definition.
+- a cert-manager `Certificate` in the release namespace, from the client CA's
+  `ClusterIssuer`, with the entry's **own common name** (not `clientCA.commonName`;
+  the chart refuses the runners' name, and two entries with one name);
+- a `CertificateRequestPolicy` that admits exactly that common name, from
+  exactly the release namespace, plus the `use` grant for cert-manager there.
+  The in-cluster runners' policy is not bound in this namespace, and this one
+  is bound nowhere else, so neither identity can ask for the other's name. The
+  release namespace must not be in `requesterNamespaces`;
+- with `push.enabled`, an External Secrets `PushSecret` that writes `ca.pem`
+  (`push.caPem`, the bundle the client trusts the builders' server
+  certificate by), `cert.pem` (`tls.crt`) and `key.pem` (`tls.key`) to the
+  store named by `push.storeRef`, as three values named by `push.names`.
+  `kmsKeyId` and `tags` go to the provider (Parameter Store `SecureString`,
+  for one). It never deletes from the store (`deletionPolicy: None`).
+
+The builders do not change: they verify the chain to the one client CA, and
+nothing else about the client. Who is issued a certificate is the policy's
+decision, so a new identity is a new entry, reviewed as one. The estate owns
+what the chart cannot know: the store (and its credentials and prefix), the
+key that encrypts the values, who may read them, and the consumer that writes
+the three files into one directory and sets `CI_BUILDKIT_TLS_DIR`.
+
+Renewal needs no human: cert-manager renews the Secret `renewBefore` ahead
+of expiry, the `PushSecret` pushes when the Secret changes and every
+`refreshInterval`, and a client that starts after that reads the new pair. A
+client in flight keeps the one it read, which is the damage window of the
+runners' certificate as well. Set `refreshInterval` well under `renewBefore`.
 
 ## What this does not do
 

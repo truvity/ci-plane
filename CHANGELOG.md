@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.0
+
+### Added: ci-builders `buildkitd.mtls.clientCA.externalClients`
+
+- **ci-builders: client identities for runners outside the cluster (`buildkitd.mtls.clientCA.externalClients`, empty by default).** One entry per client: a cert-manager `Certificate` in the release namespace with its own common name, a `CertificateRequestPolicy` admitting exactly that name from exactly that namespace (with the `use` grant for cert-manager), and, with `push.enabled`, an External Secrets `PushSecret` that writes the CA bundle (`push.caPem`), the certificate and the key to a secret store of your choice, as `ca.pem`, `cert.pem` and `key.pem` values. The builders are unchanged (they verify the chain to the one client CA); the policy decides who is issued a certificate. Needs `clientCA.create: true`; the chart refuses the in-cluster runners' common name, a repeated common name, a release namespace that is also in `requesterNamespaces`, and a push without a store or a CA bundle. With the key empty every render is byte-identical to v7.4.0. See [docs/mtls.md](docs/mtls.md#clients-outside-the-cluster).
+
 ## v7.4.0
 
 ### Added: bazel-remote's gRPC port declares HTTP/2
