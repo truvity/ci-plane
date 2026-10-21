@@ -2,6 +2,7 @@
 {{- $c := .Values.cacheRedirect }}
 {{- if not $c.s3.bucket }}{{ fail "cacheRedirect.s3.bucket is required when cacheRedirect is enabled" }}{{ end }}
 {{- if not $c.s3.region }}{{ fail "cacheRedirect.s3.region is required when cacheRedirect is enabled (\"auto\" for Cloudflare R2)" }}{{ end }}
+{{- if and $c.topologySpread.zone.enabled (int $c.topologySpread.zone.minDomains) (ne $c.topologySpread.zone.whenUnsatisfiable "DoNotSchedule") }}{{ fail "cacheRedirect.topologySpread.zone.minDomains needs whenUnsatisfiable: DoNotSchedule (Kubernetes refuses it with ScheduleAnyway)" }}{{ end }}
 {{- if not (or $c.nix.enabled $c.goproxy.enabled) }}{{ fail "cacheRedirect: nix.enabled and goproxy.enabled are both false; there is nothing to serve" }}{{ end }}
 ---
 # cache-redirect: a pull-through cache for the Nix binary cache (/nix) and
@@ -76,6 +77,19 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: cache-redirect
+        {{- if $c.topologySpread.zone.enabled }}
+        # One replica per availability zone (v7.5.3): a node or a zone lost
+        # takes one replica, not all of them.
+        - maxSkew: {{ $c.topologySpread.zone.maxSkew }}
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: {{ $c.topologySpread.zone.whenUnsatisfiable }}
+          {{- with $c.topologySpread.zone.minDomains }}
+          minDomains: {{ . }}
+          {{- end }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cache-redirect
+        {{- end }}
       # The preStop sleep (drainDelaySeconds) runs first, then shutdown
       # waits up to 25s for in-flight pull-throughs; an upload cut off past
       # that is aborted, never committed half-written. The grace period
@@ -182,6 +196,11 @@ metadata:
     app.kubernetes.io/name: cache-redirect
     app.kubernetes.io/part-of: ci-builders
 spec:
+  {{- with $c.trafficDistribution }}
+  # Prefer an endpoint in the client's zone (kube-proxy and the gateways
+  # that read EndpointSlice hints); falls back to any ready endpoint.
+  trafficDistribution: {{ . }}
+  {{- end }}
   selector:
     app.kubernetes.io/name: cache-redirect
   ports:

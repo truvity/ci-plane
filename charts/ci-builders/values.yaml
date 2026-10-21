@@ -570,6 +570,36 @@ cacheRedirect:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+  # Placement across failure domains. One replica per NODE is always on
+  # (kubernetes.io/hostname, maxSkew 1, DoNotSchedule). `zone` adds one per
+  # availability ZONE (v7.5.3), off by default: the zones are an estate fact.
+  #
+  # With `replicas` = the number of zones, maxSkew 1 puts exactly one in
+  # each. DoNotSchedule (default) keeps the spread under node loss: the
+  # replacement must go back to the zone that lost one, and while that zone
+  # has no capacity the pod waits and the other replicas serve; the PDB
+  # keeps a drain from taking more. ScheduleAnyway lets the scheduler pile
+  # replicas into one zone, which is the failure this exists to prevent.
+  #
+  # minDomains (DoNotSchedule only; 0 renders nothing): the least number of
+  # zones that must hold a replica. It matters when `nodeClass` selects
+  # nodes that exist in fewer zones than there are replicas: the scheduler
+  # counts only zones with a matching node, so without it every replica
+  # fits in the one zone that has one and nothing ever asks the autoscaler
+  # for a node in another. With it, the extra replica stays Pending until
+  # a node appears in a new zone, which Karpenter provisions.
+  topologySpread:
+    zone:
+      enabled: false
+      maxSkew: 1
+      whenUnsatisfiable: DoNotSchedule
+      minDomains: 0
+  # Service `spec.trafficDistribution` (Kubernetes 1.31+): PreferClose
+  # (alias of PreferSameZone), PreferSameZone or PreferSameNode. A client
+  # then reaches a replica in its own zone while one is ready there, so
+  # spreading the replicas across zones does not bring cross-zone traffic
+  # back. Empty: not rendered (every endpoint, as before).
+  trafficDistribution: ""
   s3:
     # Required while enabled. `region` "auto" for Cloudflare R2.
     bucket: ""

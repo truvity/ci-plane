@@ -1,0 +1,24 @@
+# cache-redirect with one replica per availability zone (v7.5.3): three
+# replicas, a zone spread of maxSkew 1 that refuses to schedule a second
+# replica into a zone (minDomains 3, so a node class that exists in one zone
+# only still asks the autoscaler for the other two), and a Service that
+# prefers an endpoint in the client's zone.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  replicas: 3
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  topologySpread:
+    zone:
+      enabled: true
+      minDomains: 3
+  trafficDistribution: PreferClose
