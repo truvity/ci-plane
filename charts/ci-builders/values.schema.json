@@ -342,6 +342,28 @@
             }
           }
         },
+        "topologySpread": {
+          "type": "object",
+          "properties": {
+            "zone": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "maxSkew": { "type": "integer", "minimum": 1 },
+                "whenUnsatisfiable": { "enum": ["DoNotSchedule", "ScheduleAnyway"] },
+                "minDomains": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "0 renders nothing; DoNotSchedule only."
+                }
+              }
+            }
+          }
+        },
+        "trafficDistribution": {
+          "enum": ["", "PreferClose", "PreferSameZone", "PreferSameNode"],
+          "description": "Service spec.trafficDistribution; empty renders nothing."
+        },
         "s3": {
           "type": "object",
           "properties": {

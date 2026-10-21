@@ -5,6 +5,14 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.3
+
+### Added: cache-redirect, one replica per availability zone
+
+- **ci-builders: `cacheRedirect.topologySpread.zone` (off by default).** Adds a second topology spread constraint to the cache-redirect Deployment, on `topology.kubernetes.io/zone`, beside the per-node one that is always rendered. Keys: `enabled`, `maxSkew` (1), `whenUnsatisfiable` (`DoNotSchedule` by default; `ScheduleAnyway` is accepted but lets replicas pile into one zone) and `minDomains` (0 renders nothing; `DoNotSchedule` only, and the chart refuses it with `ScheduleAnyway`). With `replicas` equal to the number of zones, each zone holds one replica, so a lost node or zone takes one of them. Set `minDomains` to the zone count when `nodeClass` selects nodes that exist in fewer zones than that: the scheduler counts only zones that have a matching node, so without it every replica fits where the nodes already are and nothing asks the autoscaler for a node anywhere else. With it, the extra replicas wait as `Pending` until Karpenter adds a node in a new zone.
+- **ci-builders: `cacheRedirect.trafficDistribution` (empty by default).** Renders the Service's `spec.trafficDistribution` (`PreferClose`, `PreferSameZone` or `PreferSameNode`; Kubernetes 1.31+), so a client reaches a replica in its own zone while one is ready there and spreading the replicas does not bring cross-zone traffic back. The schema refuses any other value.
+- **Nothing changes unless you set them.** Both default to off, and every existing render is byte-identical to v7.5.2. New golden `cache-redirect-zones`, and two refused fixtures. No image change.
+
 ## v7.5.2
 
 ### Fixed: ci-builders external-client `PushSecret` no longer drifts; Go 1.27.3

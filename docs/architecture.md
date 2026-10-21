@@ -339,6 +339,16 @@ replicas spread across nodes carry a fleet. **Small** objects (narinfo,
 `.info`, `.mod`, checksum-database tiles) are served directly, from an
 in-memory LRU or the bucket. The pods keep nothing on local disk.
 
+The pods are interchangeable (the only per-pod state is an in-memory LRU
+and a per-key fetch lock, both of which cost S3 reads or a duplicate
+upstream fetch when lost, never correctness), so availability is a matter
+of where they run. One replica per node is always on; to also have one per
+availability zone set `cacheRedirect.replicas` to the zone count and
+`cacheRedirect.topologySpread.zone.enabled: true` (with `minDomains` set to
+the zone count when the node class exists in fewer zones than that), and
+`cacheRedirect.trafficDistribution: PreferClose` so a client keeps reaching
+the replica in its own zone.
+
 Clients, both front-ends on one Service:
 
 ```text

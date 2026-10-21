@@ -1,0 +1,17 @@
+# refuses: trafficDistribution
+# A value the Service API would refuse (or a typo of PreferClose) fails the
+# render through the schema, not at sync.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  trafficDistribution: PreferSameRegion

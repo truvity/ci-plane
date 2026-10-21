@@ -1,0 +1,22 @@
+# refuses: minDomains needs whenUnsatisfiable: DoNotSchedule
+# Kubernetes rejects minDomains on a constraint that is not DoNotSchedule; the
+# chart says so at render time instead of leaving it to the API server.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  replicas: 3
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+  topologySpread:
+    zone:
+      enabled: true
+      whenUnsatisfiable: ScheduleAnyway
+      minDomains: 3
