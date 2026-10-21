@@ -86,6 +86,11 @@ spec:
           {{- with $c.topologySpread.zone.minDomains }}
           minDomains: {{ . }}
           {{- end }}
+          # Count each ReplicaSet's pods apart: during a rollout the old
+          # ReplicaSet's pods would otherwise stand for zones the new one has
+          # not filled, and the new pods could share a zone and stay there.
+          matchLabelKeys:
+            - pod-template-hash
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: cache-redirect

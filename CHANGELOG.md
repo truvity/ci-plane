@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.4
+
+### Fixed: cache-redirect zone spread across a rollout
+
+- **ci-builders: the `cacheRedirect.topologySpread.zone` constraint (v7.5.3) carries `matchLabelKeys: [pod-template-hash]`.** Without it the pods of the ReplicaSet being replaced counted towards the spread while a rollout ran, so the new ReplicaSet's pods could legally share a zone (two in one, none in another) and, replicas being stateless and never rescheduled, stayed there once the old ones were gone. Each ReplicaSet's pods are now spread apart from the other's, so a rollout ends with one replica per zone. Only the zone constraint changes (the per-node one is as before), and a render with `topologySpread.zone.enabled: false` is byte-identical to v7.5.3.
+
 ## v7.5.3
 
 ### Added: cache-redirect, one replica per availability zone
