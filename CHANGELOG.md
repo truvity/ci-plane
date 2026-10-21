@@ -5,6 +5,10 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.2
+
+- Dependency updates.
+
 ## v7.5.1
 
 ### Fixed: arc-runners `extraCACertificates` with `keys`
