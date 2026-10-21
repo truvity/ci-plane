@@ -7,10 +7,11 @@ line is summarised in one section.
 
 ## v7.5.2
 
-### Fixed: ci-builders external-client `PushSecret` no longer drifts
+### Fixed: ci-builders external-client `PushSecret` no longer drifts; Go 1.27.3
 
 - **ci-builders: the `PushSecret` of a `buildkitd.mtls.clientCA.externalClients` entry with `push.enabled` renders `conversionStrategy: None` on each of its three `spec.data` entries.** The External Secrets CRD defaults that field to `None`, and v7.5.0 to v7.5.1 left it out, so the object the cluster stored never equalled the object the chart rendered. Argo CD re-applied it every few minutes (a no-op) and showed the application `OutOfSync` for good, with that `PushSecret` as the only difference. With the field written out the diff is empty and the application settles at `Synced`. It is the only External Secrets object the charts render, and its other defaulted fields (`refreshInterval`, `updatePolicy`, `deletionPolicy`, `template.engineVersion`, `template.mergePolicy`) were already explicit. Nothing the `PushSecret` pushes changes, and a render without external clients is byte-identical to v7.5.1.
 - **CI: `just schema` now also proves every `PushSecret` data entry in the goldens names `conversionStrategy`.** kubeconform skips External Secrets kinds (they have no schema in the Kubernetes set), so the check reads the goldens directly, and it fails if no `PushSecret` is present at all. No chart change.
+- **Go standard library: the four helper modules under `image/` (`runner-watchdog`, `cache-redirect`, `nix-worker-client`, `nix-worker-host-cert`) now carry `toolchain go1.27.3`, the release that fixes GO-2026-6809 (`crypto/x509`).** They declared only `go 1.27.2`, so the daily `govulncheck` scan, which reaches `x509.Certificate.Verify` from `nix-worker-client`, failed and the images were built with whichever Go the builder had. The `runneridentity` module already had the toolchain line. No chart change, and the `go` directives are unchanged.
 
 ## v7.5.1
 
