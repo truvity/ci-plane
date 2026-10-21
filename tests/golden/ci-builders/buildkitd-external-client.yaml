@@ -886,8 +886,12 @@ spec:
         -----END CERTIFICATE-----
       cert.pem: '{{ index . "tls.crt" }}'
       key.pem: '{{ index . "tls.key" }}'
+  # conversionStrategy is the field the CRD defaults to None: written out, so
+  # the object Argo CD applies is the object the cluster stores (left out, the
+  # application is OutOfSync for good).
   data:
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: ca.pem
         remoteRef:
           remoteKey: "ca"
@@ -900,7 +904,8 @@ spec:
           secretType: SecureString
           tags:
             component: ci
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: cert.pem
         remoteRef:
           remoteKey: "cert"
@@ -913,7 +918,8 @@ spec:
           secretType: SecureString
           tags:
             component: ci
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: key.pem
         remoteRef:
           remoteKey: "key"

@@ -152,9 +152,13 @@ spec:
         {{- $push.caPem | trim | nindent 8 }}
       cert.pem: {{ `'{{ index . "tls.crt" }}'` }}
       key.pem: {{ `'{{ index . "tls.key" }}'` }}
+  # conversionStrategy is the field the CRD defaults to None: written out, so
+  # the object Argo CD applies is the object the cluster stores (left out, the
+  # application is OutOfSync for good).
   data:
     {{- range $key, $remote := dict "ca.pem" ($names.ca | default "ca") "cert.pem" ($names.cert | default "cert") "key.pem" ($names.key | default "key") }}
-    - match:
+    - conversionStrategy: None
+      match:
         secretKey: {{ $key }}
         remoteRef:
           remoteKey: {{ $remote | quote }}

@@ -68,6 +68,23 @@ if [ -f "$focus" ]; then
   fi
 fi
 
+# The ESO CRD defaults spec.data[].conversionStrategy to None. A render that
+# leaves it out is stored with it filled in, and Argo CD then shows the
+# application OutOfSync for good (the apply is a no-op, the diff stays). So
+# every PushSecret data entry in the goldens must say it. The kubeconform
+# pass above skips External Secrets kinds (no schema in the Kubernetes set),
+# which is why this is its own check.
+missing=$(yq eval-all '[select(.kind == "PushSecret") | .spec.data[] | select(has("conversionStrategy") | not)] | length' "${goldens[@]}" | awk '{ n += $1 } END { print n + 0 }')
+pushsecrets=$(yq eval-all '[select(.kind == "PushSecret")] | length' "${goldens[@]}" | awk '{ n += $1 } END { print n + 0 }')
+if [ "$missing" -ne 0 ]; then
+  echo "ESO-DEFAULTS: $missing PushSecret spec.data entries lack conversionStrategy (the CRD defaults it to None; leaving it out is permanent Argo CD drift)"
+  fail=1
+fi
+if [ "$pushsecrets" -eq 0 ]; then
+  echo "ESO-DEFAULTS: no PushSecret in any golden -- that is a failure, not a pass"
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "schema: ${#goldens[@]} goldens and $pods runner pod templates valid against Kubernetes $version"
 fi

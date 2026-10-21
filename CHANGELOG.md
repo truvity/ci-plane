@@ -5,6 +5,13 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.5.2
+
+### Fixed: ci-builders external-client `PushSecret` no longer drifts
+
+- **ci-builders: the `PushSecret` of a `buildkitd.mtls.clientCA.externalClients` entry with `push.enabled` renders `conversionStrategy: None` on each of its three `spec.data` entries.** The External Secrets CRD defaults that field to `None`, and v7.5.0 to v7.5.1 left it out, so the object the cluster stored never equalled the object the chart rendered. Argo CD re-applied it every few minutes (a no-op) and showed the application `OutOfSync` for good, with that `PushSecret` as the only difference. With the field written out the diff is empty and the application settles at `Synced`. It is the only External Secrets object the charts render, and its other defaulted fields (`refreshInterval`, `updatePolicy`, `deletionPolicy`, `template.engineVersion`, `template.mergePolicy`) were already explicit. Nothing the `PushSecret` pushes changes, and a render without external clients is byte-identical to v7.5.1.
+- **CI: `just schema` now also proves every `PushSecret` data entry in the goldens names `conversionStrategy`.** kubeconform skips External Secrets kinds (they have no schema in the Kubernetes set), so the check reads the goldens directly, and it fails if no `PushSecret` is present at all. No chart change.
+
 ## v7.5.1
 
 ### Fixed: arc-runners `extraCACertificates` with `keys`
