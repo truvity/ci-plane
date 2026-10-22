@@ -144,7 +144,8 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.BoolVar(&c.Npm, "npm", false, "serve the npm registry under /npm (read-only)")
 	fs.StringVar(&c.NpmPrefix, "npm-prefix", "npm/", "store key prefix of the npm front-end")
 	fs.StringVar(&c.NpmReg, "npm-registry", "https://registry.npmjs.org", "the npm registry pulled through")
-	fs.DurationVar(&c.NpmFresh, "npm-fresh", 2*time.Minute, "how long a packument is served without asking the registry again; then it is revalidated with its ETag")
+	fs.DurationVar(&c.NpmFresh, "npm-fresh", 2*time.Minute,
+		"how long a packument is served without asking the registry again; then it is revalidated with its ETag")
 	fs.Int64Var(&c.NpmMemory, "npm-memory-bytes", 128<<20, "in-memory budget for packuments (a single one may be up to 64 MiB and half of this)")
 
 	c.Hosts = newHostMap()

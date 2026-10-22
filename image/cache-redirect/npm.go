@@ -99,8 +99,8 @@ func newNpmFrontend(c *Cache, prefix string, upstream *url.URL, fresh time.Durat
 
 func (n *npmFrontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/npm")
-	switch {
-	case p == "" || p == "/":
+	switch p {
+	case "", "/":
 		if !getOrHead(w, r) {
 			return
 		}
@@ -108,19 +108,19 @@ func (n *npmFrontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		body := "npm: " + n.upstream.Host + "\n"
 		writeCached(w, r.Method == http.MethodHead, cached{status: http.StatusOK, contentType: "text/plain; charset=utf-8", body: []byte(body)})
 		return
-	case p == "/-/ping":
+	case "/-/ping":
 		if !getOrHead(w, r) {
 			return
 		}
 		n.cache.metrics.Request(frontendNpm, resultHit)
 		writeCached(w, r.Method == http.MethodHead, cached{status: http.StatusOK, contentType: "application/json", body: []byte("{}")})
 		return
-	case p == "/-/v1/search":
+	case "/-/v1/search":
 		if getOrHead(w, r) {
 			n.proxy(w, r, p)
 		}
 		return
-	case p == "/-/npm/v1/security/advisories/bulk", p == "/-/npm/v1/security/audits", p == "/-/npm/v1/security/audits/quick":
+	case "/-/npm/v1/security/advisories/bulk", "/-/npm/v1/security/audits", "/-/npm/v1/security/audits/quick":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -566,7 +566,7 @@ func (n *npmFrontend) proxy(w http.ResponseWriter, r *http.Request, p string) {
 			}
 			return nil
 		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			n.cache.log.Warn("upstream", "frontend", frontendNpm, "path", logSafe(p), "err", err)
 			n.cache.metrics.Request(frontendNpm, resultUpstreamError)
 			http.Error(w, "upstream fetch failed", http.StatusBadGateway)
