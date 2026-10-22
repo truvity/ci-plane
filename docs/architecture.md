@@ -358,6 +358,33 @@ maven:  http://cache-redirect.<ns>.svc.cluster.local/maven/central   (also /goog
 gradle: http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/   (only when cacheRedirect.gradle.enabled)
 ```
 
+### A name per front-end
+
+Behind a gateway that routes by name, give each of Nix, Maven and Gradle a
+host name of its own (`cacheRedirect.hosts.nix|maven|gradle`; flag
+`-hosts kind=host`, repeatable or comma-separated, environment
+`CACHE_REDIRECT_HOSTS`). A request whose `Host` is one of them is served at
+the **root** of that front-end, so the gateway forwards the request to the
+Service as it is and rewrites no path:
+
+```text
+nix:    substituters = https://<nix host>                 /nix-cache-info, /<hash>.narinfo, /nar/...
+maven:  https://<maven host>/central                      (also /google, /gradle-plugins; GET / lists them)
+gradle: https://<gradle host>/                            GET|PUT /<key>; GET / is the probe (200)
+```
+
+The Host is compared without its port (a gateway may forward it with or
+without one), without a trailing dot, and in lower case. The service moves a
+matching request under the front-end's path (`nix.example/foo` is served as
+`/nix/foo`) before routing it, so each front-end is written once and
+the store keys are the same whichever name was used (`nix/`, `maven/`,
+`gradle/`). A request for **any other** Host keeps the path layout above,
+including the Go proxy (it has no host of its own: `/goproxy`), the name that
+served everything before hosts existed, and the in-cluster Service. `/healthz`
+and `/metrics` are answered on the path layout only: a kubelet probes the pod
+address, not a name. Naming a host for a front-end that is off, or one name for
+two front-ends, is refused at start and at render.
+
 Nix (curl) and the go command both follow redirects; a runner must be
 able to reach the bucket's endpoint itself (on AWS a gateway VPC endpoint
 for S3 is free and keeps the bytes off a NAT gateway). Its presigned
@@ -511,14 +538,18 @@ Two things this front-end meets that the others did not:
 
 ### Gradle build cache front-end
 
-`cacheRedirect.gradle.enabled` (**off by default**, on in `presets/preview.yaml`,
-off in `presets/stable.yaml`) serves Gradle's remote build cache, the
+`cacheRedirect.gradle.enabled` (**off by default**, on in both
+`presets/preview.yaml` and `presets/stable.yaml`) serves Gradle's remote build cache, the
 `HttpBuildCache` protocol, under `/gradle/cache/<key>`: a GET of a stored
 entry is a **redirect** to a presigned URL of it (Gradle follows it; verified
 with 8.14), a miss is a 404, and a PUT stores the entry. It is the one
 front-end that is **writable** by whoever can reach the service, so the
-network policy and the tier are what govern who may write, and a deployment
-that must not read what a job can write leaves it off.
+network policy and the tier are what govern who may write. The stable tier
+has it on too: it is a separate deployment with a bucket of its own and a
+network policy that admits only stable runners, so what a stable job reads
+is only what a stable job wrote, never a preview job's. (Turning it on for
+stable was an owner decision, taken with that isolation in mind; a
+deployment whose tiers share a bucket or a service must leave it off.)
 
 A write is bounded, not authenticated: the key must be 32 to 128 hexadecimal
 digits (what Gradle sends, a hash of the task's inputs); `Content-Length` is

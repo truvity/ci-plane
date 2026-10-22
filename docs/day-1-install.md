@@ -58,8 +58,12 @@ Order matters: caches before runners, controller before both charts.
    Gradle and Maven builds use `.../maven/central` (and `/google`,
    `/gradle-plugins`) as their repositories; the Gradle build cache, a
    WRITABLE cache and so off by default (`cacheRedirect.gradle.enabled`,
-   on in `presets/preview.yaml` only), is `HttpBuildCache` with the url
-   `http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/`.
+   on in `presets/preview.yaml` and `presets/stable.yaml`, each tier its own
+   deployment and bucket), is `HttpBuildCache` with the url
+   `http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/`. Behind a
+   gateway that routes by name, `cacheRedirect.hosts.{nix,maven,gradle}`
+   serve each of those at the root of a host name of its own, so the gateway
+   rewrites no path.
 6. For persistent Nix workers:
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
      signing role (default `ci-nix`) that allows the principal `ci-nix`

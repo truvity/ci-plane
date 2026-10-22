@@ -4,6 +4,15 @@
 {{- if not $c.s3.region }}{{ fail "cacheRedirect.s3.region is required when cacheRedirect is enabled (\"auto\" for Cloudflare R2)" }}{{ end }}
 {{- if and $c.topologySpread.zone.enabled (int $c.topologySpread.zone.minDomains) (ne $c.topologySpread.zone.whenUnsatisfiable "DoNotSchedule") }}{{ fail "cacheRedirect.topologySpread.zone.minDomains needs whenUnsatisfiable: DoNotSchedule (Kubernetes refuses it with ScheduleAnyway)" }}{{ end }}
 {{- if not (or $c.nix.enabled $c.goproxy.enabled $c.maven.enabled $c.gradle.enabled) }}{{ fail "cacheRedirect: nix, goproxy, maven and gradle are all disabled; there is nothing to serve" }}{{ end }}
+{{- /* cacheRedirect.hosts: a request for the name of a front-end is served at that front-end's root (-hosts=kind=host). */}}
+{{- $hostsSeen := dict }}
+{{- range $kind, $host := $c.hosts }}
+{{- if $host }}
+{{- if not (get (dict "nix" $c.nix.enabled "maven" $c.maven.enabled "gradle" $c.gradle.enabled) $kind) }}{{ fail (printf "cacheRedirect.hosts.%s is set but cacheRedirect.%s is disabled: a host name for a front-end that is off" $kind $kind) }}{{ end }}
+{{- if hasKey $hostsSeen (lower $host) }}{{ fail (printf "cacheRedirect.hosts: %q is given to both %s and %s; each front-end needs a host of its own" $host (get $hostsSeen (lower $host)) $kind) }}{{ end }}
+{{- $_ := set $hostsSeen (lower $host) $kind }}
+{{- end }}
+{{- end }}
 {{- range $name, $url := $c.maven.repositories }}
 {{- if not (regexMatch "^[A-Za-z0-9._-]+$" $name) }}{{ fail (printf "cacheRedirect.maven.repositories: %q is not a repository name (letters, digits, '.', '_' and '-')" $name) }}{{ end }}
 {{- if not (regexMatch "^https?://" (toString $url)) }}{{ fail (printf "cacheRedirect.maven.repositories.%s: %q is not an http(s) URL" $name (toString $url)) }}{{ end }}
@@ -150,6 +159,11 @@ spec:
             {{- if $c.gradle.enabled }}
             - {{ printf "-gradle-prefix=%s" $c.gradle.prefix | quote }}
             - {{ printf "-gradle-max-entry-bytes=%d" (int64 $c.gradle.maxEntryBytes) | quote }}
+            {{- end }}
+            {{- range $kind, $host := $c.hosts }}
+            {{- if $host }}
+            - {{ printf "-hosts=%s=%s" $kind $host | quote }}
+            {{- end }}
             {{- end }}
             {{- range $c.extraArgs }}
             - {{ . | quote }}

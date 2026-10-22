@@ -23,6 +23,12 @@
 //	/goproxy/...  the GOPROXY front-end            (GOPROXY:     <base>/goproxy)
 //	/maven/...    the Maven repositories           (url:         <base>/maven/<repo>)
 //	/gradle/...   the Gradle build cache, OFF by default (url:   <base>/gradle/cache/)
+//
+// Each of nix, maven and gradle can also be served at the root of a host name
+// of its own (-hosts nix=nix.cache.example,maven=maven.cache.example), so a
+// gateway routes by name and rewrites nothing; any other Host keeps the layout
+// above.
+//
 //	/healthz      200 while serving
 //	/metrics      Prometheus text format
 //
@@ -79,6 +85,8 @@ type settings struct {
 	Gradle         bool
 	GradlePrefix   string
 	GradleMaxEntry int64
+
+	Hosts *hostMap
 }
 
 const envPrefix = "CACHE_REDIRECT_"
@@ -125,6 +133,11 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.BoolVar(&c.Gradle, "gradle", false, "serve the Gradle remote build cache under /gradle/cache/ -- WRITABLE by every client that can reach the service")
 	fs.StringVar(&c.GradlePrefix, "gradle-prefix", "gradle/", "store key prefix of the Gradle build cache")
 	fs.Int64Var(&c.GradleMaxEntry, "gradle-max-entry-bytes", 512<<20, "the largest build cache entry a client may store (413 above it)")
+
+	c.Hosts = newHostMap()
+	fs.Var(c.Hosts, "hosts", "serve a front-end at the ROOT of a host name, as kind=host (kind: nix, maven or gradle; repeatable, or comma-separated), "+
+		"so the gateway needs no path rewrite; a request for any other Host keeps the /nix, /goproxy, /maven, /gradle/cache layout. "+
+		"The port in the Host header is ignored")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -221,6 +234,12 @@ func (c *settings) validate() error {
 			}
 		}
 	}
+	for kind, host := range c.Hosts.byKind {
+		on := map[string]bool{frontendNix: c.Nix, frontendMaven: c.Maven, frontendGradle: c.Gradle}[kind]
+		if !on {
+			errs = append(errs, fmt.Errorf("-hosts %s=%s: the %s front-end is off", kind, host, kind))
+		}
+	}
 	if c.Gradle && c.GradleMaxEntry < 1 {
 		errs = append(errs, errors.New("-gradle-max-entry-bytes must be positive"))
 	}
@@ -273,7 +292,7 @@ func realMain(args []string) int {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	log.Info("serving", "listen", cfg.Listen, "bucket", cfg.S3.Bucket, "nix", cfg.Nix, "goproxy", cfg.Go,
-		"maven", cfg.Maven, "maven_repos", mavenRepoNamesOf(cfg), "gradle", cfg.Gradle)
+		"maven", cfg.Maven, "maven_repos", mavenRepoNamesOf(cfg), "gradle", cfg.Gradle, "hosts", hostsServed(cfg.Hosts.routes()))
 
 	select {
 	case err := <-errc:
@@ -349,7 +368,7 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 	if cfg.Gradle {
 		mux.Handle("/gradle/", &gradleFrontend{cache: c, prefix: cfg.GradlePrefix, maxEntry: cfg.GradleMaxEntry})
 	}
-	return mux, c
+	return withHostRouting(cfg.Hosts.routes(), mux), c
 }
 
 // mavenRepoNamesOf is the names of the configured Maven repositories, for the

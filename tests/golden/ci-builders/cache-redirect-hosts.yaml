@@ -224,7 +224,12 @@ spec:
             - "-goproxy-sumdb-upstream=https://sum.golang.org"
             - "-maven=true"
             - "-maven-prefix=maven/"
-            - "-gradle=false"
+            - "-gradle=true"
+            - "-gradle-prefix=gradle/"
+            - "-gradle-max-entry-bytes=536870912"
+            - "-hosts=gradle=gradle.cache.example.test"
+            - "-hosts=maven=maven.cache.example.test"
+            - "-hosts=nix=nix.cache.example.test"
           ports:
             - name: http
               containerPort: 8080

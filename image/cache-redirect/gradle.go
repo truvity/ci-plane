@@ -22,8 +22,10 @@ const gradleEntryType = "application/vnd.gradle.build-cache-entry.1"
 //	GET  /gradle/cache/       200: the probe of a runner
 //
 // Unlike the other front-ends it is WRITABLE by whoever may reach it, so it is
-// off unless asked for, and a deployment that must not read what a job can
-// write (the stable tier) leaves it off. What a write can do is bounded:
+// off unless asked for, and it must not be shared between tiers: each tier
+// (preview, stable) runs its own, on its own bucket, so a reader only reads
+// what its own tier's jobs wrote. With -hosts gradle=<host> it is also served
+// at the root of that host (GET|PUT /<key>). What a write can do is bounded:
 //
 //   - only keys of 32 to 128 hexadecimal digits, which is what Gradle sends (a
 //     hash of the task's inputs);

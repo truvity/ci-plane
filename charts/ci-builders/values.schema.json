@@ -4,6 +4,11 @@
   "description": "Open, not strict: only types, and the inputs the chart cannot work without. The estate facts -- which runner namespaces may reach each component -- have no default and are required while the component and its NetworkPolicy are on, because a builder that admits nobody cannot work.",
   "type": "object",
   "definitions": {
+    "cacheHost": {
+      "type": "string",
+      "description": "A DNS host name (no scheme, path or port), or empty for none.",
+      "pattern": "^$|^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$"
+    },
     "networkPolicy": {
       "type": "object",
       "properties": {
@@ -463,7 +468,7 @@
         },
         "gradle": {
           "type": "object",
-          "description": "The Gradle remote build cache under /gradle/cache/. WRITABLE by every client that can reach the service: off by default and off on the stable tier.",
+          "description": "The Gradle remote build cache under /gradle/cache/. WRITABLE by every client that can reach the service: off by default; both presets turn it on, each tier in its own deployment and bucket.",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -476,6 +481,16 @@
               "type": "integer",
               "minimum": 1
             }
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "description": "A host name per front-end: a request with that Host is served at the root of the front-end (no gateway rewrite). Empty: none. Any other Host keeps the /nix, /goproxy, /maven/<repo>, /gradle/cache/ layout.",
+          "additionalProperties": false,
+          "properties": {
+            "nix": {"$ref": "#/definitions/cacheHost"},
+            "maven": {"$ref": "#/definitions/cacheHost"},
+            "gradle": {"$ref": "#/definitions/cacheHost"}
           }
         },
         "extraArgs": {
