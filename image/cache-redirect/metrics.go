@@ -24,7 +24,10 @@ const (
 	resultRejected      = "rejected"       // a client's write was refused: no length, or too large (the Gradle build cache)
 )
 
-var allResults = []string{resultHit, resultRedirect, resultMiss, resultNotFound, resultUpstreamError, resultStoreError, resultVerifyFailed, resultNoIndex, resultStored, resultRejected}
+var allResults = []string{
+	resultHit, resultRedirect, resultMiss, resultNotFound, resultUpstreamError, resultStoreError,
+	resultVerifyFailed, resultNoIndex, resultStored, resultRejected,
+}
 
 // upstreamBuckets are the histogram bounds, in seconds, of the time to
 // upstream response headers.

@@ -73,7 +73,11 @@ func TestGradleFirstWriteWins(t *testing.T) {
 func TestGradleRefusals(t *testing.T) {
 	f := newGradleFixture(t, "-gradle-max-entry-bytes", "10")
 
-	for _, key := range []string{"short", strings.Repeat("g", 32), strings.ToUpper(gradleKey), gradleKey + gradleKey + gradleKey + gradleKey + "0", "..%2F" + gradleKey, "a/" + gradleKey} {
+	bad := []string{
+		"short", strings.Repeat("g", 32), strings.ToUpper(gradleKey), strings.Repeat(gradleKey, 4) + "0",
+		"..%2F" + gradleKey, "a/" + gradleKey,
+	}
+	for _, key := range bad {
 		if r := f.put(t, "/gradle/cache/"+key, []byte("x")); r.code != http.StatusNotFound {
 			t.Errorf("PUT of key %q: %d, want 404", key, r.code)
 		}

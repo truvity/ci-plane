@@ -101,7 +101,9 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 25*time.Second, "how long in-flight requests get to finish on SIGTERM")
 	fs.Int64Var(&c.MemoryBytes, "memory-cache-bytes", 64<<20, "in-memory cache budget for small objects")
 	fs.IntVar(&c.MaxFetches, "max-fetches", 16, "upstream pull-throughs at once; more wait")
-	fs.DurationVar(&c.RetryBackoff, "retry-backoff", time.Second, "the Maven front-end repeats an upstream request that was answered 429, 502, 503 or 504, up to 4 attempts, waiting this long times the attempt (or the upstream's Retry-After)")
+	fs.DurationVar(&c.RetryBackoff, "retry-backoff", time.Second,
+		"the Maven front-end repeats an upstream request answered 429, 502, 503 or 504, up to 4 attempts, "+
+			"waiting this long times the attempt (or the upstream's Retry-After)")
 	fs.TextVar(&c.LogLevel, "log-level", slog.LevelInfo, "debug, info, warn or error")
 
 	fs.BoolVar(&c.Nix, "nix", true, "serve the Nix binary cache front-end under /nix")

@@ -50,8 +50,15 @@ func TestConfigMavenRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.MavenRepos.String(); !strings.Contains(got, "gradle-plugins=https://repo.maven.apache.org/maven2|https://plugins.gradle.org/m2") || !strings.Contains(got, "central=https://repo.maven.apache.org/maven2") || !strings.Contains(got, "gradle-plugins=") || !strings.Contains(got, "google=") {
-		t.Errorf("default repositories %q: want central, google and gradle-plugins", got)
+	got := c.MavenRepos.String()
+	for _, want := range []string{
+		"central=https://repo.maven.apache.org/maven2",
+		"google=https://dl.google.com/dl/android/maven2",
+		"gradle-plugins=https://repo.maven.apache.org/maven2|https://plugins.gradle.org/m2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("default repositories %q lack %q", got, want)
+		}
 	}
 	if !c.Maven || c.Gradle {
 		t.Errorf("maven %v, gradle %v: want the Maven front-end on and the writable Gradle cache off by default", c.Maven, c.Gradle)

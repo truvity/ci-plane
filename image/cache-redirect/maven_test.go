@@ -236,7 +236,7 @@ func TestMavenChainAsksTheNextUpstreamOnA404(t *testing.T) {
 
 func TestMavenRetriesARateLimitedUpstream(t *testing.T) {
 	var asked counter
-	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
 		asked.inc()
 		if asked.get() <= 2 {
 			w.Header().Set("Retry-After", "0")
