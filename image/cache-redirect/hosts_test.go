@@ -69,7 +69,9 @@ func TestHostNixServedAtRoot(t *testing.T) {
 	if r := f.onHost(t, http.MethodGet, nixHost, "/nix/nix-cache-info", nil); r.code != 200 || !strings.Contains(r.body, "StoreDir") {
 		t.Errorf("/nix/nix-cache-info on the nix host: %d %q, want it served as it is", r.code, r.body)
 	}
-	if r := f.onHost(t, http.MethodGet, nixHost, "/nix/1123456789abcdfghijklmnpqrsvwxyz.narinfo", nil); r.code != http.StatusNotFound || len(up.paths) != 2 || up.paths[1] != "/1123456789abcdfghijklmnpqrsvwxyz.narinfo" {
+	const other = "1123456789abcdfghijklmnpqrsvwxyz.narinfo"
+	r = f.onHost(t, http.MethodGet, nixHost, "/nix/"+other, nil)
+	if r.code != http.StatusNotFound || len(up.paths) != 2 || up.paths[1] != "/"+other {
 		t.Errorf("/nix/<hash>.narinfo on the nix host: %d, upstream asked %v, want the same upstream path as the root form", r.code, up.paths)
 	}
 	// Other kinds are not served on the nix host.
@@ -156,7 +158,8 @@ func TestHostOthersKeepPathRouting(t *testing.T) {
 	f := newFixture(t, up, hostFlags...)
 
 	for _, host := range []string{goHost, "cache-redirect.example.svc", "cache-redirect.example.svc.cluster.local:80", ""} {
-		if r := f.onHost(t, http.MethodGet, host, "/goproxy/example.com/mod/@v/v1.6.0.mod", nil); r.code != 200 || !strings.Contains(r.body, "module example.com/mod") {
+		r := f.onHost(t, http.MethodGet, host, "/goproxy/example.com/mod/@v/v1.6.0.mod", nil)
+		if r.code != 200 || !strings.Contains(r.body, "module example.com/mod") {
 			t.Errorf("Host %q, /goproxy: %d %q", host, r.code, r.body)
 		}
 		if r := f.onHost(t, http.MethodGet, host, "/nix/nix-cache-info", nil); r.code != 200 {
@@ -176,7 +179,8 @@ func TestHostOthersKeepPathRouting(t *testing.T) {
 
 func TestConfigHosts(t *testing.T) {
 	none := func(string) string { return "" }
-	c, err := parseConfig([]string{"-s3-bucket", "b", "-gradle", "-hosts", "nix=Nix.Example.TEST,maven=m.example.test", "-hosts", "gradle=g.example.test"}, none, io.Discard)
+	args := []string{"-s3-bucket", "b", "-gradle", "-hosts", "nix=Nix.Example.TEST,maven=m.example.test", "-hosts", "gradle=g.example.test"}
+	c, err := parseConfig(args, none, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
