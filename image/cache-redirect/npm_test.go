@@ -79,7 +79,9 @@ func newFakeRegistry(t *testing.T) *fakeRegistry {
 			base := name[strings.LastIndex(name, "/")+1:]
 			// The README mentions a tarball URL the way a README may; its quotes are escaped.
 			readme := fmt.Sprintf(`see \"tarball\":\"%s/%s/-/%s-0.0.1.tgz\"`, fr.URL, name, base)
-			_, _ = fmt.Fprintf(w, `{"name":%q,"variant":%q,"v":%q,"readme":"%s","dist-tags":{"latest":"%s.0.0"},"versions":{"%s.0.0":{"dist":{"tarball":"%s/%s/-/%s-%s.0.0.tgz","shasum":"abc"}}}}`,
+			_, _ = fmt.Fprintf(w,
+				`{"name":%q,"variant":%q,"v":%q,"readme":"%s","dist-tags":{"latest":"%s.0.0"},`+
+					`"versions":{"%s.0.0":{"dist":{"tarball":"%s/%s/-/%s-%s.0.0.tgz","shasum":"abc"}}}}`,
 				name, ct, fr.version, readme, fr.version, fr.version, fr.URL, name, base, fr.version)
 		}
 	})
@@ -224,7 +226,10 @@ func TestNpmTarballMissThenRedirect(t *testing.T) {
 		t.Errorf("%d upstream fetches, want 1", n)
 	}
 	// The file must be the package's own: <basename>-<version>.tgz.
-	for _, bad := range []string{"/npm/name/-/other-1.0.0.tgz", "/npm/name/-/name-.tgz", "/npm/name/-/name-1.0.0.zip", "/npm/name/-/name-1.0.0.tgz/x", "/npm/name/x/name-1.0.0.tgz"} {
+	for _, bad := range []string{
+		"/npm/name/-/other-1.0.0.tgz", "/npm/name/-/name-.tgz", "/npm/name/-/name-1.0.0.zip",
+		"/npm/name/-/name-1.0.0.tgz/x", "/npm/name/x/name-1.0.0.tgz",
+	} {
 		if r := f.get(t, bad); r.code != 404 {
 			t.Errorf("%s: %d, want 404", bad, r.code)
 		}
@@ -237,8 +242,8 @@ func TestNpmTarballURLsAreRewrittenToTheArrivalAddress(t *testing.T) {
 	tar := func(base string) string { return `"tarball":"` + base + `/lodash/-/lodash-1.0.0.tgz"` }
 
 	// The path layout, by an address that is not any front-end's name.
-	r := f.ask(t, http.MethodGet, "cache-redirect.ns.svc.cluster.local", "/npm/lodash", nil, nil)
-	if !strings.Contains(r.body, tar("http://cache-redirect.ns.svc.cluster.local/npm")) {
+	r := f.ask(t, http.MethodGet, "cache-redirect.internal.example", "/npm/lodash", nil, nil)
+	if !strings.Contains(r.body, tar("http://cache-redirect.internal.example/npm")) {
 		t.Errorf("service address: %s", r.body)
 	}
 	// Behind a gateway that terminates TLS, on the front-end's own name: no /npm.
@@ -441,7 +446,7 @@ func grepLines(s, sub string) string {
 func TestNpmRetriesAFailingRegistry(t *testing.T) {
 	fr := newFakeRegistry(t)
 	var n counter
-	flaky := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+	flaky := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
 		if n.inc(); n.get() < 3 {
 			w.Header().Set("Retry-After", "0")
 			http.Error(w, "slow down", http.StatusTooManyRequests)
@@ -450,7 +455,10 @@ func TestNpmRetriesAFailingRegistry(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"x"}`))
 	})
 	_ = fr
-	cfg, err := parseConfig([]string{"-s3-bucket", "b", "-nix=false", "-goproxy=false", "-maven=false", "-npm", "-npm-registry", flaky.URL, "-retry-backoff", "1ms"},
+	cfg, err := parseConfig([]string{
+		"-s3-bucket", "b", "-nix=false", "-goproxy=false", "-maven=false", "-npm",
+		"-npm-registry", flaky.URL, "-retry-backoff", "1ms",
+	},
 		func(string) string { return "" }, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -590,7 +598,7 @@ func TestNpmRefusesBadNames(t *testing.T) {
 
 func TestNpmConcurrentFirstRequestsShareOneFetch(t *testing.T) {
 	g := newGate()
-	slow := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+	slow := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
 		g.wait()
 		_, _ = w.Write([]byte(`{"name":"x"}`))
 	})
