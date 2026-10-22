@@ -564,6 +564,14 @@ jobs:
               test -n "$(git config --system --get "filter.lfs.$k")"
             done
             test "$(git config --system --get filter.lfs.required)" = true'
+          # Contents test: the GitHub CLI, as the runner user, on the
+          # PATH a job step has before any devbox environment exists
+          # (ci-actions' auto-release runs bash, git and gh first).
+          docker run --rm --user runner --entrypoint bash ci-plane-runner:test -c '
+            set -euo pipefail
+            command -v gh
+            gh --version
+            test "$(command -v gh)" = /usr/local/bin/gh'
           # Contents test: runner-extra-ca (arc-runners
           # `extraCACertificates`) in the built image, as the runner
           # user, with no root: given a directory holding a certificate

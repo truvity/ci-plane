@@ -752,8 +752,8 @@ access-control docs) — this chart does not decide it.
 ## The image doctrine
 
 The image contains only what devbox cannot deliver: the nix + devbox
-bootstrap, bash-as-sh, the daemonless docker client + buildx, git-lfs, and the
-Go build cache client. goreleaser-pro is deliberately absent: its
+bootstrap, bash-as-sh, the daemonless docker client + buildx, git-lfs, gh, and
+the Go build cache client. goreleaser-pro is deliberately absent: its
 licence forbids redistributing the binary, and this image is public.
 Everything else arrives per job from each repository's own
 `devbox.json`. Repo- or cluster-specific content in
@@ -769,6 +769,17 @@ executable file: git-lfs". It is a pinned static release binary
 `sha256sums.asc`), and `git lfs install --system` configures the LFS
 filters in `/etc/gitconfig`. CI runs the built image as the runner
 user and asserts it.
+
+**`gh` ships because it is part of the GitHub toolchain** (v7.6.0, owner
+decision F3 A). GitHub-hosted runners carry the GitHub CLI, and the shared
+`auto-release` action in truvity/ci-actions needs bash, git and `gh` before
+any devbox environment exists; other jobs had each worked around its absence
+in their own repository. It is a pinned static release binary (`GH_VERSION`,
+Renovate-tracked, checked against the release's `gh_<version>_checksums.txt`
+in the same build) installed into `/usr/local/bin` at image build time, so a
+job needs neither root nor a download. The image holds no credential: the
+token is the job's `GH_TOKEN`. CI runs the built image as the runner user and
+asserts `gh --version`.
 
 **One Go cache client ships: `go-cache-plugin`.** The
 [truvity/ci-cache](https://github.com/truvity/ci-cache) agent sat beside

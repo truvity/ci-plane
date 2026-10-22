@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.6.0
+
+### runner: the GitHub CLI (`gh`) is in the image
+
+- **New: `gh` in the runner image**, so a job step that runs before any devbox environment exists can call it, as on GitHub-hosted runners (which ship it). The shared `auto-release` action in truvity/ci-actions needs bash, git and `gh` first, and other jobs had each worked around the missing binary in their own repository. A static release binary pinned by `GH_VERSION` (2.102.1, annotated for Renovate), installed into `/usr/local/bin` at image build time (no root, no download at job time) and verified against the release's own `gh_<version>_checksums.txt` for `amd64` and `arm64`. The image holds no credential: the token is the job's `GH_TOKEN`. The `image` CI job now runs the built runner image as the `runner` user and asserts `gh --version`. No chart change. Consumers re-pin the runner image to this release to get it (the ARC pools through their digest pin, the Fargate runners through their image version).
+
 ## v7.5.4
 
 ### Fixed: cache-redirect zone spread across a rollout

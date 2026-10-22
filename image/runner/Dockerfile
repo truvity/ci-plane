@@ -8,7 +8,9 @@
 # invocation it caches), and the docker toolchain (client + buildx:
 # essential, ruled in-image 2026-08-13 — daemonless, the daemon never
 # ships), and git-lfs (part of git; actions/checkout `lfs: true` needs
-# it before any devbox exists; D627). EVERYTHING else — aws, kubectl, helm, toolchains — arrives
+# it before any devbox exists; D627), and gh (the GitHub CLI: hosted
+# runners ship it, and ci-actions' auto-release runs it before devbox).
+# EVERYTHING else — aws, kubectl, helm, toolchains — arrives
 # per job from the repo's own devbox.json through the nix cache.
 # Repo-specific OR cluster-specific content in this image is a bug
 # (builder registration lives in workflows, not here). The substituter list
@@ -220,6 +222,31 @@ RUN ARCH=$(dpkg --print-architecture) \
  && git config --system --get filter.lfs.clean \
  && git config --system --get filter.lfs.smudge \
  && git config --system --get filter.lfs.process
+
+# gh, the GitHub CLI: part of the GitHub toolchain the runner is a client
+# of, not a tool devbox should deliver. GitHub-hosted runners ship it, and
+# the shared `auto-release` action (truvity/ci-actions) runs bash, git and
+# `gh` before any devbox environment exists, so a job that needs it has no
+# earlier moment to get it from; callers had worked around the gap one
+# repository at a time. Static release binary, arch-explicit, installed
+# at build time into /usr/local/bin (nothing is installed at job time and
+# nothing needs root), verified against that release's own
+# gh_<version>_checksums.txt in the same build (same shape as sluisctl
+# below; the awk matches the whole file name, because the checksums file
+# also lists the .deb and .rpm of each architecture). `grep .` fails the
+# build on no match. The token is the job's (GH_TOKEN); the image holds none.
+# renovate: datasource=github-releases depName=cli/cli
+ARG GH_VERSION=2.102.1
+RUN ARCH=$(dpkg --print-architecture) \
+ && F="gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+ && cd /tmp \
+ && curl -fsSLO "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" \
+ && curl -fsSLO "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${F}" \
+ && awk -v f="${F}" '$2 == f' "gh_${GH_VERSION}_checksums.txt" | grep . | sha256sum -c - \
+ && tar -xzf "${F}" --strip-components=2 "gh_${GH_VERSION}_linux_${ARCH}/bin/gh" \
+ && install -m 0755 gh /usr/local/bin/gh \
+ && rm -f "gh_${GH_VERSION}_checksums.txt" "${F}" gh \
+ && gh --version
 
 # devbox binary (its packages come per job, from the repo's devbox.json).
 # Straight from the GitHub release with explicit arch: the official
