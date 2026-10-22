@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.8.1
+
+### Fixed: bazel-remote's S3 backend names its endpoint
+
+- **ci-builders: `bazelRemote.s3.enabled` renders `--s3.endpoint=s3.<region>.amazonaws.com`.** bazel-remote does not start its S3 backend without an endpoint: the container logged `Endpoint:  does not follow ip address or domain name standards.` and crash-looped, so a release that turned the S3 backend on (first done on devel with v7.7.1's `bazelRemote.serviceAccount.create`) had no bazel-remote at all. The endpoint is the regional AWS one, derived from `bazelRemote.s3.region`; the backend stays AWS only, so there is still no `endpoint` value. Off (the default), the render is byte-identical to v7.8.0. The two goldens that enable the S3 backend (`bazel-s3`, `bazel-s3-service-account`) gain the flag. No image change.
+
 ## v7.8.0
 
 ### Added: cache-redirect serves the npm registry
