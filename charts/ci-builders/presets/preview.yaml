@@ -39,3 +39,8 @@ npmCache:
 cacheRedirect:
   gradle:
     enabled: true
+  # The npm registry (v7.8.0) is read-only for clients (every write is refused),
+  # so it needs no more care than the Maven repositories; it replaces the
+  # verdaccio of `npmCache` above once the runners are pointed at it.
+  npm:
+    enabled: true

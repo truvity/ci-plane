@@ -1,7 +1,7 @@
-# A host name per front-end (cacheRedirect.hosts): the Nix, Maven and Gradle
+# A host name per front-end (cacheRedirect.hosts): the Nix, Maven, Gradle and npm
 # front-ends are each served at the ROOT of their own name, so a gateway
 # routes by name and rewrites no path. The Go proxy has none and stays under
-# /goproxy. Over the stable preset, which has the Gradle build cache on.
+# /goproxy. Over the stable preset, which has the Gradle build cache and npm on.
 buildkitd:
   networkPolicy:
     consumerNamespaces: [arc-runners-example]
@@ -18,6 +18,7 @@ cacheRedirect:
     nix: nix.cache.example.test
     maven: maven.cache.example.test
     gradle: gradle.cache.example.test
+    npm: npm.cache.example.test
   s3:
     bucket: example-bucket
     region: eu-example-1

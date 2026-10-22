@@ -317,7 +317,7 @@
     },
     "cacheRedirect": {
       "type": "object",
-      "description": "cache-redirect: the Nix, Go module and Maven pull-through cache (and, opt-in, the Gradle build cache) that redirects hits to presigned URLs of its bucket. Off by default; enabled, it needs the bucket, its region and the runner namespaces allowed to reach it.",
+      "description": "cache-redirect: the Nix, Go module, Maven and npm pull-through cache (and, opt-in, the Gradle build cache) that redirects hits to presigned URLs of its bucket. Off by default; enabled, it needs the bucket, its region and the runner namespaces allowed to reach it.",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -483,14 +483,37 @@
             }
           }
         },
+        "npm": {
+          "type": "object",
+          "description": "The npm registry under /npm; read-only for clients (writes are refused). Off by default; both presets turn it on.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "registry": {
+              "type": "string",
+              "pattern": "^https?://"
+            },
+            "freshTTL": {
+              "type": "string",
+              "pattern": "^[0-9]+(ns|us|ms|s|m|h)([0-9]+(ns|us|ms|s|m|h))*$",
+              "description": "A Go duration: how long a packument is served without asking the registry again."
+            }
+          }
+        },
         "hosts": {
           "type": "object",
-          "description": "A host name per front-end: a request with that Host is served at the root of the front-end (no gateway rewrite). Empty: none. Any other Host keeps the /nix, /goproxy, /maven/<repo>, /gradle/cache/ layout.",
+          "description": "A host name per front-end: a request with that Host is served at the root of the front-end (no gateway rewrite). Empty: none. Any other Host keeps the /nix, /goproxy, /maven/<repo>, /gradle/cache/, /npm layout.",
           "additionalProperties": false,
           "properties": {
             "nix": {"$ref": "#/definitions/cacheHost"},
             "maven": {"$ref": "#/definitions/cacheHost"},
-            "gradle": {"$ref": "#/definitions/cacheHost"}
+            "gradle": {"$ref": "#/definitions/cacheHost"},
+            "npm": {"$ref": "#/definitions/cacheHost"}
           }
         },
         "extraArgs": {

@@ -85,12 +85,12 @@ spec:
 ---
 # Source: ci-builders/templates/cache-redirect.yaml
 # cache-redirect: a pull-through cache for the Nix binary cache (/nix), the
-# Go module proxy (/goproxy) and the Maven repositories (/maven) whose index
-# is an S3 bucket, and, when enabled, the Gradle remote build cache
-# (/gradle). A hit on a large immutable object is a 302 to a presigned URL
-# of the bucket, so the bytes never pass through these pods; small objects
-# are served directly; a miss is fetched from upstream once and committed
-# only when whole.
+# Go module proxy (/goproxy), the Maven repositories (/maven) and the npm
+# registry (/npm) whose index is an S3 bucket, and, when enabled, the
+# Gradle remote build cache (/gradle). A hit on a large immutable object is
+# a 302 to a presigned URL of the bucket, so the bytes never pass through
+# these pods; small objects are served directly; a miss is fetched from
+# upstream once and committed only when whole.
 #
 # The pods hold no state: S3 is the only durable layer. Their identity is
 # the ServiceAccount's (Pod Identity / IRSA, estate-side wiring, scoped to
@@ -227,6 +227,10 @@ spec:
             - "-gradle=true"
             - "-gradle-prefix=gradle/"
             - "-gradle-max-entry-bytes=536870912"
+            - "-npm=true"
+            - "-npm-prefix=npm/"
+            - "-npm-registry=https://registry.npmjs.org"
+            - "-npm-fresh=2m"
           ports:
             - name: http
               containerPort: 8080

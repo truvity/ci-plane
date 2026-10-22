@@ -1,0 +1,30 @@
+# cache-redirect with the npm registry switched on over the defaults (no
+# preset), under the one prefix a runneridentity CacheRedirect role grants, at
+# a registry of the consumer's own choice and with a longer packument window,
+# and served at the root of a name of its own.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  nix:
+    prefix: cache-redirect/nix/
+  goproxy:
+    prefix: cache-redirect/goproxy/
+  maven:
+    prefix: cache-redirect/maven/
+  npm:
+    enabled: true
+    prefix: cache-redirect/npm/
+    registry: https://registry.npmjs.example.org
+    freshTTL: 5m
+  hosts:
+    npm: npm.cache.example.test
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

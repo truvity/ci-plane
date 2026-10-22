@@ -3,12 +3,12 @@
 {{- if not $c.s3.bucket }}{{ fail "cacheRedirect.s3.bucket is required when cacheRedirect is enabled" }}{{ end }}
 {{- if not $c.s3.region }}{{ fail "cacheRedirect.s3.region is required when cacheRedirect is enabled (\"auto\" for Cloudflare R2)" }}{{ end }}
 {{- if and $c.topologySpread.zone.enabled (int $c.topologySpread.zone.minDomains) (ne $c.topologySpread.zone.whenUnsatisfiable "DoNotSchedule") }}{{ fail "cacheRedirect.topologySpread.zone.minDomains needs whenUnsatisfiable: DoNotSchedule (Kubernetes refuses it with ScheduleAnyway)" }}{{ end }}
-{{- if not (or $c.nix.enabled $c.goproxy.enabled $c.maven.enabled $c.gradle.enabled) }}{{ fail "cacheRedirect: nix, goproxy, maven and gradle are all disabled; there is nothing to serve" }}{{ end }}
+{{- if not (or $c.nix.enabled $c.goproxy.enabled $c.maven.enabled $c.gradle.enabled $c.npm.enabled) }}{{ fail "cacheRedirect: nix, goproxy, maven, gradle and npm are all disabled; there is nothing to serve" }}{{ end }}
 {{- /* cacheRedirect.hosts: a request for the name of a front-end is served at that front-end's root (-hosts=kind=host). */}}
 {{- $hostsSeen := dict }}
 {{- range $kind, $host := $c.hosts }}
 {{- if $host }}
-{{- if not (get (dict "nix" $c.nix.enabled "maven" $c.maven.enabled "gradle" $c.gradle.enabled) $kind) }}{{ fail (printf "cacheRedirect.hosts.%s is set but cacheRedirect.%s is disabled: a host name for a front-end that is off" $kind $kind) }}{{ end }}
+{{- if not (get (dict "nix" $c.nix.enabled "maven" $c.maven.enabled "gradle" $c.gradle.enabled "npm" $c.npm.enabled) $kind) }}{{ fail (printf "cacheRedirect.hosts.%s is set but cacheRedirect.%s is disabled: a host name for a front-end that is off" $kind $kind) }}{{ end }}
 {{- if hasKey $hostsSeen (lower $host) }}{{ fail (printf "cacheRedirect.hosts: %q is given to both %s and %s; each front-end needs a host of its own" $host (get $hostsSeen (lower $host)) $kind) }}{{ end }}
 {{- $_ := set $hostsSeen (lower $host) $kind }}
 {{- end }}
@@ -19,12 +19,12 @@
 {{- end }}
 ---
 # cache-redirect: a pull-through cache for the Nix binary cache (/nix), the
-# Go module proxy (/goproxy) and the Maven repositories (/maven) whose index
-# is an S3 bucket, and, when enabled, the Gradle remote build cache
-# (/gradle). A hit on a large immutable object is a 302 to a presigned URL
-# of the bucket, so the bytes never pass through these pods; small objects
-# are served directly; a miss is fetched from upstream once and committed
-# only when whole.
+# Go module proxy (/goproxy), the Maven repositories (/maven) and the npm
+# registry (/npm) whose index is an S3 bucket, and, when enabled, the
+# Gradle remote build cache (/gradle). A hit on a large immutable object is
+# a 302 to a presigned URL of the bucket, so the bytes never pass through
+# these pods; small objects are served directly; a miss is fetched from
+# upstream once and committed only when whole.
 #
 # The pods hold no state: S3 is the only durable layer. Their identity is
 # the ServiceAccount's (Pod Identity / IRSA, estate-side wiring, scoped to
@@ -159,6 +159,12 @@ spec:
             {{- if $c.gradle.enabled }}
             - {{ printf "-gradle-prefix=%s" $c.gradle.prefix | quote }}
             - {{ printf "-gradle-max-entry-bytes=%d" (int64 $c.gradle.maxEntryBytes) | quote }}
+            {{- end }}
+            - {{ printf "-npm=%t" $c.npm.enabled | quote }}
+            {{- if $c.npm.enabled }}
+            - {{ printf "-npm-prefix=%s" $c.npm.prefix | quote }}
+            - {{ printf "-npm-registry=%s" $c.npm.registry | quote }}
+            - {{ printf "-npm-fresh=%s" $c.npm.freshTTL | quote }}
             {{- end }}
             {{- range $kind, $host := $c.hosts }}
             {{- if $host }}

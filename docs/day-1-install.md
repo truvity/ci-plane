@@ -39,8 +39,8 @@ Order matters: caches before runners, controller before both charts.
    override only the registry.
 5. Optional: `cacheRedirect`
    (`cacheRedirect.enabled: true`), one service for the Nix cache, the
-   Go module proxy and the Maven repositories (and, opt-in, a Gradle
-   remote build cache) whose hits on NARs, module zips and jars are
+   Go module proxy, the Maven repositories and the npm registry (and, opt-in, a Gradle
+   remote build cache) whose hits on NARs, module zips, jars and npm tarballs are
    redirects to presigned URLs of its bucket, so the bytes flow from the object store
    to the runner directly
    ([architecture](architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)).
@@ -49,8 +49,8 @@ Order matters: caches before runners, controller before both charts.
    ServiceAccount (`cacheRedirect.serviceAccount.name`, default
    `cache-redirect`; runneridentity's `CacheRedirect` builds the AWS role,
    for one prefix `cacheRedirect.nix.prefix`, `.goproxy.prefix`,
-   `.maven.prefix` and `.gradle.prefix` must all sit under: the Maven
-   and Gradle defaults, `maven/` and `gradle/`, do not), and a route from the
+   `.maven.prefix`, `.gradle.prefix` and `.npm.prefix` must all sit under: the Maven,
+   Gradle and npm defaults, `maven/`, `gradle/` and `npm/`, do not), and a route from the
    runners to the bucket's endpoint. Point runners at it with
    `substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/`
    and
@@ -60,8 +60,11 @@ Order matters: caches before runners, controller before both charts.
    WRITABLE cache and so off by default (`cacheRedirect.gradle.enabled`,
    on in `presets/preview.yaml` and `presets/stable.yaml`, each tier its own
    deployment and bucket), is `HttpBuildCache` with the url
-   `http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/`. Behind a
-   gateway that routes by name, `cacheRedirect.hosts.{nix,maven,gradle}`
+   `http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/`. npm, yarn and
+   pnpm use `http://cache-redirect.<ns>.svc.cluster.local/npm` as their
+   registry (`cacheRedirect.npm.enabled`, read-only, on in both presets; it
+   replaces the verdaccio of `npmCache`). Behind a
+   gateway that routes by name, `cacheRedirect.hosts.{nix,maven,gradle,npm}`
    serve each of those at the root of a host name of its own, so the gateway
    rewrites no path.
 6. For persistent Nix workers:
