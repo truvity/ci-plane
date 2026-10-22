@@ -122,6 +122,17 @@ build, then warm again); the key is the one Gradle prints as
 `Build cache key for task ':<task>' is <key>`. `rejected` and `stored` in
 `cache_redirect_requests_total{frontend="gradle"}` count the writes.
 
+The npm front-end of cache-redirect keeps a stored copy of every packument
+under `<npm prefix>_meta/`: it is what installs fall back to when the registry
+fails (`result="stale"` in `cache_redirect_requests_total{frontend="npm"}` says it
+is happening; the `upstream_error` and warnings in the log say why). To drop a
+bad document, delete its object (or the whole `_meta/` prefix: the next request
+fetches it again). Tarballs are immutable and never need it. A project that
+installs fine and still shows `registry.npmjs.org` in `yarn.lock`
+(`__archiveUrl`) or `pnpm-lock.yaml` (`tarball:`) was resolved from a metadata cache
+of the client that predates the cache (yarn keeps one under `~/.yarn/berry/metadata`,
+pnpm under its `cache-dir`), not from this service.
+
 cache-redirect's bucket is disposable the same way: an object that
 expires or is deleted is only a miss. Its health is in
 `cache_redirect_requests_total`: a rising `store_error` is the

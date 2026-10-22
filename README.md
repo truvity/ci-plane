@@ -13,8 +13,8 @@ transitively digest-pinned.
 |---|---|---|
 | [`image/runner`](image/runner/Dockerfile) | The runner: nix + devbox bootstrap, the daemonless docker client + buildx, `git-lfs`, `gh`, `go-cache-plugin`, the optional `runner-watchdog` entrypoint | `ghcr.io/truvity/ci-plane/runner:vX.Y.Z` |
 | [`image/nix-worker`](image/nix-worker/Dockerfile) | A persistent remote Nix builder: nix-daemon behind sshd | `ghcr.io/truvity/ci-plane/nix-worker:vX.Y.Z` |
-| [`image/cache-redirect`](image/cache-redirect) | A pull-through cache for Nix, Go and Maven downloads (and, opt-in, a Gradle remote build cache) whose index is an S3 bucket: a hit on a NAR, a module zip or a jar is a 302 to a presigned URL, so the bytes never pass through it ([architecture](docs/architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)) | `ghcr.io/truvity/ci-plane/cache-redirect:vX.Y.Z` |
-| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the npm and Bazel read-through caches; the optional cache-redirect (Nix, Go module and Maven downloads, and the opt-in Gradle build cache) | `oci://ghcr.io/truvity/charts/ci-builders` |
+| [`image/cache-redirect`](image/cache-redirect) | A pull-through cache for Nix, Go, Maven and npm downloads (and, opt-in, a Gradle remote build cache) whose index is an S3 bucket: a hit on a NAR, a module zip, a jar or an npm tarball is a 302 to a presigned URL, so the bytes never pass through it ([architecture](docs/architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)) | `ghcr.io/truvity/ci-plane/cache-redirect:vX.Y.Z` |
+| [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the npm and Bazel read-through caches; the optional cache-redirect (Nix, Go module, Maven and npm downloads, and the opt-in Gradle build cache) | `oci://ghcr.io/truvity/charts/ci-builders` |
 | [`deploy/pulumi/runneridentity`](deploy/pulumi/runneridentity) — the AWS Pod Identity roles of the runner pools, the Go module proxy and cache-redirect, as a Pulumi Go package | `github.com/truvity/ci-plane/deploy/pulumi/runneridentity` (tag `deploy/pulumi/runneridentity/vX.Y.Z`) |
 | [`charts/arc-runners`](charts/arc-runners) | AutoscalingRunnerSet CRs per measured profile, the stuck-runner janitor and the optional runner watchdog, remote Nix builders per job | `oci://ghcr.io/truvity/charts/arc-runners` |
 
@@ -22,7 +22,7 @@ Up to 1.5.0, `ci-builders` was published as
 `oci://ghcr.io/truvity/charts/ci-cache` and carried a Go module proxy;
 2.0.0 renamed it and dropped the proxy. The Nix and Go proxies are now
 the `/nix` and `/goproxy` front-ends of cache-redirect; `/maven` and the
-opt-in `/gradle` front-ends came with 7.7.0.
+opt-in `/gradle` front-ends came with 7.7.0, `/npm` with 7.8.0.
 
 ## Who it is for
 

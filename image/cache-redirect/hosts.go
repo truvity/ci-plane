@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ var hostRoots = map[string]string{
 	frontendNix:    "/nix",
 	frontendMaven:  "/maven",
 	frontendGradle: "/gradle/cache",
+	frontendNpm:    "/npm",
 }
 
 // hostMap is the -hosts flag: kind=host pairs, repeatable or comma-separated
@@ -130,17 +132,30 @@ func withHostRouting(routes map[string]hostRoute, next http.Handler) http.Handle
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if rt, ok := routes[normalizeHost(r.Host)]; ok && (!rt.tolerant || !strings.HasPrefix(r.URL.Path, rt.root+"/")) {
 			root := rt.root
-			r2 := *r
+			// The front-end is told the request arrived at its root, for
+			// the one that has to write its own public URL into an answer.
+			r2 := r.WithContext(context.WithValue(r.Context(), hostRootKey{}, true))
 			u := *r.URL
 			u.Path = root + ensureSlash(u.Path)
 			if u.RawPath != "" {
 				u.RawPath = root + ensureSlash(u.RawPath)
 			}
 			r2.URL = &u
-			r = &r2
+			r = r2
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// hostRootKey marks a request that was moved under its front-end's path
+// because its Host is the front-end's own name.
+type hostRootKey struct{}
+
+// arrivedAtHostRoot reports whether the client addressed the front-end by its
+// own host name, i.e. its public base URL has no path.
+func arrivedAtHostRoot(r *http.Request) bool {
+	v, _ := r.Context().Value(hostRootKey{}).(bool)
+	return v
 }
 
 func ensureSlash(p string) string {

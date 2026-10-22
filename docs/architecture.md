@@ -356,12 +356,13 @@ nix:    substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://
 go:     GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
 maven:  http://cache-redirect.<ns>.svc.cluster.local/maven/central   (also /google and /gradle-plugins)
 gradle: http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/   (only when cacheRedirect.gradle.enabled)
+npm:    http://cache-redirect.<ns>.svc.cluster.local/npm             (only when cacheRedirect.npm.enabled)
 ```
 
 ### A name per front-end
 
-Behind a gateway that routes by name, give each of Nix, Maven and Gradle a
-host name of its own (`cacheRedirect.hosts.nix|maven|gradle`; flag
+Behind a gateway that routes by name, give each of Nix, Maven, Gradle and npm a
+host name of its own (`cacheRedirect.hosts.nix|maven|gradle|npm`; flag
 `-hosts kind=host`, repeatable or comma-separated, environment
 `CACHE_REDIRECT_HOSTS`). A request whose `Host` is one of them is served at
 the **root** of that front-end, so the gateway forwards the request to the
@@ -371,6 +372,7 @@ Service as it is and rewrites no path:
 nix:    substituters = https://<nix host>                 /nix-cache-info, /<hash>.narinfo, /nar/...
 maven:  https://<maven host>/central                      (also /google, /gradle-plugins; GET / lists them)
 gradle: https://<gradle host>/                            GET|PUT /<key>; GET / is the probe (200)
+npm:    registry = https://<npm host>/                    /<package>, /<package>/-/<file>.tgz, /-/ping; GET / is the probe
 ```
 
 The Host is compared without its port (a gateway may forward it with or
@@ -378,11 +380,11 @@ without one), without a trailing dot, and in lower case. The service moves a
 matching request under the front-end's path (`nix.example/foo` is served as
 `/nix/foo`) before routing it, so each front-end is written once and
 the store keys are the same whichever name was used (`nix/`, `maven/`,
-`gradle/`). The Nix host is lenient about one thing: a path that already
+`gradle/`, `npm/`). The Nix host is lenient about one thing: a path that already
 starts with `/nix/` (a binary cache never serves one) is taken as it is, so
 a gateway that still rewrites the client's root onto `/nix` (the only way
 before hosts existed) can be changed after the host is set rather than in the
-same moment. Maven and Gradle have no such leniency (`/maven/` on the maven
+same moment. Maven, Gradle and npm have no such leniency (`/maven/` on the maven
 host is a repository named `maven`). A request for **any other** Host keeps the path layout above,
 including the Go proxy (it has no host of its own: `/goproxy`), the name that
 served everything before hosts existed, and the in-cluster Service. `/healthz`
@@ -462,8 +464,8 @@ credentials are refreshed `presignTTL` + 1 minute before they expire, so
 a URL is never signed with credentials about to lapse.
 `deploy/pulumi/runneridentity`'s `CacheRedirect` builds exactly this
 role for one prefix of a bucket (both front-end prefixes go under it,
-e.g. `cache-redirect/nix/`, `cache-redirect/goproxy/`, `cache-redirect/maven/` and
-`cache-redirect/gradle/`); credentials
+e.g. `cache-redirect/nix/`, `cache-redirect/goproxy/`, `cache-redirect/maven/`,
+`cache-redirect/gradle/` and `cache-redirect/npm/`); credentials
 come from the default AWS SDK chain, so EKS Pod Identity, IRSA, or the
 keys of `cacheRedirect.s3.existingSecret` for an S3-compatible store.
 
@@ -541,6 +543,83 @@ Two things this front-end meets that the others did not:
   Gradle gives an upstream 30 seconds of silence) before the client sees a
   502. The other front-ends do not retry.
 
+### npm front-end
+
+`cacheRedirect.npm.enabled` (**off by default**, on in both presets) serves the
+npm registry under `/npm` (or at the root of `hosts.npm`) to npm, yarn (berry)
+and pnpm: the client's registry is `http://cache-redirect.<ns>.svc.cluster.local/npm`
+or `https://<npm host>/`. It replaces the verdaccio of `npmCache`. Like Maven it
+is **read-only for clients**: publish, unpublish, dist-tag changes and login are
+405s, no credential is forwarded upstream, and a private registry or a publish
+is not something it can become. It is safe on any tier.
+
+- **Tarballs** (`/<package>/-/<basename>-<version>.tgz`, scoped names included)
+  are immutable and large: stored under `<prefix><package>/-/<file>`, a redirect
+  to a presigned URL on a hit, so an install's bytes do not pass through the
+  pod. The file name must be the package's own.
+- **Packuments** (`/<package>`, the metadata) are the hot path: one request per
+  dependency per resolution. They are mutable, so they are kept for
+  `freshTTL` (2 minutes) in memory and then **revalidated** with the ETag the
+  registry gave (a `304` costs no body). There are two variants, by `Accept`:
+  the *abbreviated* install document (`application/vnd.npm.install-v1+json`, what
+  all three clients ask for first) and the *full* one (`npm view`, and the `time`
+  that pnpm's `minimumReleaseAge` and yarn's age gate read); a request that does
+  not name the abbreviated type gets the full one, and the answer says
+  `Vary: Accept`. Full documents of busy packages are tens of megabytes, so the
+  front-end keeps up to 64 MiB per document in memory (the other front-ends'
+  limit is 8 MiB), answers gzip when the client accepts it, and gives its own
+  `ETag` (which depends on the address, see below) so a client that cached the
+  document gets a `304`.
+- **Stale on error.** The last document of each package and variant is also
+  stored, gzip-compressed, under `<prefix>_meta/<package>.<variant>`, whenever
+  it changes. When the registry is unreachable or answers 5xx/429 (after the
+  retries), the copy is served and counted as `result="stale"`; for the next 15
+  seconds the copy is served without asking again, so a down registry does not
+  cost every request the retries first. A package nobody has installed through
+  the service is a 502, not an invention. A stale copy lacks new publishes,
+  which is the right way to be wrong. The copy lives as long as the bucket's
+  expiry keeps it. With the registry unreachable, `npm`, yarn 4 and pnpm 11 all
+  installed a project from a restarted pod that had only the bucket.
+- **The tarball URLs are rewritten.** Every version in a packument carries
+  `dist.tarball` at `registry.npmjs.org`. npm replaces that host by the registry it
+  was given (`replace-registry-host`, default `npmjs`) and writes the original
+  URL into `package-lock.json`; **yarn 4 and pnpm 11 do not**: they build the URL
+  from the registry only when the document's is the same one, otherwise fetch the
+  document's, bypassing the cache, and record it in their lockfiles
+  (`__archiveUrl` in `yarn.lock`, `tarball:` in `pnpm-lock.yaml`). So the
+  front-end replaces `"tarball":"https://registry.npmjs.org/` by the address the
+  client reached it by (`https://<npm host>` or `<scheme>://<host>/npm`; the scheme
+  from `X-Forwarded-Proto`, the host from `Host`, which is checked to be a host
+  name), on the raw document at serve time, a byte replacement and not a parse. The
+  stored document is the registry's own, and the rewrite is per request because
+  the address depends on how the client arrived. Yarn and pnpm then see the URL
+  they would have computed, and their lockfiles stay free of the cache's address.
+  **The npm command is not rewritten for** (`User-Agent: npm/...`): its
+  lockfile would carry this service's address into every repository that
+  generates one through it, where `npm ci` fails for anyone who cannot reach it.
+  (An npm with `replace-registry-host=never` therefore fetches tarballs from the
+  registry directly; the install still works.)
+- **Audit and search** are passed through: `POST /-/npm/v1/security/advisories/bulk`
+  (npm 10+, `yarn npm audit`, `pnpm audit`) and the older `/audits[/quick]`, with their
+  `Content-Encoding` and body (32 MiB at most), and `GET /-/v1/search`. They are
+  not stored and not retried, and carry the same User-Agent as everything else.
+  `GET /-/ping` is answered locally (200), `GET /npm/` is the probe, and
+  `/-/package/<package>/dist-tags` is passed through briefly.
+- **Names.** A package arrives as `name`, `@scope/name` or `@scope%2fname`;
+  it is the same package, and the registry is asked in its `%2f` form. Names
+  are checked against the characters the registry allows (legacy names with
+  capitals included, no leading `.`, `_` or `-`) before they become a store key
+  and an upstream URL.
+- **Retries** as Maven's: 429, 502, 503 and 504 are asked again, up to four times.
+
+What is not here, compared with verdaccio: publishing and private packages
+(a private registry is a different component, not a mode of this one), per-scope upstreams (use `npmScopes`/`.npmrc`
+on the client), a web UI, authentication, and the offline cache of every package
+ever seen (the bucket's expiry bounds ours). What is: storage in a bucket instead
+of one volume that cannot be evicted, replicas across zones and rolling
+restarts, a tarball redirect to the bucket, and one component with the same
+metrics, identity and tests as the other front-ends.
+
 ### Gradle build cache front-end
 
 `cacheRedirect.gradle.enabled` (**off by default**, on in both
@@ -578,7 +657,8 @@ PodMonitor): `cache_redirect_requests_total{frontend,result}` with
 `miss` (pulled through), `not_found`, `upstream_error`, `store_error`,
 `verify_failed` (a NAR not matching its narinfo: served, not stored),
 `no_index` (a NAR with no narinfo record: served, not stored),
-`stored` and `rejected` (a client's write to the Gradle build cache);
+`stored` and `rejected` (a client's write to the Gradle build cache),
+`stale` (an npm packument served from its stored copy because the registry failed);
 `cache_redirect_uploads_total{frontend,result="ok|failed"}`;
 `cache_redirect_upload_bytes_total{frontend}`;
 `cache_redirect_upstream_request_duration_seconds{frontend}` (a
@@ -592,7 +672,8 @@ A down service degrades like every cache here: Nix falls through to the
 next substituter, and a GOPROXY comma fails the job loudly while a pipe
 would hide the outage. Gradle does not fall through: a repository that
 cannot be reached fails the resolution, which is why a client probes
-`/maven/` and `/gradle/cache/` before it points a build at them.
+`/maven/` and `/gradle/cache/` before it points a build at them. npm, yarn
+and pnpm do not fall through either (`/npm/-/ping` and `/npm/` are the probes).
 
 ## Persistent Nix workers are CI-only and separate from BuildKit
 

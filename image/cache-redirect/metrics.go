@@ -22,11 +22,12 @@ const (
 	resultNoIndex       = "no_index"       // a NAR no narinfo of ours announced: passed through, not stored
 	resultStored        = "stored"         // a client's write was committed to the store (the Gradle build cache)
 	resultRejected      = "rejected"       // a client's write was refused: no length, or too large (the Gradle build cache)
+	resultStale         = "stale"          // upstream failed and the last copy was served instead (npm packuments)
 )
 
 var allResults = []string{
 	resultHit, resultRedirect, resultMiss, resultNotFound, resultUpstreamError, resultStoreError,
-	resultVerifyFailed, resultNoIndex, resultStored, resultRejected,
+	resultVerifyFailed, resultNoIndex, resultStored, resultRejected, resultStale,
 }
 
 // upstreamBuckets are the histogram bounds, in seconds, of the time to
@@ -111,7 +112,7 @@ func (m *Metrics) Write(w io.Writer) {
 	}
 
 	head("cache_redirect_requests_total", "counter",
-		"Requests by front-end and result (hit, redirect, miss, not_found, upstream_error, store_error, verify_failed, no_index, stored, rejected).")
+		"Requests by front-end and result (hit, redirect, miss, not_found, upstream_error, store_error, verify_failed, no_index, stored, rejected, stale).")
 	for _, k := range sortedKeys2(m.requests) {
 		_, _ = fmt.Fprintf(w, "cache_redirect_requests_total{frontend=%q,result=%q} %d\n", k[0], k[1], m.requests[k])
 	}

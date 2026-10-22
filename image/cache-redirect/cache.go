@@ -569,8 +569,14 @@ const maxRetryWait = 5 * time.Second
 // Retry-After) when the front-end asks for it and the upstream answers 429,
 // 502, 503 or 504; after the last attempt that answer is returned as it is.
 func (c *Cache) fetch(ctx context.Context, method, frontend, url string) (*http.Response, error) {
+	return c.fetchHeader(ctx, method, frontend, url, nil)
+}
+
+// fetchHeader is fetch with extra request headers (an Accept, a conditional
+// request).
+func (c *Cache) fetchHeader(ctx context.Context, method, frontend, url string, hdr http.Header) (*http.Response, error) {
 	for attempt := 1; ; attempt++ {
-		resp, err := c.fetchOnce(ctx, method, frontend, url)
+		resp, err := c.fetchOnce(ctx, method, frontend, url, hdr)
 		if err != nil || !c.retryFrontends[frontend] || attempt == maxAttempts || !retryableStatus(resp.StatusCode) {
 			return resp, err
 		}
@@ -599,12 +605,15 @@ func retryableStatus(code int) bool {
 // fetchOnce sends one upstream request. Its body stops with an error when no
 // byte has arrived for idleTimeout: a stalled upstream must fail the
 // fetch, not hold every request waiting on it.
-func (c *Cache) fetchOnce(ctx context.Context, method, frontend, url string) (*http.Response, error) {
+func (c *Cache) fetchOnce(ctx context.Context, method, frontend, url string, hdr http.Header) (*http.Response, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		cancel()
 		return nil, err
+	}
+	for k, v := range hdr {
+		req.Header[k] = v
 	}
 	req.Header.Set("User-Agent", userAgent)
 	start := time.Now()

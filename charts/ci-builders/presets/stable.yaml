@@ -39,3 +39,10 @@ cacheRedirect:
   # policy admits only stable runners, and only stable jobs write to it.
   gradle:
     enabled: true
+  # The npm registry (v7.8.0) is ON on the stable tier too: it is read-only for
+  # clients (publish, unpublish and login are refused, no credential goes
+  # upstream), and the packuments and tarballs it keeps are the registry's own
+  # public documents. It replaces `npmCache` (verdaccio, which stays off here:
+  # a second stateful service the stable tier never had).
+  npm:
+    enabled: true

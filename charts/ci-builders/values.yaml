@@ -540,7 +540,7 @@ nixWorkers:
 
 cacheRedirect:
   # cache-redirect: a pull-through cache for the Nix binary cache, the
-  # Go module proxy and the Maven repositories that keeps its index in an S3 (or S3-compatible) bucket
+  # Go module proxy, the Maven repositories and the npm registry that keeps its index in an S3 (or S3-compatible) bucket
   # and answers a hit on a large immutable download -- a NAR, a module zip
   # -- with a 302 to a short-lived PRESIGNED URL of that bucket. The bytes
   # then flow from the object store to the runner directly; these pods
@@ -555,6 +555,7 @@ cacheRedirect:
   #   go:       GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
   #   maven:    url = http://cache-redirect.<ns>.svc.cluster.local/maven/central (and /google, /gradle-plugins)
   #   gradle:   url = http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/   (when enabled below)
+  #   npm:      registry = http://cache-redirect.<ns>.svc.cluster.local/npm            (when enabled below)
   # A host name of its own for a front-end (`hosts`, v7.7.0): see below.
   # Runners must be able to reach the bucket's endpoint themselves (a VPC
   # gateway endpoint, or egress to it): that is where a redirect sends them.
@@ -680,6 +681,27 @@ cacheRedirect:
     # The largest entry a client may store; a larger PUT is a 413, which Gradle
     # reads as "too large to cache" and carries on.
     maxEntryBytes: 536870912
+  # The npm registry (v7.8.0), read-only: what npm, yarn (berry) and pnpm are
+  # given as their registry. An immutable tarball is stored under `prefix` and is
+  # a redirect to the bucket on a hit. A packument (the metadata of a package) is
+  # kept for `freshTTL`, then revalidated with the ETag upstream gave; it is
+  # served from the copy in the bucket when the registry fails, so an outage of
+  # registry.npmjs.org does not break the installs of what has been installed
+  # before (a package never seen is a 502). Two variants by Accept: the
+  # abbreviated install document and the full one (which `time`, pnpm's
+  # minimumReleaseAge and yarn's age gate need). The tarball URLs of a packument
+  # are rewritten to the address the client reached the service by, because yarn
+  # and pnpm fetch the URL the document names. `npm audit`, `yarn npm audit`,
+  # `pnpm audit` and search are passed through; publish, unpublish, login and
+  # every other write are refused (405), so it is safe on any tier. An upstream
+  # that answers 429, 502, 503 or 504 is asked again, up to four times.
+  # OFF by default; both presets turn it on.
+  npm:
+    enabled: false
+    prefix: npm/
+    registry: https://registry.npmjs.org
+    # How long a packument is served without asking the registry again.
+    freshTTL: 2m
   # A HOST NAME for a front-end (v7.7.0): a request whose Host header is the
   # name is served at the ROOT of that front-end, so a gateway routes by name
   # to the Service and rewrites nothing. A client is then given a base URL
@@ -689,11 +711,13 @@ cacheRedirect:
   #   maven:  url = https://<hosts.maven>/central              (also /google, /gradle-plugins;
   #                                                              the probe is GET /)
   #   gradle: url = https://<hosts.gradle>/                    (/<key>; the probe is GET /)
+  #   npm:    registry = https://<hosts.npm>/                  (/<package>, /<package>/-/<file>.tgz,
+  #                                                              /-/ping)
   # A port on the Host header is ignored, and so is case. On the Nix host a path
   # already starting with /nix/ is served as it is (a gateway that still
   # rewrites the root onto /nix keeps working until it is changed). A request for any
   # other Host keeps the path layout above (/nix, /goproxy, /maven/<repo>,
-  # /gradle/cache/), so the Go module proxy's name and the in-cluster Service
+  # /gradle/cache/, /npm), so the Go module proxy's name and the in-cluster Service
   # work unchanged. The Go proxy has no host of its own: it stays under
   # /goproxy. Empty: not set. Naming a host of a front-end that is disabled
   # is a render error. Hosts must differ.
@@ -701,6 +725,7 @@ cacheRedirect:
     nix: ""
     maven: ""
     gradle: ""
+    npm: ""
   # Extra flags, passed as given (see `cache-redirect -help`), e.g.
   # ["-negative-ttl=5m"].
   extraArgs: []

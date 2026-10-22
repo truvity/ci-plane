@@ -1,6 +1,6 @@
 // cache-redirect is a pull-through cache for CI downloads that are
 // immutable and content-addressed -- Nix NARs, Go module zips, Maven
-// artifacts -- whose bytes never pass through it on a hit, and, when asked
+// artifacts, npm tarballs -- whose bytes never pass through it on a hit, and, when asked
 // for, the Gradle remote build cache on the same store.
 //
 // The index is an S3 (or S3-compatible) bucket. A hit on a large object is
@@ -23,8 +23,9 @@
 //	/goproxy/...  the GOPROXY front-end            (GOPROXY:     <base>/goproxy)
 //	/maven/...    the Maven repositories           (url:         <base>/maven/<repo>)
 //	/gradle/...   the Gradle build cache, OFF by default (url:   <base>/gradle/cache/)
+//	/npm/...      the npm registry                 (registry:    <base>/npm)
 //
-// Each of nix, maven and gradle can also be served at the root of a host name
+// Each of nix, maven, gradle and npm can also be served at the root of a host name
 // of its own (-hosts nix=nix.cache.example,maven=maven.cache.example), so a
 // gateway routes by name and rewrites nothing; any other Host keeps the layout
 // above.
@@ -86,6 +87,12 @@ type settings struct {
 	GradlePrefix   string
 	GradleMaxEntry int64
 
+	Npm       bool
+	NpmPrefix string
+	NpmReg    string
+	NpmFresh  time.Duration
+	NpmMemory int64
+
 	Hosts *hostMap
 }
 
@@ -110,7 +117,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.Int64Var(&c.MemoryBytes, "memory-cache-bytes", 64<<20, "in-memory cache budget for small objects")
 	fs.IntVar(&c.MaxFetches, "max-fetches", 16, "upstream pull-throughs at once; more wait")
 	fs.DurationVar(&c.RetryBackoff, "retry-backoff", time.Second,
-		"the Maven front-end repeats an upstream request answered 429, 502, 503 or 504, up to 4 attempts, "+
+		"the Maven and npm front-ends repeat an upstream request answered 429, 502, 503 or 504, up to 4 attempts, "+
 			"waiting this long times the attempt (or the upstream's Retry-After)")
 	fs.TextVar(&c.LogLevel, "log-level", slog.LevelInfo, "debug, info, warn or error")
 
@@ -134,9 +141,15 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.StringVar(&c.GradlePrefix, "gradle-prefix", "gradle/", "store key prefix of the Gradle build cache")
 	fs.Int64Var(&c.GradleMaxEntry, "gradle-max-entry-bytes", 512<<20, "the largest build cache entry a client may store (413 above it)")
 
+	fs.BoolVar(&c.Npm, "npm", false, "serve the npm registry under /npm (read-only)")
+	fs.StringVar(&c.NpmPrefix, "npm-prefix", "npm/", "store key prefix of the npm front-end")
+	fs.StringVar(&c.NpmReg, "npm-registry", "https://registry.npmjs.org", "the npm registry pulled through")
+	fs.DurationVar(&c.NpmFresh, "npm-fresh", 2*time.Minute, "how long a packument is served without asking the registry again; then it is revalidated with its ETag")
+	fs.Int64Var(&c.NpmMemory, "npm-memory-bytes", 128<<20, "in-memory budget for packuments (a single one may be up to 64 MiB and half of this)")
+
 	c.Hosts = newHostMap()
-	fs.Var(c.Hosts, "hosts", "serve a front-end at the ROOT of a host name, as kind=host (kind: nix, maven or gradle; repeatable, or comma-separated), "+
-		"so the gateway needs no path rewrite; a request for any other Host keeps the /nix, /goproxy, /maven, /gradle/cache layout. "+
+	fs.Var(c.Hosts, "hosts", "serve a front-end at the ROOT of a host name, as kind=host (kind: nix, maven, gradle or npm; repeatable, or comma-separated), "+
+		"so the gateway needs no path rewrite; a request for any other Host keeps the /nix, /goproxy, /maven, /gradle/cache, /npm layout. "+
 		"The port in the Host header is ignored")
 
 	if err := fs.Parse(args); err != nil {
@@ -172,7 +185,7 @@ func (c *settings) validate() error {
 	if c.S3.Bucket == "" {
 		errs = append(errs, errors.New("-s3-bucket is required"))
 	}
-	if !c.Nix && !c.Go && !c.Maven && !c.Gradle {
+	if !c.Nix && !c.Go && !c.Maven && !c.Gradle && !c.Npm {
 		errs = append(errs, errors.New("all front-ends are off: nothing to serve"))
 	}
 	// SigV4 caps a presigned URL at seven days.
@@ -196,6 +209,7 @@ func (c *settings) validate() error {
 	for _, p := range []prefixed{
 		{c.Nix, "-nix-prefix", c.NixPrefix}, {c.Go, "-goproxy-prefix", c.GoPrefix},
 		{c.Maven, "-maven-prefix", c.MavenPrefix}, {c.Gradle, "-gradle-prefix", c.GradlePrefix},
+		{c.Npm, "-npm-prefix", c.NpmPrefix},
 	} {
 		if !p.on {
 			continue
@@ -235,13 +249,24 @@ func (c *settings) validate() error {
 		}
 	}
 	for kind, host := range c.Hosts.byKind {
-		on := map[string]bool{frontendNix: c.Nix, frontendMaven: c.Maven, frontendGradle: c.Gradle}[kind]
+		on := map[string]bool{frontendNix: c.Nix, frontendMaven: c.Maven, frontendGradle: c.Gradle, frontendNpm: c.Npm}[kind]
 		if !on {
 			errs = append(errs, fmt.Errorf("-hosts %s=%s: the %s front-end is off", kind, host, kind))
 		}
 	}
 	if c.Gradle && c.GradleMaxEntry < 1 {
 		errs = append(errs, errors.New("-gradle-max-entry-bytes must be positive"))
+	}
+	if c.Npm {
+		if _, err := parseUpstream(c.NpmReg); err != nil {
+			errs = append(errs, fmt.Errorf("-npm-registry: %w", err))
+		}
+		if c.NpmFresh < 0 {
+			errs = append(errs, errors.New("-npm-fresh must not be negative"))
+		}
+		if c.NpmMemory < 2*maxSmall {
+			errs = append(errs, fmt.Errorf("-npm-memory-bytes %d: at least %d", c.NpmMemory, 2*maxSmall))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -292,7 +317,7 @@ func realMain(args []string) int {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	log.Info("serving", "listen", cfg.Listen, "bucket", cfg.S3.Bucket, "nix", cfg.Nix, "goproxy", cfg.Go,
-		"maven", cfg.Maven, "maven_repos", mavenRepoNamesOf(cfg), "gradle", cfg.Gradle, "hosts", hostsServed(cfg.Hosts.routes()))
+		"maven", cfg.Maven, "maven_repos", mavenRepoNamesOf(cfg), "gradle", cfg.Gradle, "npm", cfg.Npm, "hosts", hostsServed(cfg.Hosts.routes()))
 
 	select {
 	case err := <-errc:
@@ -329,11 +354,14 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 	if cfg.Gradle {
 		frontends = append(frontends, frontendGradle)
 	}
+	if cfg.Npm {
+		frontends = append(frontends, frontendNpm)
+	}
 	m := newMetrics(frontends...)
 	c := newCache(bg, store, client, m, log, cacheOptions{
 		PresignTTL: cfg.PresignTTL, NegativeTTL: cfg.NegativeTTL, MutableTTL: cfg.MutableTTL,
 		IdleTimeout: cfg.IdleTimeout, MemoryBytes: cfg.MemoryBytes, MaxFetches: cfg.MaxFetches,
-		RetryFrontends: []string{frontendMaven}, RetryBackoff: cfg.RetryBackoff,
+		RetryFrontends: []string{frontendMaven, frontendNpm}, RetryBackoff: cfg.RetryBackoff,
 	})
 
 	mux := http.NewServeMux()
@@ -367,6 +395,10 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 	}
 	if cfg.Gradle {
 		mux.Handle("/gradle/", &gradleFrontend{cache: c, prefix: cfg.GradlePrefix, maxEntry: cfg.GradleMaxEntry})
+	}
+	if cfg.Npm {
+		up, _ := parseUpstream(cfg.NpmReg) // validated
+		mux.Handle("/npm/", newNpmFrontend(c, cfg.NpmPrefix, up, cfg.NpmFresh, cfg.NpmMemory))
 	}
 	return withHostRouting(cfg.Hosts.routes(), mux), c
 }

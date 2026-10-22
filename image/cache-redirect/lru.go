@@ -12,17 +12,24 @@ type cached struct {
 	status      int
 	contentType string
 	body        []byte
+	// etag and fetched belong to a mutable document that is revalidated (an
+	// npm packument): the validator upstream gave, and when it was last
+	// confirmed current.
+	etag    string
+	fetched time.Time
 }
 
 // lru is a byte-bounded least-recently-used map with an optional expiry
 // per entry. Memory only: losing it costs S3 reads, never correctness.
 type lru struct {
-	mu    sync.Mutex
-	max   int64
-	size  int64
-	ll    *list.List
-	items map[string]*list.Element
-	now   func() time.Time
+	mu  sync.Mutex
+	max int64
+	// entryMax is the largest entry kept; 0 means an eighth of max.
+	entryMax int64
+	size     int64
+	ll       *list.List
+	items    map[string]*list.Element
+	now      func() time.Time
 }
 
 type lruEntry struct {
@@ -53,11 +60,15 @@ func (c *lru) Get(key string) (cached, bool) {
 }
 
 // Put remembers val under key for ttl (0: until evicted). An entry larger
-// than an eighth of the budget is not kept: one big object must not empty
-// the cache of everything small.
+// than an eighth of the budget (or entryMax) is not kept: one big object must
+// not empty the cache of everything small.
 func (c *lru) Put(key string, val cached, ttl time.Duration) {
 	size := int64(len(key)+len(val.body)) + 64
-	if c.max <= 0 || size > c.max/8 {
+	limit := c.max / 8
+	if c.entryMax > 0 {
+		limit = c.entryMax
+	}
+	if c.max <= 0 || size > limit {
 		return
 	}
 	var exp time.Time
