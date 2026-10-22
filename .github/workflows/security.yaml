@@ -22,6 +22,6 @@ jobs:
   # standard-library advisory with no released fix would otherwise wedge
   # every pull request on a finding nobody can act on.
   govulncheck:
-    uses: truvity/ci-workflows/.github/workflows/check.yaml@d4350d573f67de8f7a145a4de94c392c6b43fd8c # v5.0.0
+    uses: truvity/ci-workflows/.github/workflows/check.yaml@51bc0eb7d5d89931d336219f87bde091deaf48ed # v5.4.0
     with:
       recipes: '["vuln"]'
