@@ -62,9 +62,15 @@ func TestHostNixServedAtRoot(t *testing.T) {
 	if len(up.paths) != 1 || up.paths[0] != "/0123456789abcdfghijklmnpqrsvwxyz.narinfo" {
 		t.Errorf("upstream asked for %v, want /<hash>.narinfo (the host is the only prefix)", up.paths)
 	}
-	// The path layout is not repeated under the host.
-	if r := f.onHost(t, http.MethodGet, nixHost, "/nix/nix-cache-info", nil); r.code != http.StatusNotFound {
-		t.Errorf("/nix/nix-cache-info on the nix host: %d, want 404", r.code)
+	// A gateway that still rewrites the client's root onto /nix (the way
+	// before hosts existed) sends /nix/nix-cache-info: served as it is, not
+	// moved under /nix a second time, so the rewrite can be taken away after
+	// the host is set.
+	if r := f.onHost(t, http.MethodGet, nixHost, "/nix/nix-cache-info", nil); r.code != 200 || !strings.Contains(r.body, "StoreDir") {
+		t.Errorf("/nix/nix-cache-info on the nix host: %d %q, want it served as it is", r.code, r.body)
+	}
+	if r := f.onHost(t, http.MethodGet, nixHost, "/nix/1123456789abcdfghijklmnpqrsvwxyz.narinfo", nil); r.code != http.StatusNotFound || len(up.paths) != 2 || up.paths[1] != "/1123456789abcdfghijklmnpqrsvwxyz.narinfo" {
+		t.Errorf("/nix/<hash>.narinfo on the nix host: %d, upstream asked %v, want the same upstream path as the root form", r.code, up.paths)
 	}
 	// Other kinds are not served on the nix host.
 	if r := f.onHost(t, http.MethodGet, nixHost, "/central/org/x/1/x-1.pom", nil); r.code != http.StatusNotFound {
@@ -121,6 +127,11 @@ func TestHostGradleServedAtRoot(t *testing.T) {
 	r := f.onHost(t, http.MethodGet, gradleHost, "/"+gradleKey, nil)
 	if r.code != http.StatusFound || !strings.HasPrefix(r.header.Get("Location"), "https://store.example/gradle/"+gradleKey+"?") {
 		t.Errorf("GET after PUT: %d %q, want a redirect to the store", r.code, r.header.Get("Location"))
+	}
+	// Only Nix is tolerant of its own prefix: a Maven repository may be named
+	// "maven", so /maven/... on the maven host is a repository path.
+	if r := f.onHost(t, http.MethodGet, mavenHost, "/maven/", nil); r.code != http.StatusNotFound {
+		t.Errorf("/maven/ on the maven host: %d, want 404 (an unknown repository)", r.code)
 	}
 	// Not a key: refused whatever the Host.
 	if r := f.onHost(t, http.MethodPut, gradleHost, "/not-a-key", []byte("x")); r.code != http.StatusNotFound {

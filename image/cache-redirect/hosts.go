@@ -92,15 +92,27 @@ func validHostName(s string) bool {
 	return true
 }
 
-// routes is the host -> mount path table of a configuration, nil when no
-// host is named.
-func (h *hostMap) routes() map[string]string {
+// hostRoute is where a request for one host name is moved to.
+type hostRoute struct {
+	root string
+	// tolerant: a path that already starts with root + "/" is left as it is.
+	// Only the Nix front-end can say so unambiguously (a binary cache serves
+	// /nix-cache-info, /<hash>.narinfo and /nar/..., never a path under
+	// /nix/), and it is what lets a gateway that still rewrites the client's
+	// root onto /nix (as it had to before hosts existed) be taken away AFTER
+	// the host is set, instead of in the same moment.
+	tolerant bool
+}
+
+// routes is the host -> route table of a configuration, nil when no host is
+// named.
+func (h *hostMap) routes() map[string]hostRoute {
 	if h == nil || len(h.byKind) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(h.byKind))
+	out := make(map[string]hostRoute, len(h.byKind))
 	for kind, host := range h.byKind {
-		out[host] = hostRoots[kind]
+		out[host] = hostRoute{root: hostRoots[kind], tolerant: kind == frontendNix}
 	}
 	return out
 }
@@ -111,12 +123,13 @@ func (h *hostMap) routes() map[string]string {
 // below sees one path layout whatever the Host was, so a front-end is written
 // once. /healthz and /metrics stay on the path layout: a kubelet probes by pod
 // address, never by one of these names.
-func withHostRouting(routes map[string]string, next http.Handler) http.Handler {
+func withHostRouting(routes map[string]hostRoute, next http.Handler) http.Handler {
 	if len(routes) == 0 {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if root, ok := routes[normalizeHost(r.Host)]; ok {
+		if rt, ok := routes[normalizeHost(r.Host)]; ok && !(rt.tolerant && strings.HasPrefix(r.URL.Path, rt.root+"/")) {
+			root := rt.root
 			r2 := *r
 			u := *r.URL
 			u.Path = root + ensureSlash(u.Path)
@@ -138,10 +151,10 @@ func ensureSlash(p string) string {
 }
 
 // hostsServed names the hosts for the startup log, sorted.
-func hostsServed(routes map[string]string) []string {
+func hostsServed(routes map[string]hostRoute) []string {
 	out := make([]string, 0, len(routes))
-	for h, root := range routes {
-		out = append(out, h+" -> "+root)
+	for h, rt := range routes {
+		out = append(out, h+" -> "+rt.root)
 	}
 	sort.Strings(out)
 	return out

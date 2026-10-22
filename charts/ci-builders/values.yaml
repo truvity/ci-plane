@@ -689,7 +689,9 @@ cacheRedirect:
   #   maven:  url = https://<hosts.maven>/central              (also /google, /gradle-plugins;
   #                                                              the probe is GET /)
   #   gradle: url = https://<hosts.gradle>/                    (/<key>; the probe is GET /)
-  # A port on the Host header is ignored, and so is case. A request for any
+  # A port on the Host header is ignored, and so is case. On the Nix host a path
+  # already starting with /nix/ is served as it is (a gateway that still
+  # rewrites the root onto /nix keeps working until it is changed). A request for any
   # other Host keeps the path layout above (/nix, /goproxy, /maven/<repo>,
   # /gradle/cache/), so the Go module proxy's name and the in-cluster Service
   # work unchanged. The Go proxy has no host of its own: it stays under

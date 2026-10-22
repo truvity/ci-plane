@@ -378,7 +378,12 @@ without one), without a trailing dot, and in lower case. The service moves a
 matching request under the front-end's path (`nix.example/foo` is served as
 `/nix/foo`) before routing it, so each front-end is written once and
 the store keys are the same whichever name was used (`nix/`, `maven/`,
-`gradle/`). A request for **any other** Host keeps the path layout above,
+`gradle/`). The Nix host is lenient about one thing: a path that already
+starts with `/nix/` (a binary cache never serves one) is taken as it is, so
+a gateway that still rewrites the client's root onto `/nix` (the only way
+before hosts existed) can be changed after the host is set rather than in the
+same moment. Maven and Gradle have no such leniency (`/maven/` on the maven
+host is a repository named `maven`). A request for **any other** Host keeps the path layout above,
 including the Go proxy (it has no host of its own: `/goproxy`), the name that
 served everything before hosts existed, and the in-cluster Service. `/healthz`
 and `/metrics` are answered on the path layout only: a kubelet probes the pod
