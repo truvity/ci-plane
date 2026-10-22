@@ -38,21 +38,32 @@ Order matters: caches before runners, controller before both charts.
    charts' image references are split `{registry}/{repository}` so you
    override only the registry.
 5. Optional: `cacheRedirect`
-   (`cacheRedirect.enabled: true`), one service for the Nix cache and the
-   Go module proxy whose hits on NARs and module zips are redirects to
-   presigned URLs of its bucket, so the bytes flow from the object store
+   (`cacheRedirect.enabled: true`), one service for the Nix cache, the
+   Go module proxy and the Maven repositories (and, opt-in, a Gradle
+   remote build cache) whose hits on NARs, module zips and jars are
+   redirects to presigned URLs of its bucket, so the bytes flow from the object store
    to the runner directly
    ([architecture](architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)).
    It needs `cacheRedirect.s3.bucket` and `region`,
    `cacheRedirect.networkPolicy.consumerNamespaces`, an identity on its
    ServiceAccount (`cacheRedirect.serviceAccount.name`, default
    `cache-redirect`; runneridentity's `CacheRedirect` builds the AWS role,
-   for one prefix both `cacheRedirect.nix.prefix` and
-   `cacheRedirect.goproxy.prefix` must sit under), and a route from the
+   for one prefix `cacheRedirect.nix.prefix`, `.goproxy.prefix`,
+   `.maven.prefix` and `.gradle.prefix` must all sit under: the Maven
+   and Gradle defaults, `maven/` and `gradle/`, do not), and a route from the
    runners to the bucket's endpoint. Point runners at it with
    `substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/`
    and
    `GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct`.
+   Gradle and Maven builds use `.../maven/central` (and `/google`,
+   `/gradle-plugins`) as their repositories; the Gradle build cache, a
+   WRITABLE cache and so off by default (`cacheRedirect.gradle.enabled`,
+   on in `presets/preview.yaml` and `presets/stable.yaml`, each tier its own
+   deployment and bucket), is `HttpBuildCache` with the url
+   `http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/`. Behind a
+   gateway that routes by name, `cacheRedirect.hosts.{nix,maven,gradle}`
+   serve each of those at the root of a host name of its own, so the gateway
+   rewrites no path.
 6. For persistent Nix workers:
    - an OpenBao SSH user CA (secrets engine mount, default `ssh`) with a
      signing role (default `ci-nix`) that allows the principal `ci-nix`
@@ -348,7 +359,7 @@ for the worked example and what it renders.
 Point `runs-on` at the scale-set names (via org variables so a rename
 is one change, not N). Runners reach the caches by cluster DNS:
 `buildkitd-<arch>.<namespace>.svc:1234` (buildx `--driver remote`),
-`cache-redirect.<namespace>.svc/nix` (nix substituter) and `/goproxy` (GOPROXY),
+`cache-redirect.<namespace>.svc/nix` (nix substituter), `/goproxy` (GOPROXY) and `/maven/<repo>` (Gradle and Maven repositories),
 `bazel-remote.<namespace>.svc:9092` (moon remote cache; the port declares `appProtocol: kubernetes.io/h2c`, so a gateway can publish it over an HTTPRoute),
 `npm-cache.<namespace>.svc` (yarn/npm/pnpm `npmRegistryServer`, public
 packages, behind a health-probe fallback to registry.npmjs.org).

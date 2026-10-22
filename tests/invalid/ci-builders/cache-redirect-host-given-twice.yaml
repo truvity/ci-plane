@@ -1,0 +1,18 @@
+# refuses: each front-end needs a host of its own
+# One name for two front-ends: a request could not tell them apart.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  hosts:
+    nix: cache.example.test
+    maven: Cache.Example.Test
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

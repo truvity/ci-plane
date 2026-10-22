@@ -1,6 +1,7 @@
 // cache-redirect is a pull-through cache for CI downloads that are
-// immutable and content-addressed -- Nix NARs and Go module zips -- whose
-// bytes never pass through it on a hit.
+// immutable and content-addressed -- Nix NARs, Go module zips, Maven
+// artifacts -- whose bytes never pass through it on a hit, and, when asked
+// for, the Gradle remote build cache on the same store.
 //
 // The index is an S3 (or S3-compatible) bucket. A hit on a large object is
 // answered with a 302 to a short-lived presigned GET of the bucket, so the
@@ -20,6 +21,14 @@
 //
 //	/nix/...      the Nix binary cache front-end   (substituter: <base>/nix)
 //	/goproxy/...  the GOPROXY front-end            (GOPROXY:     <base>/goproxy)
+//	/maven/...    the Maven repositories           (url:         <base>/maven/<repo>)
+//	/gradle/...   the Gradle build cache, OFF by default (url:   <base>/gradle/cache/)
+//
+// Each of nix, maven and gradle can also be served at the root of a host name
+// of its own (-hosts nix=nix.cache.example,maven=maven.cache.example), so a
+// gateway routes by name and rewrites nothing; any other Host keeps the layout
+// above.
+//
 //	/healthz      200 while serving
 //	/metrics      Prometheus text format
 //
@@ -55,6 +64,7 @@ type settings struct {
 	ShutdownTimeout time.Duration
 	MemoryBytes     int64
 	MaxFetches      int
+	RetryBackoff    time.Duration
 	LogLevel        slog.Level
 
 	Nix         bool
@@ -67,6 +77,16 @@ type settings struct {
 	GoUpstream      string
 	GoSumdb         string
 	GoSumdbUpstream string
+
+	Maven       bool
+	MavenPrefix string
+	MavenRepos  *mavenRepos
+
+	Gradle         bool
+	GradlePrefix   string
+	GradleMaxEntry int64
+
+	Hosts *hostMap
 }
 
 const envPrefix = "CACHE_REDIRECT_"
@@ -89,6 +109,9 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 25*time.Second, "how long in-flight requests get to finish on SIGTERM")
 	fs.Int64Var(&c.MemoryBytes, "memory-cache-bytes", 64<<20, "in-memory cache budget for small objects")
 	fs.IntVar(&c.MaxFetches, "max-fetches", 16, "upstream pull-throughs at once; more wait")
+	fs.DurationVar(&c.RetryBackoff, "retry-backoff", time.Second,
+		"the Maven front-end repeats an upstream request answered 429, 502, 503 or 504, up to 4 attempts, "+
+			"waiting this long times the attempt (or the upstream's Retry-After)")
 	fs.TextVar(&c.LogLevel, "log-level", slog.LevelInfo, "debug, info, warn or error")
 
 	fs.BoolVar(&c.Nix, "nix", true, "serve the Nix binary cache front-end under /nix")
@@ -101,6 +124,20 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (*set
 	fs.StringVar(&c.GoUpstream, "goproxy-upstream", "https://proxy.golang.org", "the module proxy pulled through")
 	fs.StringVar(&c.GoSumdb, "goproxy-sumdb", "sum.golang.org", "the checksum database proxied under /sumdb/<name> (empty: none, the go command goes direct)")
 	fs.StringVar(&c.GoSumdbUpstream, "goproxy-sumdb-upstream", "https://sum.golang.org", "where that checksum database is fetched from")
+
+	fs.BoolVar(&c.Maven, "maven", true, "serve the Maven repositories under /maven/<repo>")
+	fs.StringVar(&c.MavenPrefix, "maven-prefix", "maven/", "store key prefix of the Maven front-end")
+	c.MavenRepos = newMavenRepos()
+	fs.Var(c.MavenRepos, "maven-repo", "a Maven upstream as name=URL (repeatable, or comma-separated); naming any replaces the defaults: "+c.MavenRepos.String())
+
+	fs.BoolVar(&c.Gradle, "gradle", false, "serve the Gradle remote build cache under /gradle/cache/ -- WRITABLE by every client that can reach the service")
+	fs.StringVar(&c.GradlePrefix, "gradle-prefix", "gradle/", "store key prefix of the Gradle build cache")
+	fs.Int64Var(&c.GradleMaxEntry, "gradle-max-entry-bytes", 512<<20, "the largest build cache entry a client may store (413 above it)")
+
+	c.Hosts = newHostMap()
+	fs.Var(c.Hosts, "hosts", "serve a front-end at the ROOT of a host name, as kind=host (kind: nix, maven or gradle; repeatable, or comma-separated), "+
+		"so the gateway needs no path rewrite; a request for any other Host keeps the /nix, /goproxy, /maven, /gradle/cache layout. "+
+		"The port in the Host header is ignored")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -135,8 +172,8 @@ func (c *settings) validate() error {
 	if c.S3.Bucket == "" {
 		errs = append(errs, errors.New("-s3-bucket is required"))
 	}
-	if !c.Nix && !c.Go {
-		errs = append(errs, errors.New("both front-ends are off: nothing to serve"))
+	if !c.Nix && !c.Go && !c.Maven && !c.Gradle {
+		errs = append(errs, errors.New("all front-ends are off: nothing to serve"))
 	}
 	// SigV4 caps a presigned URL at seven days.
 	if c.PresignTTL < time.Second || c.PresignTTL > 7*24*time.Hour {
@@ -151,16 +188,60 @@ func (c *settings) validate() error {
 	if c.IdleTimeout <= 0 {
 		errs = append(errs, errors.New("-idle-timeout must be positive"))
 	}
-	if c.Nix && c.NixPrefix == "" || c.Go && c.GoPrefix == "" {
-		errs = append(errs, errors.New("a front-end's key prefix must not be empty"))
+	type prefixed struct {
+		on        bool
+		flag, val string
 	}
-	if c.Nix && c.Go && (strings.HasPrefix(c.NixPrefix, c.GoPrefix) || strings.HasPrefix(c.GoPrefix, c.NixPrefix)) {
-		errs = append(errs, fmt.Errorf("-nix-prefix %q and -goproxy-prefix %q overlap: one front-end's keys would land in the other's", c.NixPrefix, c.GoPrefix))
+	var prefixes []prefixed
+	for _, p := range []prefixed{
+		{c.Nix, "-nix-prefix", c.NixPrefix}, {c.Go, "-goproxy-prefix", c.GoPrefix},
+		{c.Maven, "-maven-prefix", c.MavenPrefix}, {c.Gradle, "-gradle-prefix", c.GradlePrefix},
+	} {
+		if !p.on {
+			continue
+		}
+		if p.val == "" {
+			errs = append(errs, errors.New("a front-end's key prefix must not be empty"))
+			continue
+		}
+		prefixes = append(prefixes, p)
+	}
+	for i, a := range prefixes {
+		for _, b := range prefixes[i+1:] {
+			if strings.HasPrefix(a.val, b.val) || strings.HasPrefix(b.val, a.val) {
+				errs = append(errs, fmt.Errorf("%s %q and %s %q overlap: one front-end's keys would land in the other's", a.flag, a.val, b.flag, b.val))
+			}
+		}
 	}
 	for flagName, u := range map[string]string{"-nix-upstream": c.NixUpstream, "-goproxy-upstream": c.GoUpstream, "-goproxy-sumdb-upstream": c.GoSumdbUpstream} {
 		if _, err := parseUpstream(u); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", flagName, err))
 		}
+	}
+	if c.Maven {
+		if len(c.MavenRepos.repos) == 0 {
+			errs = append(errs, errors.New("-maven-repo: the Maven front-end has no repository to serve"))
+		}
+		for name, chain := range c.MavenRepos.repos {
+			ups := splitUpstreams(chain)
+			if len(ups) == 0 {
+				errs = append(errs, fmt.Errorf("-maven-repo %s: no URL", name))
+			}
+			for _, u := range ups {
+				if _, err := parseUpstream(u); err != nil {
+					errs = append(errs, fmt.Errorf("-maven-repo %s: %w", name, err))
+				}
+			}
+		}
+	}
+	for kind, host := range c.Hosts.byKind {
+		on := map[string]bool{frontendNix: c.Nix, frontendMaven: c.Maven, frontendGradle: c.Gradle}[kind]
+		if !on {
+			errs = append(errs, fmt.Errorf("-hosts %s=%s: the %s front-end is off", kind, host, kind))
+		}
+	}
+	if c.Gradle && c.GradleMaxEntry < 1 {
+		errs = append(errs, errors.New("-gradle-max-entry-bytes must be positive"))
 	}
 	return errors.Join(errs...)
 }
@@ -210,7 +291,8 @@ func realMain(args []string) int {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("serving", "listen", cfg.Listen, "bucket", cfg.S3.Bucket, "nix", cfg.Nix, "goproxy", cfg.Go)
+	log.Info("serving", "listen", cfg.Listen, "bucket", cfg.S3.Bucket, "nix", cfg.Nix, "goproxy", cfg.Go,
+		"maven", cfg.Maven, "maven_repos", mavenRepoNamesOf(cfg), "gradle", cfg.Gradle, "hosts", hostsServed(cfg.Hosts.routes()))
 
 	select {
 	case err := <-errc:
@@ -241,10 +323,17 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 	if cfg.Go {
 		frontends = append(frontends, frontendGo)
 	}
+	if cfg.Maven {
+		frontends = append(frontends, frontendMaven)
+	}
+	if cfg.Gradle {
+		frontends = append(frontends, frontendGradle)
+	}
 	m := newMetrics(frontends...)
 	c := newCache(bg, store, client, m, log, cacheOptions{
 		PresignTTL: cfg.PresignTTL, NegativeTTL: cfg.NegativeTTL, MutableTTL: cfg.MutableTTL,
 		IdleTimeout: cfg.IdleTimeout, MemoryBytes: cfg.MemoryBytes, MaxFetches: cfg.MaxFetches,
+		RetryFrontends: []string{frontendMaven}, RetryBackoff: cfg.RetryBackoff,
 	})
 
 	mux := http.NewServeMux()
@@ -266,7 +355,29 @@ func newHandler(bg context.Context, cfg *settings, store Store, client *http.Cli
 		sumUp, _ := parseUpstream(cfg.GoSumdbUpstream)
 		mux.Handle("/goproxy/", &goFrontend{cache: c, prefix: cfg.GoPrefix, upstream: up, sumdbName: cfg.GoSumdb, sumdbUpstream: sumUp})
 	}
-	return mux, c
+	if cfg.Maven {
+		repos := map[string][]*url.URL{}
+		for name, chain := range cfg.MavenRepos.repos {
+			for _, u := range splitUpstreams(chain) {
+				pu, _ := parseUpstream(u) // validated
+				repos[name] = append(repos[name], pu)
+			}
+		}
+		mux.Handle("/maven/", &mavenFrontend{cache: c, prefix: cfg.MavenPrefix, repos: repos})
+	}
+	if cfg.Gradle {
+		mux.Handle("/gradle/", &gradleFrontend{cache: c, prefix: cfg.GradlePrefix, maxEntry: cfg.GradleMaxEntry})
+	}
+	return withHostRouting(cfg.Hosts.routes(), mux), c
+}
+
+// mavenRepoNamesOf is the names of the configured Maven repositories, for the
+// startup log; empty while the front-end is off.
+func mavenRepoNamesOf(cfg *settings) []string {
+	if !cfg.Maven {
+		return nil
+	}
+	return sortedKeys(cfg.MavenRepos.repos)
 }
 
 // upstreamClient talks to the upstream caches. Compression is off: the

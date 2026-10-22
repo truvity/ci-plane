@@ -539,8 +539,8 @@ nixWorkers:
     amd64: {}
 
 cacheRedirect:
-  # cache-redirect: a pull-through cache for the Nix binary cache and the
-  # Go module proxy that keeps its index in an S3 (or S3-compatible) bucket
+  # cache-redirect: a pull-through cache for the Nix binary cache, the
+  # Go module proxy and the Maven repositories that keeps its index in an S3 (or S3-compatible) bucket
   # and answers a hit on a large immutable download -- a NAR, a module zip
   # -- with a 302 to a short-lived PRESIGNED URL of that bucket. The bytes
   # then flow from the object store to the runner directly; these pods
@@ -549,9 +549,13 @@ cacheRedirect:
   # to the client while it is uploaded, and committed only when it arrived
   # whole. See docs/architecture.md ("cache-redirect").
   #
-  # Clients (both front-ends on the one Service, port 80):
+  # Clients (every front-end on the one Service, port 80; or at the root of
+  # a name of its own, `hosts` below):
   #   nix:      substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
   #   go:       GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
+  #   maven:    url = http://cache-redirect.<ns>.svc.cluster.local/maven/central (and /google, /gradle-plugins)
+  #   gradle:   url = http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/   (when enabled below)
+  # A host name of its own for a front-end (`hosts`, v7.7.0): see below.
   # Runners must be able to reach the bucket's endpoint themselves (a VPC
   # gateway endpoint, or egress to it): that is where a redirect sends them.
   #
@@ -639,6 +643,64 @@ cacheRedirect:
     sumdb:
       name: sum.golang.org
       upstream: https://sum.golang.org
+  # The Maven repositories (v7.7.0): what a Gradle or Maven build declares as
+  # mavenCentral(), google() and gradlePluginPortal(), pulled through like the
+  # others -- an immutable file is stored under `prefix`, an archive is a
+  # redirect on a hit, a version list or a snapshot is passed through and not
+  # stored. One path per upstream, so the client keeps the order it declared:
+  #   <base>/maven/central/...        repo.maven.apache.org/maven2
+  #   <base>/maven/google/...         dl.google.com/dl/android/maven2
+  #   <base>/maven/gradle-plugins/... repo.maven.apache.org/maven2, then plugins.gradle.org/m2
+  # (The Plugin Portal re-serves all of Maven Central to a plugin and answers a
+  # burst with 429, so its repository asks Central first and the Portal only
+  # for what Central lacks: the plugin markers.) An upstream that answers 429,
+  # 502, 503 or 504 is asked again, up to four times, before the client sees a
+  # 502. Read-only for clients, so it is safe on any tier. On (it needs
+  # nothing the other front-ends do not).
+  maven:
+    enabled: true
+    prefix: maven/
+    # name: URL, or URL|URL for a chain asked in order while the answer is a
+    # 404. Naming any repository REPLACES the three above; leave it empty for
+    # them. A name is letters, digits, '.', '_' and '-'.
+    repositories: {}
+  # The Gradle remote build cache (v7.7.0), HTTP protocol: a GET of
+  # <base>/gradle/cache/<key> is a redirect to the entry in the bucket (404 on
+  # a miss), a PUT stores it. UNLIKE every other front-end it is WRITABLE by
+  # whoever can reach the service, so it is OFF by default; both presets
+  # (presets/preview.yaml, presets/stable.yaml) turn it on, each tier in its
+  # own deployment and bucket. A write is bounded
+  # (hex keys only, a Content-Length, `maxEntryBytes`, committed only when the
+  # body arrived whole, the first write of a key wins) but not authenticated.
+  # A stable runner never reads what a preview job wrote because the tiers do
+  # not share a deployment or a bucket.
+  gradle:
+    enabled: false
+    prefix: gradle/
+    # The largest entry a client may store; a larger PUT is a 413, which Gradle
+    # reads as "too large to cache" and carries on.
+    maxEntryBytes: 536870912
+  # A HOST NAME for a front-end (v7.7.0): a request whose Host header is the
+  # name is served at the ROOT of that front-end, so a gateway routes by name
+  # to the Service and rewrites nothing. A client is then given a base URL
+  # with no path:
+  #   nix:    substituters = https://<hosts.nix>               (/nix-cache-info,
+  #                                                              /<hash>.narinfo, /nar/...)
+  #   maven:  url = https://<hosts.maven>/central              (also /google, /gradle-plugins;
+  #                                                              the probe is GET /)
+  #   gradle: url = https://<hosts.gradle>/                    (/<key>; the probe is GET /)
+  # A port on the Host header is ignored, and so is case. On the Nix host a path
+  # already starting with /nix/ is served as it is (a gateway that still
+  # rewrites the root onto /nix keeps working until it is changed). A request for any
+  # other Host keeps the path layout above (/nix, /goproxy, /maven/<repo>,
+  # /gradle/cache/), so the Go module proxy's name and the in-cluster Service
+  # work unchanged. The Go proxy has no host of its own: it stays under
+  # /goproxy. Empty: not set. Naming a host of a front-end that is disabled
+  # is a render error. Hosts must differ.
+  hosts:
+    nix: ""
+    maven: ""
+    gradle: ""
   # Extra flags, passed as given (see `cache-redirect -help`), e.g.
   # ["-negative-ttl=5m"].
   extraArgs: []

@@ -1,0 +1,18 @@
+# refuses: does not match pattern
+# A repository name becomes a path element and a store key prefix.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  maven:
+    repositories:
+      "a/b": https://maven.example.org
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

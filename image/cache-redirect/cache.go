@@ -24,9 +24,12 @@ const maxSmall = 8 << 20
 // object is one immutable, content-addressed thing a front-end asks the
 // cache for.
 type object struct {
-	frontend    string
-	key         string // the store key, prefix included
-	upstream    string // the upstream URL it is pulled through from
+	frontend string
+	key      string // the store key, prefix included
+	upstream string // the upstream URL it is pulled through from
+	// fallbacks are asked in order when upstream answers 404 or 410 (a
+	// repository that is served by a chain of upstreams).
+	fallbacks   []string
 	contentType string
 	// large objects are answered with a redirect on a hit and streamed on
 	// a miss; small ones are served from memory or the store, body and all.
@@ -65,6 +68,12 @@ type Cache struct {
 	negativeTTL time.Duration
 	mutableTTL  time.Duration
 	idleTimeout time.Duration
+	// retryFrontends are the front-ends whose upstream requests are repeated
+	// when the upstream is rate limiting or briefly failing (429, 502, 503,
+	// 504): a build resolving hundreds of artifacts at once is exactly what
+	// those answers are for, and a repeat is cheaper than a failed build.
+	retryFrontends map[string]bool
+	retryBackoff   time.Duration
 
 	mem     *lru // small immutable bodies
 	neg     *lru // upstream not-founds, for negativeTTL
@@ -95,11 +104,22 @@ type cacheOptions struct {
 	PresignTTL, NegativeTTL, MutableTTL, IdleTimeout time.Duration
 	MemoryBytes                                      int64
 	MaxFetches                                       int
+	// RetryFrontends and RetryBackoff: see Cache. Zero backoff is one second.
+	RetryFrontends []string
+	RetryBackoff   time.Duration
 }
 
 func newCache(bg context.Context, store Store, client *http.Client, m *Metrics, log *slog.Logger, o cacheOptions) *Cache {
 	now := time.Now
+	retry := map[string]bool{}
+	for _, f := range o.RetryFrontends {
+		retry[f] = true
+	}
+	if o.RetryBackoff <= 0 {
+		o.RetryBackoff = time.Second
+	}
 	return &Cache{
+		retryFrontends: retry, retryBackoff: o.RetryBackoff,
 		store: store, client: client, metrics: m, log: log,
 		presignTTL: o.PresignTTL, negativeTTL: o.NegativeTTL, mutableTTL: o.MutableTTL, idleTimeout: o.IdleTimeout,
 		mem:      newLRU(o.MemoryBytes, now),
@@ -407,7 +427,7 @@ func (c *Cache) leadLarge(w http.ResponseWriter, r *http.Request, o object, f *f
 // client (and the flight) itself and reports false.
 func (c *Cache) fetchOrAnswer(w http.ResponseWriter, r *http.Request, o object, f *flight) (*http.Response, bool) {
 	head := r.Method == http.MethodHead
-	resp, err := c.fetch(c.bg, http.MethodGet, o.frontend, o.upstream)
+	resp, err := c.fetchChain(c.bg, http.MethodGet, o.frontend, o.upstream, o.fallbacks)
 	if err != nil {
 		c.upstreamError(w, o, err)
 		return nil, false
@@ -439,7 +459,7 @@ func (c *Cache) upstreamError(w http.ResponseWriter, o object, err error) {
 
 // proxyHead answers a HEAD for a large object the store does not hold.
 func (c *Cache) proxyHead(w http.ResponseWriter, r *http.Request, o object) {
-	resp, err := c.fetch(r.Context(), http.MethodHead, o.frontend, o.upstream)
+	resp, err := c.fetchChain(r.Context(), http.MethodHead, o.frontend, o.upstream, o.fallbacks)
 	if err != nil {
 		c.upstreamError(w, o, err)
 		return
@@ -464,7 +484,7 @@ func (c *Cache) proxyHead(w http.ResponseWriter, r *http.Request, o object) {
 // ServeMutable passes a mutable answer (a version list, @latest, a sumdb
 // lookup) through from upstream, remembered for mutableTTL and never
 // stored.
-func (c *Cache) ServeMutable(w http.ResponseWriter, r *http.Request, frontend, upstream string) {
+func (c *Cache) ServeMutable(w http.ResponseWriter, r *http.Request, frontend, upstream string, fallbacks ...string) {
 	head := r.Method == http.MethodHead
 	if v, ok := c.mutable.Get(upstream); ok {
 		if v.status == http.StatusOK {
@@ -476,7 +496,7 @@ func (c *Cache) ServeMutable(w http.ResponseWriter, r *http.Request, frontend, u
 		return
 	}
 	o := object{frontend: frontend, upstream: upstream}
-	resp, err := c.fetch(r.Context(), http.MethodGet, frontend, upstream)
+	resp, err := c.fetchChain(r.Context(), http.MethodGet, frontend, upstream, fallbacks)
 	if err != nil {
 		c.upstreamError(w, o, err)
 		return
@@ -516,16 +536,77 @@ func notFound(resp *http.Response) cached {
 	return cached{status: resp.StatusCode, contentType: resp.Header.Get("Content-Type"), body: body}
 }
 
-// fetch sends one upstream request. Its body stops with an error when no
+// fetchChain asks upstream, and then each fallback in order while the answer is
+// a 404 or 410. The first other answer, or the last 404, is returned.
+func (c *Cache) fetchChain(ctx context.Context, method, frontend, upstream string, fallbacks []string) (*http.Response, error) {
+	resp, err := c.fetch(ctx, method, frontend, upstream)
+	for _, next := range fallbacks {
+		if err != nil || (resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusGone) {
+			break
+		}
+		_ = resp.Body.Close()
+		resp, err = c.fetch(ctx, method, frontend, next)
+	}
+	return resp, err
+}
+
+// userAgent names this service to the upstreams. The default of Go's HTTP
+// client is a User-Agent that Maven Central's CDN answers with 429 (and a
+// retry-after of tens of minutes) once a few hundred artifacts have been asked
+// for in a burst, which is what a build that resolves its dependencies does;
+// the same requests with a name that says who is asking are served.
+const userAgent = "cache-redirect (+https://github.com/truvity/ci-plane)"
+
+// maxAttempts is how many times a retried front-end asks an upstream.
+const maxAttempts = 4
+
+// maxRetryWait bounds a Retry-After that an upstream asks for: the client is
+// waiting for its answer (Gradle gives an upstream 30 seconds of silence), so a
+// long wait is no use to it.
+const maxRetryWait = 5 * time.Second
+
+// fetch sends an upstream request, repeated (with a back-off that honours
+// Retry-After) when the front-end asks for it and the upstream answers 429,
+// 502, 503 or 504; after the last attempt that answer is returned as it is.
+func (c *Cache) fetch(ctx context.Context, method, frontend, url string) (*http.Response, error) {
+	for attempt := 1; ; attempt++ {
+		resp, err := c.fetchOnce(ctx, method, frontend, url)
+		if err != nil || !c.retryFrontends[frontend] || attempt == maxAttempts || !retryableStatus(resp.StatusCode) {
+			return resp, err
+		}
+		wait := time.Duration(attempt) * c.retryBackoff
+		if s, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && s >= 0 {
+			wait = min(time.Duration(s)*time.Second, maxRetryWait)
+		}
+		c.log.Info("upstream asked to wait", "frontend", frontend, "url", logSafe(url), "status", resp.StatusCode, "attempt", attempt, "wait", wait)
+		_ = resp.Body.Close()
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func retryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// fetchOnce sends one upstream request. Its body stops with an error when no
 // byte has arrived for idleTimeout: a stalled upstream must fail the
 // fetch, not hold every request waiting on it.
-func (c *Cache) fetch(ctx context.Context, method, frontend, url string) (*http.Response, error) {
+func (c *Cache) fetchOnce(ctx context.Context, method, frontend, url string) (*http.Response, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+	req.Header.Set("User-Agent", userAgent)
 	start := time.Now()
 	resp, err := c.client.Do(req)
 	c.metrics.Upstream(frontend, time.Since(start))
