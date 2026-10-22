@@ -756,6 +756,17 @@ bazelRemote:
   # serviceAccountName, so the pod keeps using the namespace's default
   # ServiceAccount -- unchanged behaviour until an estate sets this.
   serviceAccountName: ""
+  serviceAccount:
+    # Render the ServiceAccount named by `serviceAccountName` (which must
+    # then be set). Off by default: an estate that already creates it
+    # elsewhere keeps doing so. A Pod Identity association is made against
+    # a ServiceAccount that EXISTS -- the pod is not admitted without it --
+    # so an estate that mints the association for this component usually
+    # wants the chart to own the object too, as `cacheRedirect.serviceAccount`
+    # does. `annotations` is for an identity mechanism that needs one
+    # (IRSA); Pod Identity needs none.
+    create: false
+    annotations: {}
   s3:
     # Off by default. Enabling needs the bucket, its region, and a
     # matching Pod Identity association (namespace +

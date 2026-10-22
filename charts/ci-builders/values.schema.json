@@ -584,6 +584,14 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create": {"type": "boolean"},
+            "annotations": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
         }
       }
     }
