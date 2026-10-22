@@ -111,6 +111,10 @@ spec:
             # material belongs in this chart.
             - --s3.bucket={{ $z.s3.bucket }}
             - --s3.region={{ $z.s3.region }}
+            # bazel-remote refuses to start without an endpoint (minio:
+            # "Endpoint: does not follow ip address or domain name
+            # standards"); the regional AWS one, since this backend is AWS only.
+            - --s3.endpoint=s3.{{ $z.s3.region }}.amazonaws.com
             - --s3.auth_method=iam_role
             {{- with $z.s3.prefix }}
             - --s3.prefix={{ . }}
