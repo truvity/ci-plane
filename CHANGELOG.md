@@ -5,6 +5,12 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.7.1
+
+### Added: bazel-remote can own its ServiceAccount
+
+- **ci-builders: `bazelRemote.serviceAccount.create` (off by default), with `serviceAccount.annotations`.** When `true`, the chart renders the ServiceAccount named by `bazelRemote.serviceAccountName` (which it then requires; a render without it is refused). `serviceAccountName` alone (the S3 backend's Pod Identity binding, since the S3 option was added) only NAMED a ServiceAccount: it had to exist already, and a Pod Identity association is made against one that does, so an estate had to create it beside the release. cache-redirect has had `serviceAccount.create` from the start; this is the same for bazel-remote. Off, the render is byte-identical to v7.7.0, and an estate that creates the ServiceAccount itself keeps doing so. New golden `bazel-s3-service-account` and one refused fixture. No image change.
+
 ## v7.7.0
 
 ### Added: cache-redirect serves Maven repositories, the Gradle build cache, and a host name per front-end

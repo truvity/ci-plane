@@ -1,8 +1,26 @@
 {{- if .Values.bazelRemote.enabled }}
 {{- $z := .Values.bazelRemote }}
+{{- if and $z.serviceAccount.create (not $z.serviceAccountName) }}{{ fail "bazelRemote.serviceAccountName is required when bazelRemote.serviceAccount.create is true" }}{{ end }}
 {{- if $z.s3.enabled }}
 {{- if not $z.s3.bucket }}{{ fail "bazelRemote.s3.bucket is required when bazelRemote.s3.enabled is true" }}{{ end }}
 {{- if not $z.s3.region }}{{ fail "bazelRemote.s3.region is required when bazelRemote.s3.enabled is true" }}{{ end }}
+{{- end }}
+{{- if $z.serviceAccount.create }}
+---
+# The ServiceAccount the estate's Pod Identity association names
+# (bazelRemote.serviceAccountName): the association is made against an
+# object that exists, and the pod is not admitted without it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $z.serviceAccountName }}
+  labels:
+    app.kubernetes.io/name: bazel-remote
+    app.kubernetes.io/part-of: ci-builders
+  {{- with $z.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
 ---
 # bazel-remote: a Bazel Remote Execution v2 API cache (moon's remote
