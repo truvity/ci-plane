@@ -358,17 +358,23 @@ jobs:
               exit 1
             fi
           done
-          # No endpoint key exists, and none may creep back: this chart
+          # No endpoint VALUE exists, and none may creep back: this chart
           # authenticates with iam_role only, so an S3-compatible store
           # it could address is one it could never authenticate to --
-          # a pod that starts, answers, and caches nothing.
-          if helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
+          # a pod that starts, answers, and caches nothing. bazel-remote
+          # does need an endpoint flag to start: the regional AWS one,
+          # derived from the region and nothing else.
+          out=$(helm template test charts/ci-builders -f tests/ci/ci-builders.yaml \
                --set bazelRemote.s3.enabled=true \
                --set bazelRemote.s3.bucket=example-bucket \
                --set bazelRemote.s3.region=us-east-1 \
-               --set bazelRemote.s3.endpoint=https://example.invalid \
-             | grep -q -- '--s3.endpoint'; then
+               --set bazelRemote.s3.endpoint=https://example.invalid)
+          if echo "$out" | grep -q 'example.invalid'; then
             echo "bazelRemote.s3.endpoint is honoured; iam_role cannot authenticate there" >&2
+            exit 1
+          fi
+          if ! echo "$out" | grep -q -- '--s3.endpoint=s3.us-east-1.amazonaws.com'; then
+            echo "bazelRemote.s3 does not render the regional AWS endpoint bazel-remote needs to start" >&2
             exit 1
           fi
           # And the render-time refusal: enabling S3 without a bucket
