@@ -312,7 +312,7 @@
     },
     "cacheRedirect": {
       "type": "object",
-      "description": "cache-redirect: the Nix and Go pull-through cache that redirects hits to presigned URLs of its bucket. Off by default; enabled, it needs the bucket, its region and the runner namespaces allowed to reach it.",
+      "description": "cache-redirect: the Nix, Go module and Maven pull-through cache (and, opt-in, the Gradle build cache) that redirects hits to presigned URLs of its bucket. Off by default; enabled, it needs the bucket, its region and the runner namespaces allowed to reach it.",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -434,6 +434,47 @@
                   "pattern": "^https?://"
                 }
               }
+            }
+          }
+        },
+        "maven": {
+          "type": "object",
+          "description": "The Maven repositories under /maven/<name>; read-only for clients.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repositories": {
+              "type": "object",
+              "description": "name: URL. Naming any replaces the defaults (central, google, gradle-plugins).",
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9._-]+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^https?://"
+              }
+            }
+          }
+        },
+        "gradle": {
+          "type": "object",
+          "description": "The Gradle remote build cache under /gradle/cache/. WRITABLE by every client that can reach the service: off by default and off on the stable tier.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxEntryBytes": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         },

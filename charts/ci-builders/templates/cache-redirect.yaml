@@ -3,13 +3,19 @@
 {{- if not $c.s3.bucket }}{{ fail "cacheRedirect.s3.bucket is required when cacheRedirect is enabled" }}{{ end }}
 {{- if not $c.s3.region }}{{ fail "cacheRedirect.s3.region is required when cacheRedirect is enabled (\"auto\" for Cloudflare R2)" }}{{ end }}
 {{- if and $c.topologySpread.zone.enabled (int $c.topologySpread.zone.minDomains) (ne $c.topologySpread.zone.whenUnsatisfiable "DoNotSchedule") }}{{ fail "cacheRedirect.topologySpread.zone.minDomains needs whenUnsatisfiable: DoNotSchedule (Kubernetes refuses it with ScheduleAnyway)" }}{{ end }}
-{{- if not (or $c.nix.enabled $c.goproxy.enabled) }}{{ fail "cacheRedirect: nix.enabled and goproxy.enabled are both false; there is nothing to serve" }}{{ end }}
+{{- if not (or $c.nix.enabled $c.goproxy.enabled $c.maven.enabled $c.gradle.enabled) }}{{ fail "cacheRedirect: nix, goproxy, maven and gradle are all disabled; there is nothing to serve" }}{{ end }}
+{{- range $name, $url := $c.maven.repositories }}
+{{- if not (regexMatch "^[A-Za-z0-9._-]+$" $name) }}{{ fail (printf "cacheRedirect.maven.repositories: %q is not a repository name (letters, digits, '.', '_' and '-')" $name) }}{{ end }}
+{{- if not (regexMatch "^https?://" (toString $url)) }}{{ fail (printf "cacheRedirect.maven.repositories.%s: %q is not an http(s) URL" $name (toString $url)) }}{{ end }}
+{{- end }}
 ---
-# cache-redirect: a pull-through cache for the Nix binary cache (/nix) and
-# the Go module proxy (/goproxy) whose index is an S3 bucket. A hit on a
-# large immutable object is a 302 to a presigned URL of the bucket, so the
-# bytes never pass through these pods; small objects are served directly;
-# a miss is fetched from upstream once and committed only when whole.
+# cache-redirect: a pull-through cache for the Nix binary cache (/nix), the
+# Go module proxy (/goproxy) and the Maven repositories (/maven) whose index
+# is an S3 bucket, and, when enabled, the Gradle remote build cache
+# (/gradle). A hit on a large immutable object is a 302 to a presigned URL
+# of the bucket, so the bytes never pass through these pods; small objects
+# are served directly; a miss is fetched from upstream once and committed
+# only when whole.
 #
 # The pods hold no state: S3 is the only durable layer. Their identity is
 # the ServiceAccount's (Pod Identity / IRSA, estate-side wiring, scoped to
@@ -132,6 +138,18 @@ spec:
             - {{ printf "-goproxy-upstream=%s" $c.goproxy.upstream | quote }}
             - {{ printf "-goproxy-sumdb=%s" $c.goproxy.sumdb.name | quote }}
             - {{ printf "-goproxy-sumdb-upstream=%s" $c.goproxy.sumdb.upstream | quote }}
+            {{- end }}
+            - {{ printf "-maven=%t" $c.maven.enabled | quote }}
+            {{- if $c.maven.enabled }}
+            - {{ printf "-maven-prefix=%s" $c.maven.prefix | quote }}
+            {{- range $name, $url := $c.maven.repositories }}
+            - {{ printf "-maven-repo=%s=%s" $name $url | quote }}
+            {{- end }}
+            {{- end }}
+            - {{ printf "-gradle=%t" $c.gradle.enabled | quote }}
+            {{- if $c.gradle.enabled }}
+            - {{ printf "-gradle-prefix=%s" $c.gradle.prefix | quote }}
+            - {{ printf "-gradle-max-entry-bytes=%d" (int64 $c.gradle.maxEntryBytes) | quote }}
             {{- end }}
             {{- range $c.extraArgs }}
             - {{ . | quote }}

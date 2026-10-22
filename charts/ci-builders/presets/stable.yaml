@@ -2,8 +2,9 @@
 # before your own values (Argo CD: `helm.valueFiles:
 # [presets/stable.yaml]`). A later values file wins key by key.
 #
-# Shape: pull-through caches only (no bazel-remote, no npm cache) and
-# buildkitd per
+# Shape: pull-through caches only (no bazel-remote, no npm cache, and no
+# Gradle build cache in cache-redirect: a stable runner reads no cache a job
+# can write) and buildkitd per
 # architecture on a pool it shares with other workloads. The builders
 # share small nodes, so the chart's own memory limit stays: a limit above
 # the node would turn a cgroup OOM into node pressure. The preset names no
@@ -31,3 +32,6 @@ bazelRemote:
   enabled: false
 npmCache:
   enabled: false
+cacheRedirect:
+  gradle:
+    enabled: false

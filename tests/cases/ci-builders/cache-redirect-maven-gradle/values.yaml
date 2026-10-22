@@ -1,0 +1,29 @@
+# cache-redirect with the Maven repositories narrowed to two upstreams of the
+# consumer's own choice and the Gradle remote build cache switched on, both
+# under the one prefix a runneridentity CacheRedirect role grants.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  nix:
+    prefix: cache-redirect/nix/
+  goproxy:
+    prefix: cache-redirect/goproxy/
+  maven:
+    prefix: cache-redirect/maven/
+    repositories:
+      central: https://repo.maven.apache.org/maven2
+      mirror-1: https://maven.example.org/releases
+  gradle:
+    enabled: true
+    prefix: cache-redirect/gradle/
+    maxEntryBytes: 104857600
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

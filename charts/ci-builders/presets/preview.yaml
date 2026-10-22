@@ -4,7 +4,10 @@
 #
 # Shape: buildkitd on a dedicated pool per architecture (a spot reclaim
 # kills a build with two minutes' notice, so run it on-demand), with a
-# 10Gi limit that pool's nodes can hold; all caches on. The preset names
+# 10Gi limit that pool's nodes can hold; all caches on, the Gradle remote
+# build cache of cache-redirect included (a writable cache: preview jobs
+# may write what preview jobs read, by design; the stable
+# preset keeps it off). The preset names
 # no node pool, label or taint of a platform; it refers to NAMES that you
 # define in your own values:
 #
@@ -33,3 +36,6 @@ bazelRemote:
   enabled: true
 npmCache:
   enabled: true
+cacheRedirect:
+  gradle:
+    enabled: true

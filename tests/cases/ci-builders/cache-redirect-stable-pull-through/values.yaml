@@ -1,0 +1,19 @@
+# The stable preset keeps the Gradle remote build cache OFF in cache-redirect: a
+# stable runner reads no cache a job can write. Maven is on by default.
+buildkitd:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+nodeClasses:
+  cache-plane: {}
+  builders-arm64: {}
+  builders-amd64: {}
+cacheRedirect:
+  enabled: true
+  s3:
+    bucket: example-bucket
+    region: eu-example-1
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

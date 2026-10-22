@@ -116,6 +116,12 @@ survives builder replacement — expect one slower build cycle after a
 PVC reset, not breakage. The nix, npm and Bazel caches degrade to
 upstream when down.
 
+The Gradle build cache of cache-redirect (preview only) is the one cache a job can write. If an entry is ever wrong, delete the object under
+`<gradle prefix><key>` (or the whole prefix: every build is then one cold
+build, then warm again); the key is the one Gradle prints as
+`Build cache key for task ':<task>' is <key>`. `rejected` and `stored` in
+`cache_redirect_requests_total{frontend="gradle"}` count the writes.
+
 cache-redirect's bucket is disposable the same way: an object that
 expires or is deleted is only a miss. Its health is in
 `cache_redirect_requests_total`: a rising `store_error` is the

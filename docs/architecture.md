@@ -349,11 +349,13 @@ the zone count when the node class exists in fewer zones than that), and
 `cacheRedirect.trafficDistribution: PreferClose` so a client keeps reaching
 the replica in its own zone.
 
-Clients, both front-ends on one Service:
+Clients, every front-end on one Service:
 
 ```text
-nix:  substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
-go:   GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
+nix:    substituters = http://cache-redirect.<ns>.svc.cluster.local/nix https://cache.nixos.org/
+go:     GOPROXY=http://cache-redirect.<ns>.svc.cluster.local/goproxy|https://proxy.golang.org,direct
+maven:  http://cache-redirect.<ns>.svc.cluster.local/maven/central   (also /google and /gradle-plugins)
+gradle: http://cache-redirect.<ns>.svc.cluster.local/gradle/cache/   (only when cacheRedirect.gradle.enabled)
 ```
 
 Nix (curl) and the go command both follow redirects; a runner must be
@@ -428,7 +430,8 @@ credentials are refreshed `presignTTL` + 1 minute before they expire, so
 a URL is never signed with credentials about to lapse.
 `deploy/pulumi/runneridentity`'s `CacheRedirect` builds exactly this
 role for one prefix of a bucket (both front-end prefixes go under it,
-e.g. `cache-redirect/nix/` and `cache-redirect/goproxy/`); credentials
+e.g. `cache-redirect/nix/`, `cache-redirect/goproxy/`, `cache-redirect/maven/` and
+`cache-redirect/gradle/`); credentials
 come from the default AWS SDK chain, so EKS Pod Identity, IRSA, or the
 keys of `cacheRedirect.s3.existingSecret` for an S3-compatible store.
 
@@ -467,6 +470,70 @@ signed tree heads and tiles itself, so a proxy can withhold an answer but
 cannot forge one. Set `goproxy.sumdb.name: ""` to send the go command to
 the database directly instead.
 
+### Maven front-end
+
+`/maven/<repo>/<Maven repository path>` pulls the Maven repositories a
+Gradle or Maven build declares through, one path per upstream:
+`central` (repo.maven.apache.org/maven2), `google`
+(dl.google.com/dl/android/maven2) and `gradle-plugins`. A repository
+is one upstream or a chain of them (`name=URL|URL`, `cacheRedirect.maven.repositories`),
+asked in order while the answer is a 404. The chain of `gradle-plugins` is
+Maven Central first and the Plugin Portal second: the Portal re-serves
+all of Central to a plugin (every transitive dependency of every plugin),
+rate limits a burst with 429, and only the plugin markers (and the few
+artifacts that live only there) are not on Central. The client keeps the
+order and meaning of the repositories it declared; an artifact is stored
+under the **repository's** name (`<prefix><repo>/<path>`), not an upstream's.
+
+Everything is immutable (stored) except the files that list versions and
+what changes with them: `maven-metadata*` (and its checksums and
+signatures), `*-index.xml` (Google's group indexes), `archetype-catalog*`
+and any file under a `...-SNAPSHOT/` directory are passed through and
+remembered for `-mutable-ttl`. An archive (`.jar`, `.aar`, anything not a
+descriptor) is a **large** object, a redirect on a hit; descriptors
+(`.pom`, `.module`), checksums and signatures are small. The front-end is
+read-only for clients, so it is safe on any tier. `GET /maven/` answers 200
+and lists the repositories: the probe a runner uses to learn the front-end
+is there before it points a build at it.
+
+Two things this front-end meets that the others did not:
+
+- **A User-Agent that names the sender.** Maven Central's CDN answers Go's
+  default User-Agent with 429 and a `retry-after` of tens of minutes once a
+  burst of a few hundred artifacts has been asked for; the same requests
+  with `cache-redirect (+https://github.com/truvity/ci-plane)` are served.
+  Every upstream request carries it.
+- **Retries.** An upstream that answers 429, 502, 503 or 504 is asked again
+  (up to 4 attempts, `-retry-backoff` times the attempt, or its
+  `Retry-After` capped at 5 seconds: the build waits for the answer, and
+  Gradle gives an upstream 30 seconds of silence) before the client sees a
+  502. The other front-ends do not retry.
+
+### Gradle build cache front-end
+
+`cacheRedirect.gradle.enabled` (**off by default**, on in `presets/preview.yaml`,
+off in `presets/stable.yaml`) serves Gradle's remote build cache, the
+`HttpBuildCache` protocol, under `/gradle/cache/<key>`: a GET of a stored
+entry is a **redirect** to a presigned URL of it (Gradle follows it; verified
+with 8.14), a miss is a 404, and a PUT stores the entry. It is the one
+front-end that is **writable** by whoever can reach the service, so the
+network policy and the tier are what govern who may write, and a deployment
+that must not read what a job can write leaves it off.
+
+A write is bounded, not authenticated: the key must be 32 to 128 hexadecimal
+digits (what Gradle sends, a hash of the task's inputs); `Content-Length` is
+required (411) and at most `gradle.maxEntryBytes` (default 512 MiB; 413
+above it, which Gradle reads as "too large to cache" and carries on); the
+body is committed only when it arrived whole (a cut-short upload is
+discarded, and a client that stops sending is let go after `-idle-timeout`);
+and **the first write of a key wins**: a later PUT of an existing key is a
+204 that changes nothing, so an entry already in the store cannot be
+replaced by another job's. `GET /gradle/cache/` answers 200: the probe.
+Metrics: `result` `stored` and `rejected` count the writes.
+
+The bucket's expiry ages entries out like everything else; a hot entry that
+expires is rebuilt and pushed again.
+
 ### Metrics and operations
 
 `/metrics` (Prometheus text, `cacheRedirect.monitoring` renders a
@@ -474,7 +541,8 @@ PodMonitor): `cache_redirect_requests_total{frontend,result}` with
 `result` one of `hit` (served from memory or the store), `redirect`,
 `miss` (pulled through), `not_found`, `upstream_error`, `store_error`,
 `verify_failed` (a NAR not matching its narinfo: served, not stored),
-`no_index` (a NAR with no narinfo record: served, not stored);
+`no_index` (a NAR with no narinfo record: served, not stored),
+`stored` and `rejected` (a client's write to the Gradle build cache);
 `cache_redirect_uploads_total{frontend,result="ok|failed"}`;
 `cache_redirect_upload_bytes_total{frontend}`;
 `cache_redirect_upstream_request_duration_seconds{frontend}` (a
@@ -486,7 +554,9 @@ committed.
 
 A down service degrades like every cache here: Nix falls through to the
 next substituter, and a GOPROXY comma fails the job loudly while a pipe
-would hide the outage.
+would hide the outage. Gradle does not fall through: a repository that
+cannot be reached fails the resolution, which is why a client probes
+`/maven/` and `/gradle/cache/` before it points a build at them.
 
 ## Persistent Nix workers are CI-only and separate from BuildKit
 
