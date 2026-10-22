@@ -128,7 +128,7 @@ func withHostRouting(routes map[string]hostRoute, next http.Handler) http.Handle
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rt, ok := routes[normalizeHost(r.Host)]; ok && !(rt.tolerant && strings.HasPrefix(r.URL.Path, rt.root+"/")) {
+		if rt, ok := routes[normalizeHost(r.Host)]; ok && (!rt.tolerant || !strings.HasPrefix(r.URL.Path, rt.root+"/")) {
 			root := rt.root
 			r2 := *r
 			u := *r.URL
