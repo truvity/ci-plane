@@ -144,7 +144,7 @@ func TestHostOthersKeepPathRouting(t *testing.T) {
 	})
 	f := newFixture(t, up, hostFlags...)
 
-	for _, host := range []string{goHost, "cache-redirect.ci-cache.svc", "cache-redirect.ci-cache.svc.cluster.local:80", ""} {
+	for _, host := range []string{goHost, "cache-redirect.example.svc", "cache-redirect.example.svc.cluster.local:80", ""} {
 		if r := f.onHost(t, http.MethodGet, host, "/goproxy/example.com/mod/@v/v1.6.0.mod", nil); r.code != 200 || !strings.Contains(r.body, "module example.com/mod") {
 			t.Errorf("Host %q, /goproxy: %d %q", host, r.code, r.body)
 		}
