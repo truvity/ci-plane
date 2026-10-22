@@ -11,7 +11,7 @@ transitively digest-pinned.
 
 | Artifact | What | Published as |
 |---|---|---|
-| [`image/runner`](image/runner/Dockerfile) | The runner: nix + devbox bootstrap, the daemonless docker client + buildx, `git-lfs`, `go-cache-plugin`, the optional `runner-watchdog` entrypoint | `ghcr.io/truvity/ci-plane/runner:vX.Y.Z` |
+| [`image/runner`](image/runner/Dockerfile) | The runner: nix + devbox bootstrap, the daemonless docker client + buildx, `git-lfs`, `gh`, `go-cache-plugin`, the optional `runner-watchdog` entrypoint | `ghcr.io/truvity/ci-plane/runner:vX.Y.Z` |
 | [`image/nix-worker`](image/nix-worker/Dockerfile) | A persistent remote Nix builder: nix-daemon behind sshd | `ghcr.io/truvity/ci-plane/nix-worker:vX.Y.Z` |
 | [`image/cache-redirect`](image/cache-redirect) | A pull-through cache for Nix and Go downloads whose index is an S3 bucket: a hit on a NAR or module zip is a 302 to a presigned URL, so the bytes never pass through it ([architecture](docs/architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)) | `ghcr.io/truvity/ci-plane/cache-redirect:vX.Y.Z` |
 | [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the npm and Bazel read-through caches; the optional cache-redirect (Nix and Go module downloads) | `oci://ghcr.io/truvity/charts/ci-builders` |
@@ -42,7 +42,8 @@ stream), the GitHub App, any Secret, or the cluster's node pools.
 - **The image is thin.** It carries only what devbox cannot deliver in
   time: the nix + devbox bootstrap, bash as `sh`, the docker client and
   buildx, git-lfs (`actions/checkout` with `lfs: true` works as on
-  GitHub-hosted runners), and the Go build cache client. Every other tool arrives per job
+  GitHub-hosted runners), the GitHub CLI `gh` (as there), and the Go
+  build cache client. Every other tool arrives per job
   from the repository's own `devbox.json`.
 - **Builders are shared, daemons never ship to runners.** buildx on a
   runner talks to rootless buildkitd per architecture (`--driver
