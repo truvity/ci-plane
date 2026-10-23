@@ -40,7 +40,7 @@
 # moves this pin within days of upstream, which is faster than the
 # controller chart stream moves.
 # renovate: datasource=docker depName=ghcr.io/actions/actions-runner
-ARG RUNNER_VERSION=2.338.0
+ARG RUNNER_VERSION=2.338.1
 
 # The nix substituter list baked into the image: the public upstream only,
 # so the image names nothing cluster-shaped. An in-cluster cache is set at
@@ -124,9 +124,17 @@ USER root
 # Ledger lesson 9: devbox/moon hooks assume bash semantics; upstream sh
 # is dash. xz: the nix installer unpacks an .xz tarball and the minimal
 # base ships without it.
+#
+# ca-certificates is upgraded explicitly, and the build refuses a bundle
+# older than 20260816ubuntu0.24.04.1 (USN-8944-1): that release drops
+# "emSign ECC Root CA - G3" after the eMudhra/emSign intermediate CA key
+# compromise (2026-10-23). The base image may carry an older bundle than
+# the archive offers; nothing here may rely on it being current.
 RUN ln -sf /bin/bash /bin/sh \
  && apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends openssh-server tini xz-utils \
+ && apt-get install -y -qq --only-upgrade ca-certificates \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20260816ubuntu0.24.04.1 \
  && rm -rf /var/lib/apt/lists/*
 
 # goreleaser-pro is deliberately ABSENT: the Pro EULA's no-distribution

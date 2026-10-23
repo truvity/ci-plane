@@ -96,9 +96,16 @@ ARG TARGETARCH
 # curl are the nix installer's; bash is what every script asks for by
 # shebang and what the health check's /dev/tcp probe needs; sudo is the
 # `admin` account's whole reason to exist (the people pilot).
+#
+# ca-certificates is upgraded explicitly, and the build refuses a bundle
+# older than 20260816ubuntu0.24.04.1 (USN-8944-1): that release drops
+# "emSign ECC Root CA - G3" after the eMudhra/emSign intermediate CA key
+# compromise (2026-10-23). The ubuntu:24.04 base may carry an older bundle.
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       bash ca-certificates curl openssh-server openssh-client sudo tini xz-utils \
+ && apt-get install -y -qq --only-upgrade ca-certificates \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20260816ubuntu0.24.04.1 \
  && rm -rf /var/lib/apt/lists/*
 
 # `runner` is not a leftover of the old base: the worker scripts resolve
