@@ -1,9 +1,16 @@
 # Changelog
 
 What changed for a consumer, per release. One tag releases everything —
-both images and both charts — at one version, so each heading covers all
-four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
-line is summarised in one section.
+the images and the chart (both charts, through v7.8.3) — at one version,
+so each heading covers all of them. Reconstructed from the history for
+v2.0.0 through v2.11.0; the 1.x line is summarised in one section.
+
+## v8.0.0
+
+### The `arc-runners` chart is archived
+
+- **Breaking: `arc-runners` is no longer released.** Its last release is 7.8.3, which stays published at `oci://ghcr.io/truvity/charts/arc-runners` and installable; no later tag publishes it, and it receives no further fixes. Its source, values schema, presets, golden and refused cases, `examples/talos/arc-runners.yaml`, `hack/janitor-cases.sh`, `hack/packing-cases.sh`, `hack/gen-nix-sandbox-seccomp.sh` and the chart's own CI renders are removed from master; read them at the [`v7.8.3`](https://github.com/truvity/ci-plane/tree/v7.8.3) tag. `docs/nix-sandbox.md` and `docs/restricted-runners.md` now point there, and the chart's sections are gone from the install, operations and architecture documents. **Adoption:** a release of `arc-runners` stays pinned at 7.8.3 (or earlier) while it lives, independently of the `ci-builders` pin; nothing else changes.
+- **Unchanged: the runner, nix-worker and cache-redirect images and `ci-builders`.** The runner image keeps everything it carried, `runner-watchdog` and `runner-extra-ca` included, and is still released with every tag. `ci-builders` renders byte for byte as in 7.8.3; its release, lint, goldens and schema checks are unchanged.
 
 ## v7.8.3
 

@@ -4,10 +4,10 @@
 # the chart assertions, the image builds and the Go jobs are still ci.yaml's
 # own jobs.
 
-charts := "arc-runners ci-builders"
+charts := "ci-builders"
 modules := "image/nix-worker-client image/nix-worker-host-cert image/runner-watchdog image/cache-redirect deploy/pulumi/runneridentity"
 
-# Lint the charts, from the CI base values (neither renders bare: each
+# Lint the chart, from the CI base values (it does not render bare: it
 # refuses to guess the estate facts it needs), and the shell scripts'
 # syntax.
 lint:
@@ -29,8 +29,8 @@ golden-update:
     bash hack/golden.sh update
 
 # Schema-validate the golden renders (kubeconform -strict against the
-# Kubernetes API, and each runner set's pod template as a Pod): the goldens
-# compare text, this proves the API server would accept what they say.
+# Kubernetes API): the goldens compare text, this proves the API server
+# would accept what they say.
 schema:
     bash hack/schema.sh
 

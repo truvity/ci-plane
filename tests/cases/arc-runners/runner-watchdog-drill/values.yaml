@@ -1,9 +1,0 @@
-# runner.watchdog on with drillFile set: the watchdog's command gains
-# -drill-file, and nothing else changes (compare runner-watchdog).
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-runner:
-  watchdog:
-    enabled: true
-    drillFile: /tmp/runner-watchdog-drill

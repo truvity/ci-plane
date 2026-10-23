@@ -1,7 +1,0 @@
-# refuses: networkPolicy.containment.serviceCidr is required
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-networkPolicy:
-  containment:
-    enabled: true

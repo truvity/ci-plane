@@ -1,13 +1,20 @@
 # ci-plane
 
-The CI plane for GitHub Actions on Kubernetes, released as one versioned
-unit: the ARC **runner image**, the **nix-worker image**, the
-**cache-redirect image**, and the two Helm charts around them —
-**`ci-builders`** (the in-cluster builders and caches) and
-**`arc-runners`** (the runner scale sets). One `v*` tag publishes all
-five at one version, with each image's digest stamped into
-the chart defaults, so a consumer pins one chart version and is
-transitively digest-pinned.
+The CI plane for GitHub Actions, released as one versioned unit: the
+**runner image**, the **nix-worker image**, the **cache-redirect
+image**, and the Helm chart around them, **`ci-builders`** (the
+in-cluster builders and caches). One `v*` tag publishes all four at one
+version, with each image's digest stamped into the chart defaults, so a
+consumer pins one chart version and is transitively digest-pinned.
+
+**The `arc-runners` chart is archived.** It rendered the Actions Runner
+Controller (ARC) scale sets; its last release is **7.8.3**
+(`oci://ghcr.io/truvity/charts/arc-runners`, tag
+[`v7.8.3`](https://github.com/truvity/ci-plane/tree/v7.8.3/charts/arc-runners)),
+which stays published and installable. Later tags do not publish it,
+and its source, tests and chart-only documentation are no longer on
+master: read them at that tag. The runner image and `ci-builders`
+continue unchanged.
 
 | Artifact | What | Published as |
 |---|---|---|
@@ -16,7 +23,7 @@ transitively digest-pinned.
 | [`image/cache-redirect`](image/cache-redirect) | A pull-through cache for Nix, Go, Maven and npm downloads (and, opt-in, a Gradle remote build cache) whose index is an S3 bucket: a hit on a NAR, a module zip, a jar or an npm tarball is a 302 to a presigned URL, so the bytes never pass through it ([architecture](docs/architecture.md#cache-redirect-a-hit-is-a-redirect-not-a-stream)) | `ghcr.io/truvity/ci-plane/cache-redirect:vX.Y.Z` |
 | [`charts/ci-builders`](charts/ci-builders) | Rootless buildkitd and Nix workers per architecture; the npm and Bazel read-through caches; the optional cache-redirect (Nix, Go module, Maven and npm downloads, and the opt-in Gradle build cache) | `oci://ghcr.io/truvity/charts/ci-builders` |
 | [`deploy/pulumi/runneridentity`](deploy/pulumi/runneridentity) — the AWS Pod Identity roles of the runner pools, the Go module proxy and cache-redirect, as a Pulumi Go package | `github.com/truvity/ci-plane/deploy/pulumi/runneridentity` (tag `deploy/pulumi/runneridentity/vX.Y.Z`) |
-| [`charts/arc-runners`](charts/arc-runners) | AutoscalingRunnerSet CRs per measured profile, the stuck-runner janitor and the optional runner watchdog, remote Nix builders per job | `oci://ghcr.io/truvity/charts/arc-runners` |
+| `charts/arc-runners` — **archived**, last release 7.8.3 ([source at `v7.8.3`](https://github.com/truvity/ci-plane/tree/v7.8.3/charts/arc-runners)) | AutoscalingRunnerSet CRs per measured profile, the stuck-runner janitor and the optional runner watchdog, remote Nix builders per job | `oci://ghcr.io/truvity/charts/arc-runners` (up to 7.8.3) |
 
 Up to 1.5.0, `ci-builders` was published as
 `oci://ghcr.io/truvity/charts/ci-cache` and carried a Go module proxy;
@@ -26,17 +33,15 @@ opt-in `/gradle` front-ends came with 7.7.0, `/npm` with 7.8.0.
 
 ## Who it is for
 
-A platform team running self-hosted GitHub Actions runners on Kubernetes
-with the Actions Runner Controller (ARC), that wants the runners, the
-image builders and the build caches sized, versioned and upgraded as one
-thing. It assumes an installed ARC controller, a GitHub App per
-organization, and — for the remote Nix builders — an OpenBao SSH
-secrets engine to sign short-lived certificates.
+A platform team running self-hosted GitHub Actions runners that wants
+the runner image, the image builders and the build caches versioned and
+upgraded as one thing. The builders and caches run on Kubernetes; the
+runners that use them can run anywhere that reaches them. For the
+persistent Nix workers it assumes an OpenBao SSH secrets engine to sign
+short-lived certificates.
 
-It deliberately does not install the ARC controller or its CRDs (use the
-upstream `gha-runner-scale-set-controller` chart; `arc-runners` renders
-the CRs directly so it cannot drift from the controller's own chart
-stream), the GitHub App, any Secret, or the cluster's node pools.
+It deliberately does not install the runners or whatever schedules them,
+any Secret, or the cluster's node pools.
 
 ## The model
 
@@ -53,12 +58,8 @@ stream), the GitHub App, any Secret, or the cluster's node pools.
 - **Every cache is a cache.** Disposable storage, no backups; losing one
   costs a re-warm, and a dead cache degrades to upstream — slower, never
   broken.
-- **Profiles are measured.** Memory request equals limit, `GOMAXPROCS`
-  is pinned to the cgroup, disruption protection covers a runner
-  mid-job, and runners pack onto nodes that already run runners.
-- **Estate facts are inputs.** The organization, the controller's
-  namespace, the runner namespaces allowed to reach each builder, and the
-  worker hosts have no defaults; the charts refuse to render without
+- **Estate facts are inputs.** The runner namespaces allowed to reach
+  each builder have no defaults; the chart refuses to render without
   them.
 
 [docs/architecture.md](docs/architecture.md) has each decision and why
@@ -66,48 +67,35 @@ it holds.
 
 ## Install and a worked example
 
-With the ARC controller installed and a runner namespace per
-organization, install the builders into a namespace of their own
-(`<namespace>` below), then one runner release per organization:
+Install the builders into a namespace of their own (`<namespace>`
+below), admitting the namespaces your runners run in:
 
 ```sh
 helm install ci-builders oci://ghcr.io/truvity/charts/ci-builders \
   --version <X.Y.Z> -n <namespace> \
-  --set 'buildkitd.networkPolicy.consumerNamespaces={arc-runners-<org>}' \
-  --set 'npmCache.networkPolicy.consumerNamespaces={arc-runners-<org>}'
-
-helm install arc-runners oci://ghcr.io/truvity/charts/arc-runners \
-  --version <X.Y.Z> -n arc-runners-<org> \
-  --set githubConfigUrl=https://github.com/<org> \
-  --set controllerServiceAccount.namespace=<controller namespace> \
-  --set arcVersion=<installed controller version>
+  --set 'buildkitd.networkPolicy.consumerNamespaces={<runner namespace>}' \
+  --set 'npmCache.networkPolicy.consumerNamespaces={<runner namespace>}'
 ```
 
-Pin both charts to the same version. The chart ships no scale set, no node
-pool and no size: you define the sizes (`sizes`), where they run
-(`nodeClasses`) and the sets (`scaleSets`), or list a tier preset that
-names them. [examples/talos](examples/talos) is a complete values pair for
-fixed nodes with no autoscaler. A workflow then asks for a set by its
-scale-set name:
-
-```yaml
-jobs:
-  build:
-    runs-on: build   # the name of a scaleSets entry
-```
+The chart ships no node pool and no size: you define the sizes
+(`sizes`) and where they run (`nodeClasses`), or list a tier preset that
+names them. [examples/talos](examples/talos) is a complete values file
+for fixed nodes with no autoscaler. Runners outside the cluster reach
+buildkitd over mutual TLS ([docs/mtls.md](docs/mtls.md)).
 
 [docs/day-1-install.md](docs/day-1-install.md) covers the prerequisites,
 the Nix workers, per-architecture pools and every required value.
 
 ## Consumers
 
-- **truvity/gitops** — `ci-builders` and `arc-runners`, one version
-  pinned for both: a Kargo Warehouse promotes it on devel and kernel,
-  and stage/prod bump the pin by hand.
-- **A second, non-AWS estate** — `ci-builders` and `arc-runners`.
+- **truvity/gitops** — `ci-builders`: a Kargo Warehouse promotes the
+  pin on devel and kernel, and stage/prod bump it by hand.
+- **A second, non-AWS estate** — `ci-builders`.
 - **truvity/ci-workflows** — its `node-cache: true` option probes
   `ci-builders`' npm cache by a fixed Service name in namespace
   `ci-cache`.
+
+An estate that still runs `arc-runners` stays on 7.8.3 or earlier.
 
 ## Neighbours
 
@@ -116,8 +104,8 @@ the Nix workers, per-architecture pools and every required value.
   **[truvity/ci-actions](https://github.com/truvity/ci-actions)** holds
   the composite steps; **[truvity/ci-cache](https://github.com/truvity/ci-cache)**
   owns cache wiring and the cache server; this repository is where the
-  work executes — the runner and nix-worker images and the
-  `arc-runners` and `ci-builders` charts. `ci-builders` still carries the
+  work executes — the runner, nix-worker and cache-redirect images and
+  the `ci-builders` chart. `ci-builders` still carries the
   Nix, npm and Bazel caches; moving them to ci-cache is tracked
   separately.
 - **[truvity/policy](https://github.com/truvity/policy)** holds the
@@ -143,7 +131,7 @@ the consuming estate supplies it from its own repository.
 `hack/leak-canary.sh` enforces this in `just check`, because public
 history cannot be unpublished. One known debt remains: both images bake
 the maintainers' in-cluster Nix substituter as a build argument, which
-consumers override at runtime through `arc-runners`' `nixConfig`
+consumers override at runtime through `NIX_CONFIG`
 ([day-1](docs/day-1-install.md#prerequisites)).
 
 This repository follows the shared
@@ -152,8 +140,8 @@ This repository follows the shared
 
 ## Status
 
-Used in production by its maintainers, on 2.x. Every tag publishes
-the images and the charts; the release workflow itself creates no
+Used in production by its maintainers. Every tag publishes the images
+and the chart; the release workflow itself creates no
 GitHub Release (an occasional tag may carry one made by hand), so
 [CHANGELOG.md](CHANGELOG.md) and the
 [tags](https://github.com/truvity/ci-plane/tags) are the record.
@@ -179,8 +167,8 @@ their renders start from `tests/ci/<chart>.yaml`.
 Push a tag `vX.Y.Z` after its `## vX.Y.Z` heading lands in the
 CHANGELOG; tag creation is restricted by ruleset. The release workflow
 builds every image natively per architecture, stamps each digest into
-the charts by key, stamps both charts' `version` and `appVersion` from
-the tag — `Chart.yaml` commits `0.0.0` — and publishes them.
+the chart by key, stamps its `version` and `appVersion` from the tag —
+`Chart.yaml` commits `0.0.0` — and publishes it.
 `auto-release` is armed (`vars.AUTO_RELEASE` is `true`): the shared
 workflow cuts the next patch tag itself when master is ahead of the last
 release. Minors and majors are tagged by hand.

@@ -17,7 +17,7 @@ cannot be edited after the push.
 
 `just check` is the gate and needs no credentials and no cluster. It runs:
 
-- `lint` lints both charts and checks the shell scripts' syntax
+- `lint` lints the chart and checks the shell scripts' syntax
 - `golden` renders every case, compares it with `tests/golden/` and proves every refusal fixture fails
 - `leak-canary`
 

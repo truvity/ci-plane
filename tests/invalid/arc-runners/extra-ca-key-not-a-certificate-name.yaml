@@ -1,9 +1,0 @@
-# refuses: does not end in .pem or .crt
-# A key the image's runner-extra-ca would never read: it would be mounted and
-# then silently ignored.
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-extraCACertificates:
-  configMapName: private-ca
-  keys: [roots.txt]
