@@ -1,8 +1,0 @@
-# refuses: is not defined: add it under sizes
-# A scale set naming a size nobody defined: the chart ships no sizes.
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-scaleSets:
-  lint:
-    size: tiny

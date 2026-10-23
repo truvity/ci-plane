@@ -13,8 +13,9 @@ git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
 
 The Release workflow does the rest: every image built natively per
 architecture and merged into manifest lists, each digest stamped into
-the chart defaults by key, both charts stamped with the tag's version
-and published. Semver intent: patch = refresh/mechanics, minor = chart
+the chart defaults by key, the chart stamped with the tag's version
+and published (`ci-builders`; `arc-runners` is archived and was last
+published at 7.8.3). Semver intent: patch = refresh/mechanics, minor = chart
 features or new tools in the image, major = breaking values. Add the
 version's `## vX.Y.Z` heading to [CHANGELOG.md](../CHANGELOG.md) before
 tagging.
@@ -59,7 +60,8 @@ The producer releases and stops. In the consuming estate's repository:
    # renovate: datasource=docker depName=ghcr.io/truvity/charts/ci-builders
    ciPlane: "X.Y.Z"
    ```
-   One chart is the sentinel; both always share a version.
+   The chart's version is the plane's version: one tag releases the
+   images and the chart together.
 2. A renovate custom regex manager over that file, plus a packageRule
    with `automerge: true` and `postUpgradeTasks` running whatever
    regenerates derived files (renders, goldens) **inside the update
@@ -81,32 +83,6 @@ The producer releases and stops. In the consuming estate's repository:
 Revert the consumer's pin PR. The previous charts and image digests are
 immutable and still published; ArgoCD walks the fleet back on sync.
 Never delete published versions.
-
-## Upgrading the ARC controller
-
-Bump the controller and the consumers' `arcVersion` value **in the same
-change** — they must come from one pin. A mismatched `arcVersion` does
-not degrade politely: the controller deletes the scale sets.
-
-## Changing profiles / sizes
-
-`scaleSets` map in `charts/arc-runners` values. Sizes are MEASURED, not
-guessed: memory request == limit (no overcommit — ceilings cannot sum
-past a node's allocatable), GOMAXPROCS pinned to the cgroup, no
-ephemeral-storage request (breaks scale-from-zero) but a hard limit
-(exceeding it must evict the pod, never the node). A runner killed at
-its cgroup limit uploads no log and reads as a hang — err high.
-
-## The Nix sandbox's seccomp profile
-
-`hack/gen-nix-sandbox-seccomp.sh` regenerates the profile a
-`nixSandbox.enabled` scale set needs whenever the CONTAINERD minor
-version on the nodes it lands on bumps — the default profile it starts
-from grows syscalls over time, and a stale copy denies new ones with
-`EPERM` in a build that used to work. This is a node-side artifact, not
-part of `just check`: regenerate it, review the diff, reinstall it on
-those nodes, and only then bump whatever pin drives the containerd
-version. See [nix-sandbox.md](nix-sandbox.md).
 
 ## Cache operations
 

@@ -1,7 +1,8 @@
 # Release: a v* tag publishes the whole plane at ONE version — the three
-# images (runner, nix-worker, cache-redirect) and both charts, with each image's digest stamped into the
-# chart defaults. Consumers pin one chart version and are transitively
-# digest-pinned.
+# images (runner, nix-worker, cache-redirect) and every chart under
+# charts/ (ci-builders; arc-runners is archived, its last release is
+# v7.8.3), with each image's digest stamped into the chart defaults.
+# Consumers pin one chart version and are transitively digest-pinned.
 #
 # Tag creation is restricted by ruleset (role-runner-release): who can
 # tag is who can publish. Nothing rebuilds on a schedule and nothing
@@ -29,8 +30,8 @@
 # NOT YET THE SHARED release-public.yaml, and the reason is specific:
 # helmctl fills a chart's image values from goreleaser's
 # dist/artifacts.json, reading and validating a single `images:` map.
-# These charts carry top-level `runnerImage:` / `nixWorkerImage:`, so the
-# manifest would merge an `images:` key no template reads and the charts
+# The chart carries top-level `runnerImage:` / `nixWorkerImage:`, so the
+# manifest would merge an `images:` key no template reads and the chart
 # would ship unstamped -- green, and uninstallable. Adopting that
 # convention is a breaking values change with consumers to move, so it is
 # its own piece of work; hack/stamp-digests.sh holds the line until then.
@@ -179,7 +180,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           for c in charts/*; do
-            # Neither chart lints bare: each refuses to guess the estate
+            # A chart does not lint bare: it refuses to guess the estate
             # facts it needs, so lint starts from the CI base values.
             helm lint "$c" -f "tests/ci/$(basename "$c").yaml"
             helm package "$c" -d dist

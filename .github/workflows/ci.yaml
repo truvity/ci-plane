@@ -26,9 +26,9 @@ jobs:
       - name: Lint and template
         run: |
           set -euo pipefail
-          # Neither chart renders bare any more: each refuses to guess
-          # the estate facts it needs (values.schema.json), so every
-          # render below starts from tests/ci/<chart>.yaml. The golden
+          # The chart does not render bare: it refuses to guess the
+          # estate facts it needs (values.schema.json), so every render
+          # below starts from tests/ci/<chart>.yaml. The golden
           # renders and the refused fixtures are `just golden`, in the
           # recipes job.
           for c in charts/*; do
@@ -248,98 +248,6 @@ jobs:
             echo "hostCertificate guard did not fire on minRemaining >= certificateTTL" >&2
             exit 1
           fi
-          # Every nixBuilders render below starts from these: the OpenBao
-          # route, and the workers' host CA line -- known_hosts being
-          # unpinned (certAuthorities alone) by default since v5.0.0.
-          nix_builder_args=(
-            --set githubConfigUrl=https://github.com/example
-            --set runnerServiceAccountName=preview-runner
-            --set nixBuilders.enabled=true
-            --set nixBuilders.openbao.address=https://openbao.example
-            --set nixBuilders.openbao.namespace=dev
-            --set nixBuilders.openbao.caBundle=dGVzdA==
-            --set-string 'nixBuilders.openbao.sshCAPublicKeys[0]=ssh-ed25519 AAAATEST'
-            --set nixBuilders.openbao.authMount=jwt-dev
-            --set nixBuilders.openbao.authRole=runner-example
-          )
-          ca_args=(
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].hosts[0]=*.example.svc.cluster.local'
-            --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA'
-          )
-          helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            "${nix_builder_args[@]}" "${ca_args[@]}" \
-            --set nodeSelector."example\.com/pool"=ci \
-            --set runnerImage.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-            > /dev/null
-          # The v5 defaults: `nix` / ci-nix over ssh-ng, signing on the
-          # ci-nix role, known_hosts the @cert-authority line alone -- the
-          # pinned Secret is not even mounted.
-          default_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            "${nix_builder_args[@]}" "${ca_args[@]}")
-          for want in \
-            'ssh-ng://nix@nix-worker-amd64.example.svc.cluster.local' \
-            '@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA'; do
-            if ! grep -qF -- "$want" <<< "$default_out"; then
-              echo "the default nixBuilders render is missing: $want" >&2
-              exit 1
-            fi
-          done
-          for env in 'NIX_BUILDER_PRINCIPAL:ci-nix' 'NIX_BUILDER_PROTOCOL:ssh-ng' 'NIX_BUILDER_OPENBAO_SSH_ROLE:ci-nix' 'NIX_BUILDER_KNOWN_HOSTS_PINNED:false'; do
-            if ! grep -A1 -- "name: ${env%%:*}\$" <<< "$default_out" | grep -qF -- "value: \"${env#*:}\""; then
-              echo "the default nixBuilders render is missing ${env%%:*}=${env#*:}" >&2
-              exit 1
-            fi
-          done
-          if grep -qF -- 'name: nix-builder-known-hosts' <<< "$default_out"; then
-            echo "the default (unpinned) render must not mount the pinned known_hosts Secret" >&2
-            exit 1
-          fi
-          # And the refusal: unpinned (the default) with no CA to trust
-          # would trust nothing and break every build.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               "${nix_builder_args[@]}" > /dev/null 2>&1; then
-            echo "knownHosts guard did not fire on an empty certAuthorities list" >&2
-            exit 1
-          fi
-          # An entry with no hosts is not a CA anyone could ever match.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               "${nix_builder_args[@]}" \
-               --set-string 'nixBuilders.knownHosts.certAuthorities[0].key=ssh-ed25519 AAAACA' > /dev/null 2>&1; then
-            echo "certAuthorities guard did not fire on a missing hosts list" >&2
-            exit 1
-          fi
-          # The explicit static-key path: pinned: true mounts the Secret,
-          # needs its revision, and ADDS any certAuthorities to it.
-          pinned_out=$(helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-            "${nix_builder_args[@]}" "${ca_args[@]}" \
-            --set nixBuilders.knownHosts.pinned=true \
-            --set nixBuilders.knownHosts.revision=test-v1)
-          if ! grep -qF -- 'name: nix-builder-known-hosts' <<< "$pinned_out" \
-             || ! grep -qF -- '@cert-authority *.example.svc.cluster.local ssh-ed25519 AAAACA' <<< "$pinned_out"; then
-            echo "knownHosts.pinned=true must mount the pinned Secret and keep the @cert-authority line" >&2
-            exit 1
-          fi
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               "${nix_builder_args[@]}" --set nixBuilders.knownHosts.pinned=true > /dev/null 2>&1; then
-            echo "knownHosts.pinned=true guard did not fire on a missing revision" >&2
-            exit 1
-          fi
-          # An unknown protocol is not a degraded one, it is a typo that
-          # would render a machines file no store URI scheme understands.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               "${nix_builder_args[@]}" "${ca_args[@]}" \
-               --set nixBuilders.login.protocol=bogus > /dev/null 2>&1; then
-            echo "nixBuilders.login.protocol guard did not fire on an unknown protocol" >&2
-            exit 1
-          fi
-          # The removed deprecated alias: any nixBuilders.sshUser -- even
-          # the `nixremote` the last v4 consumer set -- is refused.
-          if helm template test charts/arc-runners -f tests/ci/arc-runners.yaml \
-               "${nix_builder_args[@]}" "${ca_args[@]}" \
-               --set nixBuilders.sshUser=nixremote > /dev/null 2>&1; then
-            echo "removed-values guard did not fire on nixBuilders.sshUser" >&2
-            exit 1
-          fi
           bash -n image/nix-worker-*.sh
           # bazel-remote S3: flipped on, the flags must actually carry
           # the values given, not just appear as booleans.
@@ -393,21 +301,8 @@ jobs:
           fi
           echo "charts OK"
 
-      # The janitor deletes and PATCHES live objects, so reading it is not
-      # enough. This extracts the sweep from the RENDERED chart and runs it
-      # against a stub kubectl: what it must act on, and — the half that
-      # matters — the three shapes it must leave alone.
-      - name: janitor cases
-        run: ./hack/janitor-cases.sh
-
-      # Runner packing is a scheduling PREFERENCE: a lost label, a term
-      # that matches one namespace only, or a caller's affinity replaced
-      # all render and run fine, and the runners quietly spread again.
-      - name: packing cases
-        run: ./hack/packing-cases.sh
-
       # The runner image's CA entrypoint prefix (image/runner-extra-ca.sh,
-      # arc-runners `extraCACertificates`), run as the non-root user a
+      # behind `CI_EXTRA_CA_DIR`), run as the non-root user a
       # runner pod is: the bundle holds the system roots AND the extras,
       # a ConfigMap-shaped directory works, and a bad directory never
       # stops the command. The image test below runs the same script in
@@ -458,7 +353,6 @@ jobs:
         run: |
           set -euo pipefail
           cp charts/ci-builders/values.yaml /tmp/ci-builders.bak
-          cp charts/arc-runners/values.yaml /tmp/arc-runners.bak
           ./hack/stamp-digests.sh \
             runnerImage=sha256:1111111111111111111111111111111111111111111111111111111111111111 \
             nixWorkerImage=sha256:2222222222222222222222222222222222222222222222222222222222222222 \
@@ -467,7 +361,6 @@ jobs:
             echo "::error::the stamper accepted a key no chart declares"; exit 1
           fi
           cp /tmp/ci-builders.bak charts/ci-builders/values.yaml
-          cp /tmp/arc-runners.bak charts/arc-runners/values.yaml
           git diff --exit-code -- charts/ || { echo "::error::the dry run left the charts modified"; exit 1; }
 
   # Two independent binaries, each with its own certificate policy:

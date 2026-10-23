@@ -10,9 +10,8 @@
 # line): each is passed as `-f charts/<chart>/presets/<name>.yaml` BEFORE
 # the case's values, the order a consumer lists them in. A case WITHOUT a
 # `presets` file is rendered over tests/cases/<chart>/base.yaml, when that
-# exists: the scale sets the chart no longer ships by default, so the
-# cases that exercise something else (a nix sandbox, a watchdog) still
-# have sets to exercise it on. The goldens are
+# exists: shared values every such case needs, so each case states only
+# what it exercises. The goldens are
 # committed, so a template change that alters a manifest is a diff a
 # reviewer reads rather than a surprise in a cluster.
 #
@@ -61,17 +60,6 @@ for chart_dir in charts/*/; do
       continue
     fi
     rendered=$((rendered + 1))
-    # Every runner pod template must opt out of the service-account
-    # automount, nixBuilders on or off: a job must not read a Kubernetes
-    # API token. Counted per AutoscalingRunnerSet document.
-    if [ "$chart" = arc-runners ]; then
-      bad=$(awk -v RS='\n---\n' '/kind: AutoscalingRunnerSet/ && !/\n      automountServiceAccountToken: false\n/ {n++} END {print n+0}' <<< "$out")
-      sets=$(grep -c '^kind: AutoscalingRunnerSet' <<< "$out")
-      if [ "$bad" -ne 0 ] || [ "$sets" -eq 0 ]; then
-        echo "RUNNER POD AUTOMOUNTS A TOKEN (or no runner set rendered): $values ($bad of $sets sets lack automountServiceAccountToken: false)"
-        fail=1
-      fi
-    fi
     # A case named talos-* is the proof the chart works with no Karpenter
     # (and no EKS): its render must not mention either.
     case "$name" in talos*)
@@ -137,20 +125,6 @@ for golden in tests/golden/*/*.yaml; do
     fail=1
   fi
 done
-
-# The runner nix ConfigMap is immutable and named by its content: with
-# nixBuilders off, setting nixCache.url (which adds a substituters line to
-# nix.conf) must move the name, or Argo CD tries to mutate the object in
-# place. The `minimal` and `nix-cache` cases differ only in nixCache.url.
-cm_name() {
-  grep -m1 -E '^  name: runner-nix-config-' "$1" | awk '{print $2}'
-}
-a=$(cm_name tests/golden/arc-runners/minimal.yaml)
-b=$(cm_name tests/golden/arc-runners/nix-cache.yaml)
-if [ -z "$a" ] || [ -z "$b" ] || [ "$a" = "$b" ]; then
-  echo "NIX CONFIGMAP NAME: minimal ($a) and nix-cache ($b) must differ -- nixCache.url is part of the immutable nix.conf"
-  fail=1
-fi
 
 if [ "$rendered" -eq 0 ]; then
   echo "rendered nothing -- that is a failure, not a pass"

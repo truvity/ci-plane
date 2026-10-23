@@ -1,8 +1,15 @@
 # Architecture
 
-The CI plane is three artifacts released as **one versioned unit**: the
-runner image and the two Helm charts that surround it. This document
-records the load-bearing decisions and why each one holds.
+The CI plane is released as **one versioned unit**: the runner,
+nix-worker and cache-redirect images and the `ci-builders` Helm chart.
+This document records the load-bearing decisions and why each one holds.
+
+The `arc-runners` chart, which rendered the Actions Runner Controller
+scale sets, is archived; its last release is 7.8.3. The decisions that
+were that chart's alone (rendering the CRs directly, per-scale-set
+overrides, the Nix sandbox, runner packing, the AWS profile for a
+credential helper) are in
+[this document at `v7.8.3`](https://github.com/truvity/ci-plane/blob/v7.8.3/docs/architecture.md).
 
 ## One version, transitively digest-pinned
 
@@ -15,8 +22,8 @@ A `v*` tag releases everything. The release workflow:
    anything (`image/release/`), and stamps each digest into the chart
    defaults **by key** (`hack/stamp-digests.sh`), so the runner's digest
    can never land in `nixWorkerImage`;
-3. stamps both charts' `version` and `appVersion` from the tag — the
-   committed `0.0.0` is a placeholder — and publishes them.
+3. stamps the chart's `version` and `appVersion` from the tag — the
+   committed `0.0.0` is a placeholder — and publishes it.
 
 A consumer therefore pins **one chart version** and is transitively
 digest-pinned to both images. Every release builds the images: native
@@ -25,113 +32,11 @@ skip-rebuild gate, and its "did `image/` change?" question, is gone.
 The stamp is the compatibility statement: chart X was released against
 image X.
 
-## Direct CRs, not the upstream scale-set chart
-
-`charts/arc-runners` renders `AutoscalingRunnerSet` CRs directly rather
-than depending on the upstream `gha-runner-scale-set` chart. The
-controller and that chart share a version stream; bundling the chart
-here would let the two drift apart independently. The CR API
-(`actions.github.com/v1alpha1`) is the real contract, and the chart
-mirrors what upstream renders: the CR, the per-scale-set manager
-Role/RoleBinding for the controller SA, and the labels.
-
-Two of those labels are load-bearing, learned the hard way:
-
-- **`app.kubernetes.io/version` is a compatibility gate**: the
-  controller DELETES any AutoscalingRunnerSet whose label differs from
-  its build version — silently, seconds after apply. It is a REQUIRED
-  value (`arcVersion`); feed it from the same pin that installs the
-  controller so the two cannot drift.
-- The `actions.github.com/values-hash` annotation changes whenever a
-  set's rendered inputs change, which is what prompts the controller to
-  recycle the listener — same mechanism as upstream.
-
-## One different scale set does not need a second release
-
-Through v3.0.0, everything about a scale set except `gomaxprocs`,
-`resources` and (undocumented, but already read this way)
-`minRunners` was release-wide: `nodeSelector`, `tolerations`,
-`affinity`, `podAnnotations`, `extraEnv`, `extraEnvFrom` and `nixConfig`
-applied identically to every profile in `scaleSets`. An estate that
-needed ONE scale set to differ — a big Nix builder pinned to one node, an
-amd64 set on a dedicated host — had no lever inside this chart for it,
-and paid for the difference with a whole second release of `arc-runners`
-sharing the same GitHub App secret (opwerm's `arc-runners-nix` release is
-exactly this shape).
-
-v4.1.0 adds `scaleSets.<name>.<key>` overrides for each of those keys,
-each REPLACING the release-wide value when set on that one scale set
-(never merging into it — a deep merge would leave no way to ask for an
-explicitly empty map or list on one set while the release default is
-non-empty) and falling back to the release-wide value otherwise. A
-release that sets none of them on any scale set renders BYTE-IDENTICAL
-to before this existed: the ConfigMap, the ConfigMap name and the
-`values-hash` annotation are unaffected unless a scale set actually uses
-a new key (`templates/_helpers.tpl`'s `nixConfigFor`/`nixConfigNameFor`,
-and the conditional `hasKey` guards around `$spec` in
-`templates/runnersets.yaml`, carry the full reasoning). `extraNixConfig`
-is additive rather than a fallback value: it APPENDS to the release-wide
-`nixConfig` for one set only, because Nix keeps the LAST occurrence of a
-scalar key when it reads its config top-to-bottom.
-
-## The Nix sandbox is per scale set, and the chart cannot install its half
-
-`scaleSets.<name>.nixSandbox` (v4.1.0) is the chart-rendered half of
-running Nix's own build sandbox in a pod at all: `hostUsers: false`,
-`procMount: Unmasked` and a `Localhost` seccomp profile on that set's
-pods, plus `sandbox = true`/`sandbox-fallback = false` in its
-`NIX_CONFIG`. The chart cannot install the OTHER half — the profile
-file on the node, and the node's own `user.max_user_namespaces` sysctl —
-because both are node-shaped facts a Helm chart has no channel to. See
-[docs/nix-sandbox.md](nix-sandbox.md) for the full mechanism, the
-estate's checklist, and `nixSandbox.fence.enabled`'s
-`ValidatingAdmissionPolicy`, which exists because a `Localhost` seccomp
-profile is a file ANY pod scheduled on that node can name — PodSecurity
-`baseline` never inspects what the profile actually contains.
-
-This is the chart-side half of opwerm/nexus PR #306's stopgap: that PR
-hand-wrote a `MutatingAdmissionPolicy` to fake `hostUsers`,
-`procMount` and `seccompProfile` onto one scale set's pods because this
-chart could not yet set them, and said so at the time ("the upstream fix
-... truvity/ci-plane arc-runners gains per-scale-set hostUsers,
-podSecurityContext and runnerSecurityContext values"). With this
-release, that stopgap's mutating policy is no longer needed for a new
-install; its Talos node patches (the sysctl and the seccomp profile
-itself) stay either way, because those are node facts, not chart output.
-
-## Runners pack; they do not spread
-
-Left to the default scheduler, runners SPREAD. `NodeResourcesFit`
-scores with `LeastAllocated`, and balanced allocation agrees with it, so
-of all the nodes a runner fits, it lands on the emptiest. Bigger nodes
-do not change this: a pool of nodes that each hold several runners still
-ends up with one idle warm runner per node. And the spread cannot be
-undone afterwards on a Karpenter estate, because runners there carry
-`karpenter.sh/do-not-disrupt` (set via `podAnnotations`, empty by chart
-default; `presets/karpenter.yaml` sets it, see docs/day-1-install.md)
-and the autoscaler may not move them to empty a node. On a managed
-control plane the scheduler profile is out of reach, so the fix is in
-the pod spec.
-
-`packing.enabled` (the default) gives every runner pod the chart-owned
-label `ci-plane.io/packing-group: runners` and a **preferred** podAffinity
-toward it, keyed on `kubernetes.io/hostname`, with `namespaceSelector: {}`.
-The label is the chart's own rather than one the controller stamps,
-because a controller label that changes between ARC versions would turn
-packing back into spreading with no error anywhere. The empty namespace
-selector matters just as much: a pod affinity term without one only
-looks at the pod's own namespace, and each organization's release is its
-own namespace. With it, every size, scale set and organization is one
-packing group on the shared pool.
-
-It is a preference, never a requirement: a runner that fits no runner
-node goes to an empty node or a new one, exactly as before. A caller's
-own `affinity` is kept, and the packing term is appended to it.
-`hack/packing-cases.sh` asserts all of this on the rendered chart, since
-a broken preference fails nothing: the runners would simply spread
-again.
-
 ## Runner watchdog: a stuck runner says so itself
+
+`runner-watchdog` ships in the runner image. The readiness probe, the
+janitor and the PodMonitor this section describes around it were the
+archived `arc-runners` chart's (`runner.watchdog`, last released 7.8.3).
 
 Upstream ARC
 [#4307](https://github.com/actions/actions-runner-controller/issues/4307)
@@ -193,8 +98,8 @@ NotReady for `janitor.notReadySeconds` (60). The criterion keys on the pod,
 not on a chart value: a pod without the probe (the watchdog off, or an
 older pod) never matches, so it is inert until `runner.watchdog.enabled` is
 on. The log grep stays as the backstop (idle, past `graceSeconds`), for a
-runner whose watchdog cannot answer. `hack/janitor-cases.sh` runs both
-against a stub `kubectl`.
+runner whose watchdog cannot answer. The chart's `hack/janitor-cases.sh`
+ran both against a stub `kubectl`.
 
 **A drill proves the chain without waiting for #4307.** With
 `runner.watchdog.drillFile` set (an absolute path, off by default), the
@@ -234,6 +139,11 @@ What it does not cover: a runner that hangs WHILE it holds a job
 running, so the watchdog judges nothing.
 
 ## Runner CA certificates: supplied at runtime, trusted without root
+
+`runner-extra-ca` ships in the runner image and is driven by
+`CI_EXTRA_CA_DIR` alone. The mount and the render-time refusals this
+section describes were the archived `arc-runners` chart's
+(`extraCACertificates`, last released 7.8.3).
 
 An HTTPS endpoint under a private CA (a cache, a mirror) has to be trusted
 by every client a job runs. The runner image is public and identical for
@@ -306,9 +216,8 @@ tag-reactive workflow.
 ## Promotion is the consumer's job
 
 This repository releases and stops. There is no cross-repo reach: the
-consumer's own renovate tracks the published chart version (one chart —
-`charts/ci-builders` — serves as the sentinel, since both charts always
-share a version), bumps its pin, regenerates any derived files inside
+consumer's own renovate tracks the published chart version (the
+`ci-builders` chart's version is the plane's version), bumps its pin, regenerates any derived files inside
 the update branch, and automerges on its own CI. See the consumer-side
 wiring in [day-2-operations.md](day-2-operations.md).
 
@@ -988,9 +897,10 @@ and is not described here.
 MinIO, Ceph), the Go cache client above reads its credential through
 the ordinary AWS SDK chain — an `AWS_CONFIG_FILE` naming a profile
 whose `credential_process` is `sluisctl cloudflare r2 <preset>`
-(`arc-runners`' `awsConfig` value, below). That credential_process is
-invoked BY the cache client, and the cache client already has to
-pre-exist the first `go` invocation of a job — so whatever it in turn
+(the archived `arc-runners` chart's `awsConfig` value rendered one).
+That credential_process is invoked BY the cache client, and the cache
+client already has to pre-exist the first `go` invocation of a job — so
+whatever it in turn
 execs has to pre-exist it too, by the same ordering rule. `sluisctl`
 (truvity/sluis) asks the estate's sluis for a credential its Cloudflare
 module mints; a job that never names it leaves it idle on PATH. It is
@@ -1006,91 +916,3 @@ Every version pin in the Dockerfile carries a `# renovate:` annotation
 from current. That includes the upstream runner base: `latest` was
 replaced with an annotated pin precisely so CVE pickups become renovate
 PRs instead of side effects.
-
-## An AWS profile for a credential helper (v4.2.0)
-
-The shape from ["Runner pod expectations"](day-1-install.md) upward,
-worked through for one store: Cloudflare R2, with the credential minted
-by the Cloudflare module of sluis (truvity/sluis,
-`docs/guides/sluis/cloudflare-tokens.md`), so the estate's own sluis —
-not a static key — decides who gets a credential and for how long. The
-estate declares an R2 preset (a disabled prototype token scoped to the
-bucket, an `endpoint`, a `lifetime` and a `rotation`) and grants it to
-a group its CI jobs earn through `github` matchers.
-
-**Nothing extra runs the credential helper.** A GitHub Actions job
-granted `permissions: id-token: write` already has
-`ACTIONS_ID_TOKEN_REQUEST_URL`/`ACTIONS_ID_TOKEN_REQUEST_TOKEN` in its
-environment — the Actions Runner process sets them per job, self-hosted
-or not — and `sluisctl` reads them on its own
-(sluis's docs/reference/sluis/sluisctl.md). So the workflow
-side of this is one line in the caller's own `permissions:` block; this
-chart's `awsConfig` value only has to get the credential_process line
-onto `PATH`, in a place `AWS_CONFIG_FILE` names.
-
-```yaml
-# values.yaml for one arc-runners release
-awsConfig:
-  enabled: true
-  profile: ci-cache
-  credentialProcess: sluisctl cloudflare r2 <preset>
-```
-
-```yaml
-# the calling workflow, unchanged apart from the permission
-permissions:
-  id-token: write
-env:
-  GOCACHEPROG: go-cache-plugin
-  AWS_ENDPOINT_URL_S3: https://<account>.r2.cloudflarestorage.com
-```
-
-That renders a `runner-aws-config` ConfigMap (`templates/aws-config.yaml`)
-holding one INI profile, mounted read-only on the runner container at
-`/var/run/aws-config/config`, with `AWS_CONFIG_FILE` pointed at it and
-`AWS_PROFILE` set to `ci-cache` — both on the runner container alone,
-never `envFrom`, never the pod. `go-cache-plugin` (or any other AWS
-SDK/CLI call in the same job) then resolves credentials the ordinary
-way: no profile named explicitly falls through to this one, which execs
-`sluisctl cloudflare r2`, which exchanges the job's own GitHub identity
-token at sluis for an R2 access key pair that expires within the
-preset's lifetime, never written to a Secret. The preset is
-bucket-wide: sluis cannot scope an R2 credential to a prefix, so one
-prefix per cache tool is a naming convention, not a boundary.
-
-**A pool-wide credential instead.** When the jobs should not each sign
-in, a secrets operator can project the credential sluis stores for the
-preset (`external/cloudflare/<preset>`, a `cloudflare/v1` document,
-replaced on every rotation) into a Secret, mounted through
-`extraVolumes`/`extraVolumeMounts`, and the line becomes
-`sluisctl cloudflare r2 <preset> --file <mounted path>`, which signs in
-to nothing and refuses an expired document. Every job of the pool then
-shares one credential.
-
-**This is JOB-scoped, not CLIENT-scoped.** An ephemeral runner's
-`runner` container is the one place every step of one job runs, so
-`AWS_PROFILE` here is the *default* for any AWS call that job makes —
-not narrowed to the Go cache client alone. A step in the same job that
-needs a genuinely different AWS identity (a real AWS account through
-pod identity, say) sets its own `AWS_PROFILE` or `--profile` for that
-call, the same way it would override any other inherited default.
-
-**Refused, never silently ignored, the other direction.** Setting
-`awsConfig.enabled` alongside an `extraEnv` entry named
-`AWS_ACCESS_KEY_ID` fails to render: the AWS SDK's credential chain
-checks environment variables *before* a config file's
-`credential_process`, so a static key left over from the old
-`extraEnvFrom` Secret pattern would keep winning and sluis would
-never be consulted — exactly the migration this feature exists for, not
-happening, with nothing in a job log to say so. Drop the static key (and
-its Secret) first.
-
-**`projectedServiceAccountTokens` is a separate, more general hook**,
-not required for the shape above — GitHub's own job OIDC token is
-already what `sluisctl` in a job reads. It exists for a workload that
-calls a SAME-CLUSTER service by presenting a ServiceAccount token
-projected for that service's own audience instead
-(sluis documents the service-to-service shape), which is a
-different identity path than a GitHub Actions job's own token. Use it
-when something in the pod needs that shape; the R2 path above needs
-only `awsConfig` and the workflow's own `id-token: write`.

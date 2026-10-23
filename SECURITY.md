@@ -15,9 +15,12 @@ Only the latest release is supported with security updates.
 
 This repository publishes:
 
-- The runner image and the nix-worker image, built from `image/`.
-- The charts `ci-builders` and `arc-runners`, as published to `oci://ghcr.io/truvity/charts`.
-- The Nix sandbox profile and the scripts under `hack/` that build the images.
+- The runner, nix-worker and cache-redirect images, built from `image/`.
+- The chart `ci-builders`, as published to `oci://ghcr.io/truvity/charts`.
+- The scripts under `hack/` that build and check the images and the chart.
+
+The `arc-runners` chart is archived: its last release, 7.8.3, receives no
+further updates, security ones included.
 
 Reports that matter most:
 

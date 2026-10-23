@@ -1,8 +1,0 @@
-# refuses: neither configMapName nor secretName
-# Keys with no source to take them from: the setting would do nothing, and a
-# release that meant to turn the feature on would not know it had not.
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-extraCACertificates:
-  keys: [roots.pem]

@@ -1,9 +1,0 @@
-# refuses: exactly one source
-# extraCACertificates naming a ConfigMap AND a Secret: which one wins would
-# be a guess.
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-extraCACertificates:
-  configMapName: private-ca
-  secretName: private-ca

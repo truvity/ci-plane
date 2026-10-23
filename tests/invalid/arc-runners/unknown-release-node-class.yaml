@@ -1,8 +1,0 @@
-# refuses: is not defined: add it under nodeClasses
-# The release-wide class, undefined (a preset's class name nobody mapped).
-githubConfigUrl: https://github.com/example
-controllerServiceAccount:
-  namespace: arc-system
-nodeClass: preview-runners
-scaleSets:
-  lint: {}

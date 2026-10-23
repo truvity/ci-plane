@@ -3,8 +3,11 @@
 The builders (`ci-builders`, `buildkitd`) serve plain TCP on :1234 by
 default, gated by a NetworkPolicy alone. `buildkitd.mtls` adds builders that
 terminate mutual TLS themselves, which is what a TLS-passthrough gateway in
-front of them needs, and `arc-runners` `buildkitTLS` gives the runners the
-client certificate. Both are off by default and change nothing until set.
+front of them needs; a client presents a certificate from the builders' client
+CA ([Clients outside the cluster](#clients-outside-the-cluster) below). It is
+off by default and changes nothing until set. (In-cluster runners got theirs
+from the `arc-runners` chart's `buildkitTLS`; that chart is archived, last
+released as 7.8.3.)
 
 ## Why a second set of builders
 
@@ -66,7 +69,7 @@ sequence:
 |---|---|---|
 | Server certificate, one per arch | `buildkitd.mtls.serverCertificate` | cert-manager `Certificate` from an issuer you name, names you give (`dnsNames.<arch>`). The key and certificate are mounted at `/etc/buildkit/tls`. |
 | Client CA | `buildkitd.mtls.clientCA` | The only authority the builders accept clients from. `create: true` builds it: self-signed Issuer and CA Certificate in cert-manager's namespace, a CA `ClusterIssuer`, an approver-policy `CertificateRequestPolicy` (one common name, client auth, ECDSA, listed namespaces), and a trust-manager `Bundle` publishing the CA certificate, never its key, to the ConfigMap the builders read. |
-| Client certificate | `arc-runners` `buildkitTLS` | `certificate.create: true` renders the `Certificate` in the release namespace; the Secret is mounted with the trust bundle as `ca.pem`, `cert.pem`, `key.pem` at `mountPath`, and `CI_BUILDKIT_TLS_DIR` points there. |
+| Client certificate | `buildkitd.mtls.clientCA.externalClients` | One `Certificate` per client name, delivered as `ca.pem`, `cert.pem`, `key.pem`; see [Clients outside the cluster](#clients-outside-the-cluster). (The archived `arc-runners` chart's `buildkitTLS` rendered the in-cluster runners' one and mounted it at `CI_BUILDKIT_TLS_DIR`.) |
 
 A runner that dials an address which is not a SAN on the builders'
 certificate (the in-cluster Service name, before the runners move to the

@@ -1,3 +1,0 @@
-# refuses: /controllerServiceAccount/namespace
-# The controller's namespace is the estate's choice; there is no default.
-githubConfigUrl: https://github.com/example
