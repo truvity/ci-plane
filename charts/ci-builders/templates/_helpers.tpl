@@ -144,3 +144,29 @@ Takes a dict `{root, size, name}`; `name` is the component, for the message.
 {{- if not (hasKey $sizes .size) }}{{ fail (printf "%s.size %q is not defined: add it under sizes (defined: [%s])" .name .size (keys $sizes | sortAlpha | join ", ")) }}{{ end -}}
 {{- get $sizes .size | default (dict) | toJson -}}
 {{- end -}}
+
+{{- /*
+The buildkitd container's probes: readiness always, liveness and startup when
+enabled. All three run the same check, `buildctl debug workers` against the
+daemon's own address (.addr), so a daemon that cannot answer it is one that
+cannot take a build. Liveness without startup is refused: the daemon can need
+minutes to load its cache index after a restart, and a liveness probe that
+starts at once would kill it before it is ready.
+*/ -}}
+{{- define "ci-builders.buildkitdProbes" -}}
+{{- $probes := .probes -}}
+{{- if and $probes.liveness.enabled (not $probes.startup.enabled) }}{{ fail "buildkitd.probes.liveness.enabled needs buildkitd.probes.startup.enabled: without a startup probe the liveness probe would restart a daemon that is still loading its cache" }}{{ end -}}
+{{- range $name := list "readiness" "liveness" "startup" }}
+{{- $p := index $probes $name }}
+{{- if or (eq $name "readiness") $p.enabled }}
+{{ $name }}Probe:
+  exec:
+    command: {{ list "buildctl" "--addr" $.addr "debug" "workers" | toJson }}
+  {{- range $k := list "initialDelaySeconds" "periodSeconds" "timeoutSeconds" "failureThreshold" }}
+  {{- if hasKey $p $k }}
+  {{ $k }}: {{ index $p $k }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}

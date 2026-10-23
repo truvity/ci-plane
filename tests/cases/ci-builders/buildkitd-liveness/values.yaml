@@ -1,0 +1,18 @@
+# The builders with the watchdog on and a CPU limit: a daemon that stays
+# unable to answer `buildctl debug workers` is restarted by the kubelet,
+# and the startup probe keeps that from happening to one still starting.
+buildkitd:
+  maxParallelism: 3
+  probes:
+    liveness:
+      enabled: true
+    startup:
+      enabled: true
+  resources:
+    limits:
+      cpu: 1500m
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

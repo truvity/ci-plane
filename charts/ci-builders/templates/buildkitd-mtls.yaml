@@ -157,13 +157,8 @@ spec:
             runAsGroup: 1000
             seccompProfile:
               type: Unconfined
-          readinessProbe:
-            exec:
-              # The unix socket, which buildkitd leaves plain: the tcp://
-              # listener demands a client certificate.
-              command: ["buildctl", "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "debug", "workers"]
-            initialDelaySeconds: 5
-            periodSeconds: 30
+          {{- /* The unix socket, which buildkitd leaves plain: the tcp:// listener demands a client certificate. */}}
+          {{- include "ci-builders.buildkitdProbes" (dict "probes" $b.probes "addr" "unix:///run/user/1000/buildkit/buildkitd.sock") | trim | nindent 10 }}
           resources:
             {{- toYaml $b.resources | nindent 12 }}
           volumeMounts:

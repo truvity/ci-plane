@@ -127,19 +127,12 @@ spec:
             runAsGroup: 1000
             seccompProfile:
               type: Unconfined
-          readinessProbe:
-            exec:
-              {{- if $mtlsInPlace }}
-              # The unix socket, which buildkitd leaves plain: the tcp://
-              # listener demands a client certificate.
-              command: ["buildctl", "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock", "debug", "workers"]
-              {{- else }}
-              # --addr: buildctl defaults to the unix socket; the daemon
-              # listens on TCP for the runners.
-              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
-              {{- end }}
-            initialDelaySeconds: 5
-            periodSeconds: 30
+          {{- /* The unix socket, which buildkitd leaves plain when it serves TLS: the tcp://
+               listener demands a client certificate. Otherwise --addr names the TCP
+               listener: buildctl defaults to the unix socket, and the daemon listens on
+               TCP for the runners. */}}
+          {{- $probeAddr := ternary "unix:///run/user/1000/buildkit/buildkitd.sock" "tcp://127.0.0.1:1234" $mtlsInPlace }}
+          {{- include "ci-builders.buildkitdProbes" (dict "probes" $b.probes "addr" $probeAddr) | trim | nindent 10 }}
           resources:
             {{- toYaml $b.resources | nindent 12 }}
           volumeMounts:
