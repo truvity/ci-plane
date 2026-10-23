@@ -5,6 +5,14 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.8.2
+
+### Security: images pick up the emSign root removal
+
+- **runner: base `ghcr.io/actions/actions-runner` 2.338.0 to 2.338.1, and an explicit `apt-get install --only-upgrade ca-certificates`.** After the eMudhra/emSign intermediate CA key compromise, Ubuntu's `ca-certificates` `20260816ubuntu0.24.04.1` (USN-8944-1) removes "emSign ECC Root CA - G3". The runner image upgrades the package itself and the build fails if the installed version is older than that, so a base image that lags the archive cannot ship the old bundle. The 2.338.1 base already carries the fixed package.
+- **nix-worker: the same explicit upgrade and version guard on `ubuntu:24.04`.**
+- The Go binaries baked into the images are already built with `toolchain go1.27.3` (GO-2026-6809, CVE-2026-111943), set in every image module on master. Charts are unchanged.
+
 ## v7.8.1
 
 ### Fixed: bazel-remote's S3 backend names its endpoint
