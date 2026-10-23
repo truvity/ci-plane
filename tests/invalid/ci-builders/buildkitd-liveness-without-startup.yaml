@@ -1,0 +1,10 @@
+# refuses: buildkitd.probes.liveness.enabled needs buildkitd.probes.startup.enabled
+buildkitd:
+  probes:
+    liveness:
+      enabled: true
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]
+npmCache:
+  networkPolicy:
+    consumerNamespaces: [arc-runners-example]

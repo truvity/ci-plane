@@ -439,11 +439,10 @@ spec:
               type: Unconfined
           readinessProbe:
             exec:
-              # --addr: buildctl defaults to the unix socket; the daemon
-              # listens on TCP for the runners.
-              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+              command: ["buildctl","--addr","tcp://127.0.0.1:1234","debug","workers"]
             initialDelaySeconds: 5
             periodSeconds: 30
+            timeoutSeconds: 5
           resources:
             limits:
               ephemeral-storage: 10Gi
@@ -521,11 +520,10 @@ spec:
               type: Unconfined
           readinessProbe:
             exec:
-              # --addr: buildctl defaults to the unix socket; the daemon
-              # listens on TCP for the runners.
-              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+              command: ["buildctl","--addr","tcp://127.0.0.1:1234","debug","workers"]
             initialDelaySeconds: 5
             periodSeconds: 30
+            timeoutSeconds: 5
           resources:
             limits:
               ephemeral-storage: 10Gi

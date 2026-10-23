@@ -139,9 +139,42 @@ buildkitd:
   # (12 concurrent builds, 2026-10-11). Set a positive integer sized to
   # the memory limit below; excess steps queue instead of dying.
   # maxParallelism: 4
+  # Probes: all three run `buildctl debug workers` against the daemon.
+  # Readiness takes the builder out of its Service while it cannot answer.
+  # Liveness restarts the container when it STAYS unable to: a builder
+  # starved of CPU by a burst of builds stops answering and does not
+  # recover by itself, so every client fails until someone deletes the
+  # pod. OFF by default, because a restart kills the builds in flight (an
+  # outage of that kind kills them all anyway, and for hours). With it on,
+  # the container is restarted after failureThreshold x periodSeconds
+  # (180s) of failed checks, and the startup probe holds liveness off until
+  # the daemon has answered once: a restart can take minutes to load the
+  # cache index, and failureThreshold x periodSeconds here is how long it
+  # may take (600s) before the kubelet gives up on it. Liveness needs
+  # startup; the chart refuses one without the other.
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 30
+      # The kubelet's default is 1s, which a busy daemon misses while it
+      # is still serving builds.
+      timeoutSeconds: 5
+    liveness:
+      enabled: false
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 6
+    startup:
+      enabled: false
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 20
   resources:
     # No CPU limit: builds burst to whatever the node has free; the
-    # request is scheduling headroom only.
+    # request is scheduling headroom only. A node with few cores takes the
+    # limit from the estate (`resources.limits.cpu`): a burst that takes
+    # every core starves the kubelet, and the node, not just the builder,
+    # stops answering.
     #
     # Sized from an OBSERVED build peak, not from idle. The 2026-08-27
     # sizing (500m/1.5Gi request, 3Gi limit) read idle RSS at ~58Mi and

@@ -164,6 +164,46 @@
           "minimum": 1,
           "description": "Cap on concurrent build steps per daemon (--oci-max-parallelism). Unset = no flag."
         },
+        "probes": {
+          "type": "object",
+          "description": "The buildkitd container's probes, each running `buildctl debug workers`. Liveness (off by default) restarts a daemon that stays unresponsive and needs the startup probe.",
+          "additionalProperties": false,
+          "properties": {
+            "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "initialDelaySeconds": {"type": "integer", "minimum": 0},
+            "periodSeconds": {"type": "integer", "minimum": 1},
+            "timeoutSeconds": {"type": "integer", "minimum": 1},
+            "failureThreshold": {"type": "integer", "minimum": 1}
+          }
+        },
+            "liveness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "initialDelaySeconds": {"type": "integer", "minimum": 0},
+            "periodSeconds": {"type": "integer", "minimum": 1},
+            "timeoutSeconds": {"type": "integer", "minimum": 1},
+            "failureThreshold": {"type": "integer", "minimum": 1}
+          }
+        },
+            "startup": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "initialDelaySeconds": {"type": "integer", "minimum": 0},
+            "periodSeconds": {"type": "integer", "minimum": 1},
+            "timeoutSeconds": {"type": "integer", "minimum": 1},
+            "failureThreshold": {"type": "integer", "minimum": 1}
+          }
+        }
+          }
+        },
         "mtls": {
           "type": "object",
           "description": "Mutual-TLS builders, beside the plain ones or in place of them. Off by default; the values.yaml comment has the sequence.",

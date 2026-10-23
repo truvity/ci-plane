@@ -5,6 +5,14 @@ both images and both charts — at one version, so each heading covers all
 four. Reconstructed from the history for v2.0.0 through v2.11.0; the 1.x
 line is summarised in one section.
 
+## v7.8.3
+
+### Added: buildkitd can restart itself when it wedges
+
+- **ci-builders: `buildkitd.probes` (readiness, liveness, startup).** Each runs `buildctl debug workers` against the daemon's own address, as the readiness probe always did. A builder starved of CPU by a burst of builds stops answering that check and does not recover on its own: readiness takes it out of its Service, every client fails to boot a builder, and nothing restarts it. The kubelet can: `probes.liveness.enabled: true` restarts the container after `failureThreshold` x `periodSeconds` (default 6 x 30s) of failed checks. The builds in flight die with the restart, as they do in the outage it ends. `probes.startup.enabled: true` holds liveness off until the daemon has answered once (default 20 x 30s allowed): a restart can take minutes to load the cache index. The chart refuses liveness without startup. Liveness and startup are **off by default**; the render of an estate that sets neither differs only in the readiness probe's timeout.
+- **Readiness probe `timeoutSeconds` is 5 (it was the kubelet's default, 1s)**, `probes.readiness.timeoutSeconds`. A busy daemon routinely takes longer than a second to answer, and each miss took the builder out of its Service. Both builder templates (plain, and the TLS ones) render the same probes. This rolls the builder pods once on upgrade.
+- A CPU limit needs no chart change: `buildkitd.resources.limits.cpu` was always passed through (the values comment now says when to set it). New golden `buildkitd-liveness`, one refused fixture.
+
 ## v7.8.2
 
 ### Security: images pick up the emSign root removal
