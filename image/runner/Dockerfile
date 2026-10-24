@@ -244,7 +244,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # also lists the .deb and .rpm of each architecture). `grep .` fails the
 # build on no match. The token is the job's (GH_TOKEN); the image holds none.
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.102.1
+ARG GH_VERSION=2.103.0
 RUN ARCH=$(dpkg --print-architecture) \
  && F="gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
  && cd /tmp \
@@ -295,7 +295,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # file that was never downloaded. `grep .` fails the build on no match.
 #
 # renovate: datasource=github-releases depName=truvity/sluis
-ARG SLUISCTL_VERSION=1.74.0
+ARG SLUISCTL_VERSION=1.78.0
 RUN ARCH=$(dpkg --print-architecture) \
  && cd /tmp \
  && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
