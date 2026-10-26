@@ -5,6 +5,10 @@ the images and the chart (both charts, through v7.8.3) — at one version,
 so each heading covers all of them. Reconstructed from the history for
 v2.0.0 through v2.11.0; the 1.x line is summarised in one section.
 
+## v8.0.1
+
+- Dependency updates.
+
 ## v8.0.0
 
 ### The `arc-runners` chart is archived
