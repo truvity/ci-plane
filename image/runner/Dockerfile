@@ -215,7 +215,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # filters to /etc/gitconfig, so every user and every checkout gets them,
 # as on hosted runners.
 # renovate: datasource=github-releases depName=git-lfs/git-lfs
-ARG GIT_LFS_VERSION=v3.8.0
+ARG GIT_LFS_VERSION=v3.8.1
 RUN ARCH=$(dpkg --print-architecture) \
  && F="git-lfs-linux-${ARCH}-${GIT_LFS_VERSION}.tar.gz" \
  && cd /tmp \
@@ -244,7 +244,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # also lists the .deb and .rpm of each architecture). `grep .` fails the
 # build on no match. The token is the job's (GH_TOKEN); the image holds none.
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.102.1
+ARG GH_VERSION=2.103.2
 RUN ARCH=$(dpkg --print-architecture) \
  && F="gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
  && cd /tmp \
@@ -262,7 +262,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # refuses even for root) and downloads an arch-opaque URL — useless
 # under a QEMU multi-arch build.
 # renovate: datasource=github-releases depName=jetify-com/devbox
-ARG DEVBOX_VERSION=0.18.4
+ARG DEVBOX_VERSION=0.18.5
 RUN ARCH=$(dpkg --print-architecture) \
  && curl -fsSL -o /tmp/devbox.tgz "https://github.com/jetify-com/devbox/releases/download/${DEVBOX_VERSION}/devbox_${DEVBOX_VERSION}_linux_${ARCH}.tar.gz" \
  && tar -xz -C /usr/local/bin -f /tmp/devbox.tgz devbox \
@@ -295,7 +295,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 # file that was never downloaded. `grep .` fails the build on no match.
 #
 # renovate: datasource=github-releases depName=truvity/sluis
-ARG SLUISCTL_VERSION=1.74.0
+ARG SLUISCTL_VERSION=1.79.3
 RUN ARCH=$(dpkg --print-architecture) \
  && cd /tmp \
  && curl -fsSLO "https://github.com/truvity/sluis/releases/download/v${SLUISCTL_VERSION}/checksums.txt" \
